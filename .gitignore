@@ -4,6 +4,7 @@ benchmarks/visuals/
 benchmarks/scratch_*/
 
 build/
+mar
 test_mar
 test_nar
 
@@ -16,3 +17,4 @@ test_nar
 *.tgz
 *.json
 **__pycache__**
+
