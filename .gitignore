@@ -1,0 +1,18 @@
+benchmarks/data/*
+benchmarks/results.csv
+benchmarks/visuals/
+benchmarks/scratch_*/
+
+build/
+test_mar
+test_nar
+
+# Archives
+*.mar
+*.mai
+**/*.mai
+**/*.mar
+*.tar
+*.tgz
+*.json
+**__pycache__**
