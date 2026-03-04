@@ -44,7 +44,7 @@ ifeq ($(UNAME_S),Darwin)
     # macOS clang often needs this for C++17/20 features
     CXXFLAGS += -stdlib=libc++
 endif
-OPT_CXXFLAGS ?= -O3
+OPT_CXXFLAGS ?= -O2
 DBG_CXXFLAGS ?= -g -fno-omit-frame-pointer
 EXTRA_CXXFLAGS ?=
 EXTRA_LDFLAGS ?=
@@ -67,6 +67,7 @@ TEST_SRC = tests/test_main.cpp
 
 # Object files
 BUILD_DIR = build
+DIST_DIR = dist
 OBJS = $(SRCS:src/%.cpp=$(BUILD_DIR)/%.o)
 MAIN_OBJ = $(BUILD_DIR)/main.o
 TEST_OBJ = $(BUILD_DIR)/test_main.o
@@ -274,14 +275,25 @@ endif
 
 # Phony targets
 .PHONY: all clean test install check-deps drop-cache static release \
-        deps debug gprof pgo-generate pgo-use \
-        gprof-run gprof-report nsys-run vtune-run \
-        dist-linux-x86_64 dist-linux-x86_64-sse42 dist-linux-x86_64-avx2 \
-        dist-linux-arm64 dist-macos-arm64 dist-macos-x86_64 dist-macos-universal \
-        dist-all native native-lto help deb brew-formula
+        deps debug \
+        dist-linux-x86_64 \
+		dist-linux-x86_64-sse42 \
+		dist-linux-x86_64-avx2 \
+        dist-linux-arm64 \
+		dist-macos-arm64 \
+		dist-macos-x86_64 \
+		dist-macos-universal \
+        dist-all \
+		native \
+		native-lto \
+		help \
+		deb \
+		brew-formula
 
 # Default target
-all: $(BUILD_DIR) $(BLAKE3_DEP) $(LIBDEFLATE_DEP) $(TARGET)
+all-internal: $(BUILD_DIR) $(BLAKE3_DEP) $(LIBDEFLATE_DEP) $(TARGET)
+
+all: all-internal
 
 # Build local BLAKE3
 $(LOCAL_BLAKE3_LIB):
@@ -322,11 +334,11 @@ $(TEST_TARGET): $(OBJS) $(TEST_OBJ) $(BLAKE3_DEP) $(LIBDEFLATE_DEP)
 
 # Static build
 static:
-	$(MAKE) STATIC=1
+	$(MAKE) STATIC=1 all-internal
 
 # Release build (optimized, static)
 release:
-	$(MAKE) STATIC=1 BUILD=release OPT_CXXFLAGS="-O3" all
+	$(MAKE) STATIC=1 BUILD=release OPT_CXXFLAGS="-O3" all-internal
 
 # Dependency management
 deps:
@@ -349,53 +361,23 @@ deps:
 
 # Debug build
 debug:
-	$(MAKE) BUILD=debug clean all
+	$(MAKE) BUILD=debug clean all-internal
 
 # gprof build (compile+link with -pg)
 gprof:
-	$(MAKE) BUILD=gprof clean all
+	$(MAKE) BUILD=gprof clean all-internal
 
 # PGO build stages
 pgo-generate:
 	@mkdir -p $(PGO_DIR)
-	$(MAKE) BUILD=pgo-generate clean all
+	$(MAKE) BUILD=pgo-generate clean all-internal
 
 pgo-use:
-	$(MAKE) BUILD=pgo-use clean all
+	$(MAKE) BUILD=pgo-use clean all-internal
 
 # Run tests
 test: $(TEST_TARGET)
 	./$(TEST_TARGET)
-
-# -----------------------------------------------------------------------------
-# Convenience profiling targets (optional tools)
-# -----------------------------------------------------------------------------
-#
-# gprof:
-#   make gprof && make gprof-run ARGS="create -f /tmp/x.mar ./benchmarks/data/dickens"
-#   make gprof-report
-#
-ARGS ?=
-gprof-run: gprof
-	./$(TARGET) $(ARGS) || true
-
-gprof-report:
-	@echo "Writing gprof report to gprof.txt"
-	gprof ./$(TARGET) gmon.out > gprof.txt
-
-# Nsight Systems (nsys) - requires NVIDIA Nsight Systems installed.
-# Usage:
-#   make nsys-run ARGS="create -f /tmp/x.mar ./benchmarks/data/dickens" NSYS_OUT=nsys_report
-NSYS_OUT ?= nsys_report
-nsys-run: all
-	nsys profile -o $(NSYS_OUT) --trace=osrt,cuda,nvtx ./$(TARGET) $(ARGS)
-
-# Intel VTune - requires vtune installed.
-# Usage:
-#   make vtune-run ARGS="create -f /tmp/x.mar ./benchmarks/data/dickens" VTUNE_OUT=vtune_result
-VTUNE_OUT ?= vtune_result
-vtune-run: all
-	vtune -collect hotspots -result-dir $(VTUNE_OUT) -- ./$(TARGET) $(ARGS)
 
 # Integration test
 integration-test: $(TARGET)
@@ -426,7 +408,7 @@ install: $(TARGET)
 
 # Clean
 clean:
-	rm -rf $(BUILD_DIR) $(TARGET) $(TEST_TARGET)
+	rm -rf $(BUILD_DIR) $(DIST_DIR) $(TARGET) $(TEST_TARGET) mar-* 2>/dev/null || true
 
 # Print variables for debugging
 print-%:
@@ -447,88 +429,96 @@ print-%:
 
 # Linux x86_64 - SSE2 baseline (maximum compatibility)
 dist-linux-x86_64:
+	@mkdir -p $(DIST_DIR)
 	$(MAKE) clean
 	$(MAKE) STATIC=1 BUILD=release \
 	        ARCH_FLAGS="-march=x86-64 -mtune=generic" \
-	        TARGET_NAME=mar-linux-x86_64 \
-	        all
+	        TARGET_NAME=$(DIST_DIR)/mar-linux-x86_64 \
+	        all-internal
 	@echo ""
-	@echo "Built: mar-linux-x86_64 (portable x86_64, SSE2 baseline)"
-	@ls -lh mar-linux-x86_64
+	@echo "Built: $(DIST_DIR)/mar-linux-x86_64 (portable x86_64, SSE2 baseline)"
+	@ls -lh $(DIST_DIR)/mar-linux-x86_64
 
 # Linux x86_64 - SSE4.2 optimized (recommended for modern systems)
 dist-linux-x86_64-sse42:
+	@mkdir -p $(DIST_DIR)
 	$(MAKE) clean
 	$(MAKE) STATIC=1 BUILD=release \
 	        ARCH_FLAGS="-march=nehalem -mtune=generic" \
-	        TARGET_NAME=mar-linux-x86_64-sse42 \
-	        all
+	        TARGET_NAME=$(DIST_DIR)/mar-linux-x86_64-sse42 \
+	        all-internal
 	@echo ""
-	@echo "Built: mar-linux-x86_64-sse42 (2008+ Intel, 2011+ AMD)"
-	@ls -lh mar-linux-x86_64-sse42
+	@echo "Built: $(DIST_DIR)/mar-linux-x86_64-sse42 (2008+ Intel, 2011+ AMD)"
+	@ls -lh $(DIST_DIR)/mar-linux-x86_64-sse42
 
 # Linux x86_64 - AVX2 optimized (for newer systems)
 dist-linux-x86_64-avx2:
+	@mkdir -p $(DIST_DIR)
 	$(MAKE) clean
 	$(MAKE) STATIC=1 BUILD=release \
 	        ARCH_FLAGS="-march=haswell -mtune=generic" \
-	        TARGET_NAME=mar-linux-x86_64-avx2 \
-	        all
+	        TARGET_NAME=$(DIST_DIR)/mar-linux-x86_64-avx2 \
+	        all-internal
 	@echo ""
-	@echo "Built: mar-linux-x86_64-avx2 (2013+ Intel, 2015+ AMD)"
-	@ls -lh mar-linux-x86_64-avx2
+	@echo "Built: $(DIST_DIR)/mar-linux-x86_64-avx2 (2013+ Intel, 2015+ AMD)"
+	@ls -lh $(DIST_DIR)/mar-linux-x86_64-avx2
 
 # Linux ARM64 (ARMv8-A with NEON)
 dist-linux-arm64:
+	@mkdir -p $(DIST_DIR)
 	$(MAKE) clean
 	$(MAKE) STATIC=1 BUILD=release \
 	        ARCH_FLAGS="-march=armv8-a+simd -mtune=generic" \
-	        TARGET_NAME=mar-linux-arm64 \
-	        all
+	        TARGET_NAME=$(DIST_DIR)/mar-linux-arm64 \
+	        all-internal
 	@echo ""
-	@echo "Built: mar-linux-arm64 (ARMv8-A with NEON)"
-	@ls -lh mar-linux-arm64
+	@echo "Built: $(DIST_DIR)/mar-linux-arm64 (ARMv8-A with NEON)"
+	@ls -lh $(DIST_DIR)/mar-linux-arm64
 
 # macOS ARM64 (Apple Silicon: M1, M2, M3, M4)
 dist-macos-arm64:
+	@mkdir -p $(DIST_DIR)
 	$(MAKE) clean
 	$(MAKE) BUILD=release \
 	        ARCH_FLAGS="-arch arm64" \
-	        TARGET_NAME=mar-macos-arm64 \
-	        all
+	        TARGET_NAME=$(DIST_DIR)/mar-macos-arm64 \
+	        all-internal
 	@echo ""
-	@echo "Built: mar-macos-arm64 (Apple Silicon)"
-	@file mar-macos-arm64
-	@ls -lh mar-macos-arm64
+	@echo "Built: $(DIST_DIR)/mar-macos-arm64 (Apple Silicon)"
+	@file $(DIST_DIR)/mar-macos-arm64
+	@ls -lh $(DIST_DIR)/mar-macos-arm64
 
 # macOS x86_64 (Intel Macs)
 dist-macos-x86_64:
+	@mkdir -p $(DIST_DIR)
 	$(MAKE) clean
 	$(MAKE) BUILD=release \
 	        ARCH_FLAGS="-arch x86_64 -march=nehalem" \
-	        TARGET_NAME=mar-macos-x86_64 \
-	        all
+	        TARGET_NAME=$(DIST_DIR)/mar-macos-x86_64 \
+	        all-internal
 	@echo ""
-	@echo "Built: mar-macos-x86_64 (Intel Macs, 2008+)"
-	@file mar-macos-x86_64
-	@ls -lh mar-macos-x86_64
+	@echo "Built: $(DIST_DIR)/mar-macos-x86_64 (Intel Macs, 2008+)"
+	@file $(DIST_DIR)/mar-macos-x86_64
+	@ls -lh $(DIST_DIR)/mar-macos-x86_64
 
 # macOS Universal Binary (ARM64 + x86_64)
 dist-macos-universal:
+	@mkdir -p $(DIST_DIR)
 	@echo "Building macOS Universal Binary (ARM64 + x86_64)..."
 	$(MAKE) dist-macos-arm64
-	@mv mar-macos-arm64 mar-arm64-temp
+	@mv $(DIST_DIR)/mar-macos-arm64 $(DIST_DIR)/mar-arm64-temp
 	$(MAKE) dist-macos-x86_64
-	@mv mar-macos-x86_64 mar-x86_64-temp
-	lipo -create -output mar-macos-universal mar-arm64-temp mar-x86_64-temp
-	@rm mar-arm64-temp mar-x86_64-temp
+	@mv $(DIST_DIR)/mar-macos-x86_64 $(DIST_DIR)/mar-x86_64-temp
+	lipo -create -output $(DIST_DIR)/mar-macos-universal $(DIST_DIR)/mar-arm64-temp $(DIST_DIR)/mar-x86_64-temp
+	@rm $(DIST_DIR)/mar-arm64-temp $(DIST_DIR)/mar-x86_64-temp
 	@echo ""
-	@echo "Built: mar-macos-universal (ARM64 + x86_64)"
-	@lipo -info mar-macos-universal
-	@ls -lh mar-macos-universal
+	@echo "Built: $(DIST_DIR)/mar-macos-universal (ARM64 + x86_64)"
+	@lipo -info $(DIST_DIR)/mar-macos-universal
+	@ls -lh $(DIST_DIR)/mar-macos-universal
 
 # Build all distribution binaries for current platform
 dist-all:
+	@mkdir -p $(DIST_DIR)
 	@echo "Building all distribution binaries for current platform..."
 	@if [ "$(UNAME_S)" = "Linux" ]; then \
 	    if [ "$$(uname -m)" = "x86_64" ]; then \
@@ -545,18 +535,18 @@ dist-all:
 	fi
 	@echo ""
 	@echo "Distribution builds complete!"
-	@ls -lh mar-* 2>/dev/null || true
+	@ls -lh $(DIST_DIR)/mar-* 2>/dev/null || true
 
 # Native optimized build (maximum performance for current CPU)
 native:
-	$(MAKE) BUILD=release NATIVE=1 all
+	$(MAKE) BUILD=release NATIVE=1 all-internal
 	@echo ""
 	@echo "Built: mar (native optimized for current CPU)"
 	@echo "WARNING: This binary may not run on different CPUs!"
 
 # Native + LTO (maximum performance, slower compile)
 native-lto:
-	$(MAKE) BUILD=release NATIVE=1 LTO=1 all
+	$(MAKE) BUILD=release NATIVE=1 LTO=1 all-internal
 	@echo ""
 	@echo "Built: mar (native + LTO, maximum performance)"
 	@echo "WARNING: This binary may not run on different CPUs!"
@@ -617,6 +607,7 @@ help:
 	@echo "  make              - Build release binary (optimized)"
 	@echo "  make debug        - Build with debug symbols"
 	@echo "  make static       - Build static binary"
+	@echo "  make release      - Build optimized static binary"
 	@echo "  make test         - Build and run tests"
 	@echo ""
 	@echo "Distribution Builds (Portable):"
