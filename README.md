@@ -243,7 +243,7 @@ See `specs/mar-0.1.0.md` for the complete specification.
 
 ## License
 
-See LICENSE file in the project root.
+See the LICENSE.md file in the project root.
 
 ## Citation
 
