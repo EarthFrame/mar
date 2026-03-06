@@ -1,0 +1,197 @@
+# Comprehensive MAR Benchmark Configuration
+# Complete test matrix: TAR (uncompressed/gzip) vs MAR (zstd/gzip/lz4)
+# Operations: create, extract, list, get
+#
+# Note: Commands use $SCRATCH_DIR for temporary files
+# Note: Input paths are relative to repository root
+
+global:
+  timeout: 600
+  seed: 42
+
+benchmarks:
+  # ==========================================================================
+  # NUMPY WORKLOAD - Complete Test Matrix
+  # ==========================================================================
+  
+  # --------------------------------------------------------------------------
+  # CREATE operations
+  # --------------------------------------------------------------------------
+  
+  - id: "tar_numpy_uncompressed"
+    name: "TAR (Uncompressed): NumPy Create"
+    workload: "numpy"
+    operation: "create"
+    variant: "tar_uncompressed"
+    command: "tar cf $SCRATCH_DIR/numpy.tar benchmarks/data/numpy-2.4.1/"
+    output_file: "$SCRATCH_DIR/numpy.tar"
+    timeout: 60
+
+  - id: "tar_numpy_gzip"
+    name: "TAR+Gzip: NumPy Create"
+    workload: "numpy"
+    operation: "create"
+    variant: "tar_gzip"
+    command: "tar czf $SCRATCH_DIR/numpy.tar.gz benchmarks/data/numpy-2.4.1/"
+    output_file: "$SCRATCH_DIR/numpy.tar.gz"
+    timeout: 60
+
+  - id: "mar_numpy_zstd"
+    name: "MAR+ZSTD: NumPy Create"
+    workload: "numpy"
+    operation: "create"
+    variant: "mar_zstd"
+    command: "../mar create --force --compression zstd $SCRATCH_DIR/numpy_zstd.mar benchmarks/data/numpy-2.4.1/"
+    output_file: "$SCRATCH_DIR/numpy_zstd.mar"
+    timeout: 60
+
+  - id: "mar_numpy_gzip"
+    name: "MAR+Gzip: NumPy Create"
+    workload: "numpy"
+    operation: "create"
+    variant: "mar_gzip"
+    command: "../mar create --force --compression gzip $SCRATCH_DIR/numpy_gzip.mar benchmarks/data/numpy-2.4.1/"
+    output_file: "$SCRATCH_DIR/numpy_gzip.mar"
+    timeout: 60
+
+  - id: "mar_numpy_lz4"
+    name: "MAR+LZ4: NumPy Create"
+    workload: "numpy"
+    operation: "create"
+    variant: "mar_lz4"
+    command: "../mar create --force --compression lz4 $SCRATCH_DIR/numpy_lz4.mar benchmarks/data/numpy-2.4.1/"
+    output_file: "$SCRATCH_DIR/numpy_lz4.mar"
+    timeout: 60
+
+  # --------------------------------------------------------------------------
+  # EXTRACT operations
+  # --------------------------------------------------------------------------
+
+  - id: "tar_numpy_extract_uncompressed"
+    name: "TAR (Uncompressed): NumPy Extract"
+    workload: "numpy"
+    operation: "extract"
+    variant: "tar_uncompressed"
+    command: "mkdir -p $SCRATCH_DIR/extracted_tar && tar xf $SCRATCH_DIR/numpy.tar -C $SCRATCH_DIR/extracted_tar"
+    cleanup: "$SCRATCH_DIR/extracted_tar"
+    timeout: 60
+
+  - id: "tar_numpy_extract_gzip"
+    name: "TAR+Gzip: NumPy Extract"
+    workload: "numpy"
+    operation: "extract"
+    variant: "tar_gzip"
+    command: "mkdir -p $SCRATCH_DIR/extracted_tar_gz && tar xzf $SCRATCH_DIR/numpy.tar.gz -C $SCRATCH_DIR/extracted_tar_gz"
+    cleanup: "$SCRATCH_DIR/extracted_tar_gz"
+    timeout: 60
+
+  - id: "mar_numpy_extract_zstd"
+    name: "MAR+ZSTD: NumPy Extract"
+    workload: "numpy"
+    operation: "extract"
+    variant: "mar_zstd"
+    command: "mkdir -p $SCRATCH_DIR/extracted_mar_zstd && ../mar extract -o $SCRATCH_DIR/extracted_mar_zstd $SCRATCH_DIR/numpy_zstd.mar"
+    cleanup: "$SCRATCH_DIR/extracted_mar_zstd"
+    timeout: 60
+
+  - id: "mar_numpy_extract_gzip"
+    name: "MAR+Gzip: NumPy Extract"
+    workload: "numpy"
+    operation: "extract"
+    variant: "mar_gzip"
+    command: "mkdir -p $SCRATCH_DIR/extracted_mar_gzip && ../mar extract -o $SCRATCH_DIR/extracted_mar_gzip $SCRATCH_DIR/numpy_gzip.mar"
+    cleanup: "$SCRATCH_DIR/extracted_mar_gzip"
+    timeout: 60
+
+  - id: "mar_numpy_extract_lz4"
+    name: "MAR+LZ4: NumPy Extract"
+    workload: "numpy"
+    operation: "extract"
+    variant: "mar_lz4"
+    command: "mkdir -p $SCRATCH_DIR/extracted_mar_lz4 && ../mar extract -o $SCRATCH_DIR/extracted_mar_lz4 $SCRATCH_DIR/numpy_lz4.mar"
+    cleanup: "$SCRATCH_DIR/extracted_mar_lz4"
+    timeout: 60
+
+  # --------------------------------------------------------------------------
+  # LIST operations
+  # --------------------------------------------------------------------------
+
+  - id: "tar_numpy_list_uncompressed"
+    name: "TAR (Uncompressed): NumPy List"
+    workload: "numpy"
+    operation: "list"
+    variant: "tar_uncompressed"
+    command: "tar tf $SCRATCH_DIR/numpy.tar > /dev/null"
+    timeout: 30
+
+  - id: "tar_numpy_list_gzip"
+    name: "TAR+Gzip: NumPy List"
+    workload: "numpy"
+    operation: "list"
+    variant: "tar_gzip"
+    command: "tar tzf $SCRATCH_DIR/numpy.tar.gz > /dev/null"
+    timeout: 30
+
+  - id: "mar_numpy_list_zstd"
+    name: "MAR+ZSTD: NumPy List"
+    workload: "numpy"
+    operation: "list"
+    variant: "mar_zstd"
+    command: "../mar list $SCRATCH_DIR/numpy_zstd.mar > /dev/null"
+    timeout: 30
+
+  - id: "mar_numpy_list_gzip"
+    name: "MAR+Gzip: NumPy List"
+    workload: "numpy"
+    operation: "list"
+    variant: "mar_gzip"
+    command: "../mar list $SCRATCH_DIR/numpy_gzip.mar > /dev/null"
+    timeout: 30
+
+  - id: "mar_numpy_list_lz4"
+    name: "MAR+LZ4: NumPy List"
+    workload: "numpy"
+    operation: "list"
+    variant: "mar_lz4"
+    command: "../mar list $SCRATCH_DIR/numpy_lz4.mar > /dev/null"
+    timeout: 30
+
+  # --------------------------------------------------------------------------
+  # GET operations (MAR only - random access)
+  # --------------------------------------------------------------------------
+
+  - id: "mar_numpy_get_zstd"
+    name: "MAR+ZSTD: NumPy Get (Random Access)"
+    workload: "numpy"
+    operation: "get"
+    variant: "mar_zstd"
+    command: |
+      mkdir -p $SCRATCH_DIR/get_zstd
+      ../mar list $SCRATCH_DIR/numpy_zstd.mar | python3 -c 'import sys, random; files = [line.strip() for line in sys.stdin if line.strip() and " " not in line.strip()]; random.seed(42); selected = random.sample(files, min(50, len(files))); sys.stdout.write(" ".join(selected))' > $SCRATCH_DIR/get_files.txt
+      ../mar get -o $SCRATCH_DIR/get_zstd $SCRATCH_DIR/numpy_zstd.mar $(cat $SCRATCH_DIR/get_files.txt)
+    cleanup: "$SCRATCH_DIR/get_zstd"
+    timeout: 30
+
+  - id: "mar_numpy_get_gzip"
+    name: "MAR+Gzip: NumPy Get (Random Access)"
+    workload: "numpy"
+    operation: "get"
+    variant: "mar_gzip"
+    command: |
+      mkdir -p $SCRATCH_DIR/get_gzip
+      ../mar list $SCRATCH_DIR/numpy_gzip.mar | python3 -c 'import sys, random; files = [line.strip() for line in sys.stdin if line.strip() and " " not in line.strip()]; random.seed(42); selected = random.sample(files, min(50, len(files))); sys.stdout.write(" ".join(selected))' > $SCRATCH_DIR/get_files_gzip.txt
+      ../mar get -o $SCRATCH_DIR/get_gzip $SCRATCH_DIR/numpy_gzip.mar $(cat $SCRATCH_DIR/get_files_gzip.txt)
+    cleanup: "$SCRATCH_DIR/get_gzip"
+    timeout: 30
+
+  - id: "mar_numpy_get_lz4"
+    name: "MAR+LZ4: NumPy Get (Random Access)"
+    workload: "numpy"
+    operation: "get"
+    variant: "mar_lz4"
+    command: |
+      mkdir -p $SCRATCH_DIR/get_lz4
+      ../mar list $SCRATCH_DIR/numpy_lz4.mar | python3 -c 'import sys, random; files = [line.strip() for line in sys.stdin if line.strip() and " " not in line.strip()]; random.seed(42); selected = random.sample(files, min(50, len(files))); sys.stdout.write(" ".join(selected))' > $SCRATCH_DIR/get_files_lz4.txt
+      ../mar get -o $SCRATCH_DIR/get_lz4 $SCRATCH_DIR/numpy_lz4.mar $(cat $SCRATCH_DIR/get_files_lz4.txt)
+    cleanup: "$SCRATCH_DIR/get_lz4"
+    timeout: 30

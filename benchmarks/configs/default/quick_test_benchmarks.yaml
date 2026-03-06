@@ -1,0 +1,103 @@
+# Quick Test Benchmark Configuration
+# Fast subset for iteration and testing
+# Uses new command-line first format
+
+global:
+  timeout: 90
+  seed: 42
+
+benchmarks:
+  # ==========================================================================
+  # NUMPY WORKLOAD - Quick Test Subset
+  # ==========================================================================
+  
+  # --------------------------------------------------------------------------
+  # CREATE operations (baselines + MAR variants)
+  # --------------------------------------------------------------------------
+  
+  - id: "tar_numpy_uncompressed"
+    name: "TAR (Uncompressed): NumPy Create"
+    workload: "numpy"
+    operation: "create"
+    variant: "tar_uncompressed"
+    command: "tar cf $SCRATCH_DIR/numpy.tar benchmarks/data/numpy-2.4.1/"
+    output_file: "$SCRATCH_DIR/numpy.tar"
+    timeout: 60
+
+  - id: "tar_numpy_gzip"
+    name: "TAR+Gzip: NumPy Create"
+    workload: "numpy"
+    operation: "create"
+    variant: "tar_gzip"
+    command: "tar czf $SCRATCH_DIR/numpy.tar.gz benchmarks/data/numpy-2.4.1/"
+    output_file: "$SCRATCH_DIR/numpy.tar.gz"
+    timeout: 60
+
+  - id: "mar_numpy_zstd"
+    name: "MAR+ZSTD: NumPy Create"
+    workload: "numpy"
+    operation: "create"
+    variant: "mar_zstd"
+    command: "../mar create --force --compression zstd $SCRATCH_DIR/numpy_zstd.mar benchmarks/data/numpy-2.4.1/"
+    output_file: "$SCRATCH_DIR/numpy_zstd.mar"
+    timeout: 60
+
+  - id: "mar_numpy_gzip"
+    name: "MAR+Gzip: NumPy Create"
+    workload: "numpy"
+    operation: "create"
+    variant: "mar_gzip"
+    command: "../mar create --force --compression gzip $SCRATCH_DIR/numpy_gzip.mar benchmarks/data/numpy-2.4.1/"
+    output_file: "$SCRATCH_DIR/numpy_gzip.mar"
+    timeout: 60
+
+  - id: "mar_numpy_lz4"
+    name: "MAR+LZ4: NumPy Create"
+    workload: "numpy"
+    operation: "create"
+    variant: "mar_lz4"
+    command: "../mar create --force --compression lz4 $SCRATCH_DIR/numpy_lz4.mar benchmarks/data/numpy-2.4.1/"
+    output_file: "$SCRATCH_DIR/numpy_lz4.mar"
+    timeout: 60
+
+  # --------------------------------------------------------------------------
+  # EXTRACT operations (quick subset - just zstd)
+  # --------------------------------------------------------------------------
+
+  - id: "tar_numpy_extract_uncompressed"
+    name: "TAR (Uncompressed): NumPy Extract"
+    workload: "numpy"
+    operation: "extract"
+    variant: "tar_uncompressed"
+    command: "mkdir -p $SCRATCH_DIR/extracted_tar && tar xf $SCRATCH_DIR/numpy.tar -C $SCRATCH_DIR/extracted_tar"
+    cleanup: "$SCRATCH_DIR/extracted_tar"
+    timeout: 60
+
+  - id: "mar_numpy_extract_zstd"
+    name: "MAR+ZSTD: NumPy Extract"
+    workload: "numpy"
+    operation: "extract"
+    variant: "mar_zstd"
+    command: "mkdir -p $SCRATCH_DIR/extracted_mar_zstd && ../mar extract -o $SCRATCH_DIR/extracted_mar_zstd $SCRATCH_DIR/numpy_zstd.mar"
+    cleanup: "$SCRATCH_DIR/extracted_mar_zstd"
+    timeout: 60
+
+  # --------------------------------------------------------------------------
+  # LIST operations (quick subset)
+  # --------------------------------------------------------------------------
+
+  - id: "tar_numpy_list_uncompressed"
+    name: "TAR (Uncompressed): NumPy List"
+    workload: "numpy"
+    operation: "list"
+    variant: "tar_uncompressed"
+    command: "tar tf $SCRATCH_DIR/numpy.tar > /dev/null"
+    timeout: 30
+
+  - id: "mar_numpy_list_zstd"
+    name: "MAR+ZSTD: NumPy List"
+    workload: "numpy"
+    operation: "list"
+    variant: "mar_zstd"
+    command: "../mar list $SCRATCH_DIR/numpy_zstd.mar > /dev/null"
+    timeout: 30
