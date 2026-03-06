@@ -1,0 +1,201 @@
+# MAR Benchmark Configuration
+# Real-world dataset benchmarks for MAR vs TAR
+
+global:
+  binary: "../mar"
+  timeout: 600
+  output_checksum_algorithm: b3sum
+  run_checksum_validation: false
+  profiling: false
+  seed: 42
+
+benchmarks:
+  # ============================================================================
+  # TAR Baselines (Create only, for comparison with MAR create)
+  # ============================================================================
+
+  - id: "tar_linux_kernel_gzip"
+    name: "TAR+Gzip: Linux Kernel Create"
+    binary: "tar"
+    workload: "linux_kernel"
+    command: "czf"
+    input: "benchmarks/data/linux-6.18.5/"
+    output: "profile_output/linux.tar.gz"
+    timeout: 300
+    remove_outputs: true
+
+  - id: "tar_numpy_gzip"
+    name: "TAR+Gzip: NumPy Create"
+    binary: "tar"
+    workload: "numpy"
+    command: "czf"
+    input: "benchmarks/data/numpy-2.4.1/"
+    output: "profile_output/numpy.tar.gz"
+    timeout: 60
+    remove_outputs: true
+
+  - id: "tar_casp15_gzip"
+    name: "TAR+Gzip: CASP15 Create"
+    binary: "tar"
+    workload: "casp15"
+    command: "czf"
+    input: "casp15/"
+    output: "profile_output/casp15.tar.gz"
+    timeout: 60
+    remove_outputs: true
+
+  - id: "tar_dickens_gzip"
+    name: "TAR+Gzip: Dickens Create"
+    binary: "tar"
+    workload: "dickens"
+    command: "czf"
+    input: "benchmarks/data/dickens"
+    output: "profile_output/dickens.tar.gz"
+    timeout: 60
+    remove_outputs: true
+
+  - id: "tar_webster_gzip"
+    name: "TAR+Gzip: Webster Create"
+    binary: "tar"
+    workload: "webster"
+    command: "czf"
+    input: "benchmarks/data/webster"
+    output: "profile_output/webster.tar.gz"
+    timeout: 60
+    remove_outputs: true
+
+  - id: "tar_makonin_gzip"
+    name: "TAR+Gzip: Makonin Create"
+    binary: "tar"
+    workload: "makonin"
+    command: "czf"
+    input: "benchmarks/data/makonin/"
+    output: "profile_output/makonin.tar.gz"
+    timeout: 300
+    remove_outputs: true
+
+  # ============================================================================
+  # MAR Create Benchmarks (Phase 1)
+  # ============================================================================
+
+  - id: "mar_linux_kernel_create"
+    name: "MAR+ZSTD: Linux Kernel Create"
+    workload: "linux_kernel"
+    command: "create"
+    input: "benchmarks/data/linux-6.18.5/"
+    output: "profile_output/linux.mar"
+    compression: "zstd"
+    timeout: 300
+
+  - id: "mar_numpy_create"
+    name: "MAR+ZSTD: NumPy Create"
+    workload: "numpy"
+    command: "create"
+    input: "benchmarks/data/numpy-2.4.1/"
+    output: "profile_output/numpy.mar"
+    compression: "zstd"
+    timeout: 60
+
+  - id: "mar_casp15_create"
+    name: "MAR+ZSTD: CASP15 Create"
+    workload: "casp15"
+    command: "create"
+    input: "casp15/"
+    output: "profile_output/casp15.mar"
+    compression: "zstd"
+    timeout: 60
+
+  - id: "mar_dickens_create"
+    name: "MAR+ZSTD: Dickens Create"
+    workload: "dickens"
+    command: "create"
+    input: "benchmarks/data/dickens"
+    output: "profile_output/dickens.mar"
+    compression: "zstd"
+    timeout: 60
+
+  - id: "mar_webster_create"
+    name: "MAR+ZSTD: Webster Create"
+    workload: "webster"
+    command: "create"
+    input: "benchmarks/data/webster"
+    output: "profile_output/webster.mar"
+    compression: "zstd"
+    timeout: 60
+
+  - id: "mar_makonin_create"
+    name: "MAR+ZSTD: Makonin Create"
+    workload: "makonin"
+    command: "create"
+    input: "benchmarks/data/makonin/"
+    output: "profile_output/makonin.mar"
+    compression: "zstd"
+    timeout: 300
+
+  # ============================================================================
+  # MAR List Benchmarks (Phase 2 - after create)
+  # ============================================================================
+
+  - id: "mar_linux_kernel_list"
+    name: "MAR: Linux Kernel List"
+    workload: "linux_kernel"
+    command: "list"
+    input: "profile_output/linux.mar"
+    timeout: 30
+
+  - id: "mar_casp15_list"
+    name: "MAR: CASP15 List"
+    workload: "casp15"
+    command: "list"
+    input: "profile_output/casp15.mar"
+    timeout: 30
+
+  # ============================================================================
+  # MAR Random Access (Phase 3 - after create)
+  # ============================================================================
+
+  - id: "mar_linux_kernel_get"
+    name: "MAR: Linux Kernel Get (Random Access)"
+    workload: "linux_kernel"
+    command: "get"
+    input: "profile_output/linux.mar"
+    count: 50
+    timeout: 60
+
+  - id: "mar_casp15_get"
+    name: "MAR: CASP15 Get (Random Access)"
+    workload: "casp15"
+    command: "get"
+    input: "profile_output/casp15.mar"
+    count: 10
+    timeout: 30
+
+  - id: "mar_makonin_get"
+    name: "MAR: Makonin Get (Random Access)"
+    workload: "makonin"
+    command: "get"
+    input: "profile_output/makonin.mar"
+    count: 20
+    timeout: 60
+
+  # ============================================================================
+  # MAR Extract Benchmarks (Phase 4 - after create)
+  # ============================================================================
+
+  - id: "mar_linux_kernel_extract"
+    name: "MAR: Linux Kernel Extract"
+    workload: "linux_kernel"
+    command: "extract"
+    input: "profile_output/linux.mar"
+    output: "profile_output/extracted_linux/"
+    timeout: 300
+    remove_outputs: true
+
+  - id: "mar_casp15_extract"
+    name: "MAR: CASP15 Extract"
+    workload: "casp15"
+    command: "extract"
+    input: "profile_output/casp15.mar"
+    output: "profile_output/extracted_casp15/"
+    timeout: 60
+    remove_outputs: true
