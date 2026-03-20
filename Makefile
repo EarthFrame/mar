@@ -9,6 +9,13 @@ VERSION_RELEASE ?= 1
 VERSION = $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH)
 PKG_VERSION = $(VERSION)-$(VERSION_RELEASE)
 
+# Installation paths
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+DATADIR ?= $(PREFIX)/share
+MANDIR ?= $(DATADIR)/man
+DOCDIR ?= $(DATADIR)/doc/$(PROJECT_NAME)
+
 # Project Metadata
 PROJECT_NAME = mar
 PROJECT_DESC = High-performance archival utility for efficient compression, storage, and retrieval of large datasets with multi-format support
@@ -239,10 +246,16 @@ ifeq ($(UNAME_S),Darwin)
         # We replace -l<lib> with the full path to the .a file if it exists in Homebrew
         LDFLAGS := $(subst -lzstd,$(wildcard $(HOMEBREW_PREFIX)/lib/libzstd.a),$(LDFLAGS))
         LDFLAGS := $(subst -llz4,$(wildcard $(HOMEBREW_PREFIX)/lib/liblz4.a),$(LDFLAGS))
-        LDFLAGS := $(subst -lz,$(wildcard $(HOMEBREW_PREFIX)/lib/libz.a),$(LDFLAGS))
+        LDFLAGS := $(subst -lz,$(wildcard $(HOMEBREW_PREFIX)/lib/libz.a $(HOMEBREW_PREFIX)/opt/zlib/lib/libz.a),$(LDFLAGS))
         LDFLAGS := $(subst -lbz2,$(wildcard $(HOMEBREW_PREFIX)/lib/libbz2.a),$(LDFLAGS))
         LDFLAGS := $(subst -ldeflate,$(wildcard $(HOMEBREW_PREFIX)/lib/libdeflate.a),$(LDFLAGS))
-        LDFLAGS := $(subst -lblake3,$(wildcard $(HOMEBREW_PREFIX)/lib/libblake3.a),$(LDFLAGS))
+        
+        # Prefer local BLAKE3 static library if it exists
+        ifneq ($(wildcard $(LOCAL_BLAKE3_LIB)),)
+            LDFLAGS := $(subst -lblake3,$(LOCAL_BLAKE3_LIB),$(LDFLAGS))
+        else
+            LDFLAGS := $(subst -lblake3,$(wildcard $(HOMEBREW_PREFIX)/lib/libblake3.a),$(LDFLAGS))
+        endif
     endif
 
     # Only add these if pkg-config failed to find them
@@ -403,8 +416,11 @@ check-deps:
 
 # Install
 install: $(TARGET)
-	install -d $(DESTDIR)$(PREFIX)/bin
-	install -m 755 $(TARGET) $(DESTDIR)$(PREFIX)/bin/
+	install -d $(DESTDIR)$(BINDIR)
+	install -m 755 $(TARGET) $(DESTDIR)$(BINDIR)/
+
+uninstall:
+	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
 
 # Clean
 clean:

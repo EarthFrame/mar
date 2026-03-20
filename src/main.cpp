@@ -2106,12 +2106,29 @@ bool is_global_option(const std::string& arg) {
 int main(int argc, char* argv[]) {
     // Ignore SIGPIPE to handle early pipe closure gracefully (e.g., | head)
     std::signal(SIGPIPE, SIG_IGN);
-    init_feature_flags_from_env();
 
+    // Optimization: Handle no-argument case and simple help/version checks immediately
+    // to avoid overhead of feature flag initialization and argument scanning.
     if (argc < 2) {
+        // We need feature flags for print_usage, but we can call it directly if we're okay 
+        // with default flags, or just do a quick init.
+        init_feature_flags_from_env();
         print_usage();
         return EXIT_USAGE;
     }
+
+    if (std::string_view(argv[1]) == "-h" || std::string_view(argv[1]) == "--help") {
+        init_feature_flags_from_env();
+        print_usage();
+        return EXIT_OK;
+    }
+
+    if (std::string_view(argv[1]) == "--version") {
+        std::cout << get_tool_version() << std::endl;
+        return EXIT_OK;
+    }
+
+    init_feature_flags_from_env();
 
     // First pass: find command and extract global options
     std::string command;
