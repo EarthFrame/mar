@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <sys/types.h>
 #include "mar/types.hpp"
 
 #ifdef MAR_HAS_URING
