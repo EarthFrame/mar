@@ -43,10 +43,11 @@ std::string get_mar_version() {
 }
 
 // Exit codes per spec
-constexpr int EXIT_OK = 0;
-constexpr int EXIT_ERROR = 1;
-constexpr int EXIT_USAGE = 2;
-constexpr int EXIT_INTEGRITY = 65;
+constexpr int EXIT_OK         = 0;
+constexpr int EXIT_NO_RESULTS = 1;   // search: no matches found
+constexpr int EXIT_USAGE      = 2;   // bad command-line arguments
+constexpr int EXIT_ERROR      = 3;   // runtime / I-O error
+constexpr int EXIT_INTEGRITY  = 65;
 constexpr int EXIT_UNAVAILABLE = 69;
 
 // Global CLI options structure
@@ -1501,6 +1502,14 @@ int cmd_diff(int argc, char* argv[]) {
     }
 
     try {
+        if (!std::filesystem::exists(archive1)) {
+            print_error("Archive not found: " + archive1, "diff");
+            return EXIT_ERROR;
+        }
+        if (!std::filesystem::exists(archive2)) {
+            print_error("Archive not found: " + archive2, "diff");
+            return EXIT_ERROR;
+        }
         MarReader src(archive1);
         MarReader tgt(archive2);
 
@@ -1517,6 +1526,9 @@ int cmd_diff(int argc, char* argv[]) {
         }
 
         return EXIT_OK;
+    } catch (const MarError& e) {
+        print_error(e.what(), "diff");
+        return EXIT_ERROR;
     } catch (const std::exception& e) {
         print_error(e.what(), "diff");
         return EXIT_ERROR;
@@ -1662,6 +1674,10 @@ int cmd_validate(int argc, char* argv[]) {
 
     try {
         print_verbose("Validating archive: " + archive_path);
+        if (!std::filesystem::exists(archive_path)) {
+            print_error("Archive not found: " + archive_path, "validate");
+            return EXIT_ERROR;
+        }
         MarReader reader(archive_path);
 
         bool all_valid = reader.validate_parallel(num_threads, cli_options.verbose > 0);
@@ -1856,23 +1872,28 @@ Create a sidecar index for an archive.
 
 Options:
   -i, --input <archive>      Path to the .mar archive
-  --type <type>              Index type (e.g., minhash, vector)
+  --type <type>              Index type: minhash, vector, genomic, email, timeseries
   --aux <file>               Auxiliary input file (repeatable)
   --with <key=value>         Type-specific parameter (repeatable)
-  -o, --output <file>        Custom output path (default: archive.type.mai)
-  --align <log2>             Section alignment (2^n bytes, default: 0)
+  -o, --output <file>        Custom output path (default: <archive>.<type>.mai)
+  --align <log2>             Section alignment as 2^n bytes (default: 0)
 
-Example:
+Common --with parameters:
+  threads=N                  Parallel build threads (default: CPU cores)
+
+Examples:
   mar index -i data.mar --type minhash --with bit_width=16
+  mar index -i data.mar --type vector  --with url=http://localhost:7998
+  mar index -i data.mar --type genomic
+  mar index -i data.mar --type timeseries --with ts_col=timestamp --with ts_format=iso8601
 )";
-    // Show type-specific help if possible
     auto types = IndexRegistry::instance().list_index_types();
     if (!types.empty()) {
         std::cout << "\nAvailable types: ";
         for (size_t i = 0; i < types.size(); ++i) {
             std::cout << types[i] << (i + 1 == types.size() ? "" : ", ");
         }
-        std::cout << "\nUse 'mar index --type <type> --help' for specific options.\n";
+        std::cout << "\nUse 'mar index --type <type> --help' for type-specific options.\n";
     }
 }
 
@@ -1927,15 +1948,11 @@ int cmd_index(int argc, char* argv[]) {
 
     try {
         MarReader reader(archive_path);
-        
-        // Compute archive hash for consistency
-        mar::xxhash3::XXHash3_64 hasher(0);
-        // Simplified hash: just FixedHeader + FileTable for now
-        // In a real implementation, we'd use the full archive hash or a specific fingerprint.
-        u64 archive_hash = 0; // Placeholder, should match 'mar hash' logic
-        
-        // Re-read archive bytes to match 'mar hash'
+
+        // Compute archive hash to match 'mar hash' behaviour.
+        u64 archive_hash = 0;
         {
+            mar::xxhash3::XXHash3_64 hasher(0);
             std::ifstream in(archive_path, std::ios::binary);
             char buffer[65536];
             while (in.read(buffer, sizeof(buffer))) {
@@ -1947,18 +1964,15 @@ int cmd_index(int argc, char* argv[]) {
             archive_hash = hasher.finalize();
         }
 
-        MAIIndexType mai_type = MAIIndexType::Generic;
-        if (type_name == "minhash") mai_type = MAIIndexType::MinHash;
-        else if (type_name == "vector") mai_type = MAIIndexType::Vector;
+        // Ask the indexer itself for its type; no hardcoded mapping here.
+        MAIWriter writer(archive_path, indexer->index_type(), archive_hash);
 
-        MAIWriter writer(archive_path, mai_type, archive_hash);
-        
         indexer->build(reader, writer, opts);
-        
+
         if (output_path.empty()) {
             output_path = archive_path + "." + type_name + ".mai";
         }
-        
+
         std::cout << "Writing index to " << output_path << "..." << std::endl;
         writer.write_to_file(output_path, align_log2);
         std::cout << "Successfully created " << type_name << " index." << std::endl;
@@ -1980,23 +1994,56 @@ Search an archive using a sidecar index.
 
 Options:
   -i, --input <archive>      Path to the .mar archive
-  --index <index.mai>        Path to the sidecar index file
-  --type <type>              Search type (semantic, similarity)
-  --with <key=value>         Search parameters (repeatable)
-  --filenames-only           Output only matching filenames
+  --index <index.mai>        Path to the sidecar index (.mai) file
+  --with <key=value>         Search parameter (repeatable; type-specific)
+  --extract                  Genomic: write raw sequence/records to stdout
+  --filenames-only           Shorthand for --with format=filenames
 
-Example:
-  mar search -i data.mar --index data.minhash.mai --type similarity --with file=target.txt
+Universal --with parameters:
+  topk=N                     Maximum results to return (default: 10)
+  format=text|json|filenames Output format (default: text)
+  threads=N                  Worker threads
+
+Genomic region extraction example:
+  mar search -i ref.mar --index ref.genomic.mai chr1:1000000-2000000 --extract
+
+Vector semantic search example:
+  mar search -i docs.mar --index docs.vector.mai "Hamilton case" \
+    --with url=http://localhost:7998 --with topk=5 --with format=json
+
+MinHash similarity example:
+  mar search -i data.mar --index data.minhash.mai --with file=query.txt
+
+Exit codes: 0=results found, 1=no results, 2=usage error, 3=runtime error
 )";
+}
+
+// Escape a string value for NDJSON output (minimal, correct for ASCII content).
+static std::string json_escape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 4);
+    for (unsigned char c : s) {
+        if      (c == '"')  out += "\\\"";
+        else if (c == '\\') out += "\\\\";
+        else if (c == '\n') out += "\\n";
+        else if (c == '\r') out += "\\r";
+        else if (c == '\t') out += "\\t";
+        else if (c < 0x20) {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "\\u%04x", (unsigned)c);
+            out += buf;
+        } else {
+            out += static_cast<char>(c);
+        }
+    }
+    return out;
 }
 
 int cmd_search(int argc, char* argv[]) {
     std::string archive_path;
     std::string index_path;
-    std::string type_name;
     std::string query;
     IndexOptions opts;
-    // bool filenames_only = false; // Currently unused
 
     for (int i = 0; i < argc; ++i) {
         std::string arg = argv[i];
@@ -2007,17 +2054,17 @@ int cmd_search(int argc, char* argv[]) {
             archive_path = argv[++i];
         } else if (arg == "--index" && i + 1 < argc) {
             index_path = argv[++i];
-        } else if (arg == "--type" && i + 1 < argc) {
-            type_name = argv[++i];
         } else if (arg == "--with" && i + 1 < argc) {
             std::string kv = argv[++i];
             size_t pos = kv.find('=');
             if (pos != std::string::npos) {
                 opts.params[kv.substr(0, pos)] = kv.substr(pos + 1);
             }
+        } else if (arg == "--extract") {
+            opts.params["extract"] = "true";
         } else if (arg == "--filenames-only") {
-            // filenames_only = true;
-        } else if (arg[0] != '-') {
+            opts.params["format"] = "filenames";
+        } else if (!arg.empty() && arg[0] != '-') {
             query = arg;
         }
     }
@@ -2035,8 +2082,7 @@ int cmd_search(int argc, char* argv[]) {
             return EXIT_ERROR;
         }
 
-        // Consistency check
-        u64 current_hash = 0;
+        // Warn if the archive has changed since the index was built.
         {
             mar::xxhash3::XXHash3_64 hasher(0);
             std::ifstream in(archive_path, std::ios::binary);
@@ -2047,20 +2093,101 @@ int cmd_search(int argc, char* argv[]) {
             if (in.gcount() > 0) {
                 hasher.update(reinterpret_cast<const u8*>(buffer), in.gcount());
             }
-            current_hash = hasher.finalize();
+            if (index->header().archive_hash != hasher.finalize()) {
+                std::cerr << "mar: warning: index may be stale (archive hash mismatch)" << std::endl;
+            }
         }
 
-        if (index->header().archive_hash != current_hash) {
-            std::cerr << "Warning: Index hash mismatch. Archive may have changed." << std::endl;
-        }
-
-        auto searcher = IndexRegistry::instance().get_searcher(static_cast<MAIIndexType>(index->header().index_type));
+        auto searcher = IndexRegistry::instance().get_searcher(
+            static_cast<MAIIndexType>(index->header().index_type));
         if (!searcher) {
-            print_error("No searcher available for index type: " + std::to_string(index->header().index_type), "search");
+            print_error("No searcher available for this index type", "search");
             return EXIT_ERROR;
         }
 
-        searcher->search(reader, *index, query, opts);
+        auto results = searcher->search(reader, *index, query, opts);
+
+        if (results.empty()) {
+            return EXIT_NO_RESULTS;
+        }
+
+        // Output formatting is owned here; searchers return structured results.
+        const std::string fmt = opts.get("format", "text");
+
+        if (fmt == "filenames") {
+            for (const auto& r : results) {
+                std::cout << r.filename << "\n";
+            }
+        } else if (fmt == "json") {
+            for (size_t i = 0; i < results.size(); ++i) {
+                const auto& r = results[i];
+                std::cout << "{\"rank\":" << (i + 1)
+                          << ",\"score\":" << r.score
+                          << ",\"file\":\"" << json_escape(r.filename) << "\"";
+                if (!r.content.empty()) {
+                    std::cout << ",\"content\":\"" << json_escape(r.content) << "\"";
+                }
+                if (!r.metadata.empty()) {
+                    std::cout << ",\"metadata\":{";
+                    bool first = true;
+                    for (const auto& [k, v] : r.metadata) {
+                        if (!first) std::cout << ",";
+                        std::cout << "\"" << json_escape(k) << "\":\"" << json_escape(v) << "\"";
+                        first = false;
+                    }
+                    std::cout << "}";
+                }
+                std::cout << "}\n";
+            }
+        } else {
+            // Text table
+            // Determine whether any result has a content snippet.
+            bool has_content = false;
+            for (const auto& r : results) {
+                if (!r.content.empty()) { has_content = true; break; }
+            }
+
+            if (has_content) {
+                std::cout << std::left
+                          << std::setw(4)  << "RANK" << "  "
+                          << std::setw(8)  << "SCORE"  << "  "
+                          << std::setw(40) << "FILE"   << "  "
+                          << "SNIPPET\n";
+            } else {
+                std::cout << std::left
+                          << std::setw(4)  << "RANK" << "  "
+                          << std::setw(8)  << "SCORE"  << "  "
+                          << "FILE\n";
+            }
+
+            for (size_t i = 0; i < results.size(); ++i) {
+                const auto& r = results[i];
+                std::ostringstream score_str;
+                score_str << std::fixed << std::setprecision(4) << r.score;
+
+                std::cout << std::left
+                          << std::setw(4)  << (i + 1)          << "  "
+                          << std::setw(8)  << score_str.str()  << "  ";
+
+                if (has_content) {
+                    std::cout << std::setw(40) << r.filename << "  ";
+                    // Print snippet on one line, truncated at 80 chars.
+                    std::string snip = r.content;
+                    if (snip.size() > 80) snip = snip.substr(0, 77) + "...";
+                    // Collapse newlines for display.
+                    for (char& c : snip) { if (c == '\n' || c == '\r') c = ' '; }
+                    std::cout << "\"" << snip << "\"";
+                } else {
+                    std::cout << r.filename;
+                    // Append notable metadata inline.
+                    for (const auto& [k, v] : r.metadata) {
+                        std::cout << "  " << k << "=" << v;
+                    }
+                }
+                std::cout << "\n";
+            }
+        }
+
         return EXIT_OK;
     } catch (const std::exception& e) {
         print_error(e.what(), "search");
