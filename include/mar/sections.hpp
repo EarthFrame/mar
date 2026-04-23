@@ -5,6 +5,7 @@
 #include "mar/format.hpp"
 #include "mar/name_index.hpp"
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
