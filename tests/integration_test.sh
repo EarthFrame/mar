@@ -1268,7 +1268,7 @@ test_cli_error_paths() {
     assert_output_contains "$output" "To see command usage and help, run: ./mar header -h" "header error shows help hint"
 
     # Non-existent archive should fail.
-    run_test "validate nonexistent archive" "$MAR_BIN validate /this/does/not/exist.mar" 1
+    run_test "validate nonexistent archive" "$MAR_BIN validate /this/does/not/exist.mar" 3
     assert_output_contains "$output" "To see command usage and help, run: ./mar validate -h" "validate file error shows help hint"
 }
 
@@ -1344,7 +1344,7 @@ test_redact_roundtrip() {
 
     # Verify refusal to redact compressed archives
     run_test "create compressed archive for redaction refusal" "$MAR_BIN create -f -c zstd compressed.mar input"
-    run_test "redact compressed archive should fail" "$MAR_BIN redact -I compressed.mar input/hello.txt" 1
+    run_test "redact compressed archive should fail" "$MAR_BIN redact -I compressed.mar input/hello.txt" 3
 }
 
 test_indexing_and_search() {
@@ -1393,7 +1393,7 @@ test_indexing_and_search() {
     # 7. Consistency check
     echo "modification" >> test.mar
     output=$("$MAR_BIN" search -i test.mar --index test.mar.minhash.mai --type similarity query.txt 2>&1)
-    assert_output_contains "$output" "Warning: Index hash mismatch" "Stale index warning issued"
+    assert_output_contains "$output" "mar: warning: index may be stale" "Stale index warning issued"
 }
 
 test_create_force_and_overwrite() {
@@ -1406,7 +1406,7 @@ test_create_force_and_overwrite() {
     SEED=42 bash "$GENERATE_DATA" basic input >/dev/null
 
     run_test "create initial archive" "$MAR_BIN create -f -c none a.mar input"
-    run_test "create without -f should fail" "$MAR_BIN create -c none a.mar input" 1
+    run_test "create without -f should fail" "$MAR_BIN create -c none a.mar input" 3
     run_test "create with -f overwrites" "$MAR_BIN create -f -c none a.mar input"
     run_test "validate overwritten archive" "$MAR_BIN validate a.mar"
 }
@@ -1774,13 +1774,13 @@ test_diff_invalid_paths() {
     run_test "create test archive" "$MAR_BIN create -f valid.mar source"
     
     # Test non-existent file - should return non-zero
-    run_test "diff with non-existent first archive" "$MAR_BIN diff nonexistent.mar valid.mar" 1
-    run_test "diff with non-existent second archive" "$MAR_BIN diff valid.mar nonexistent.mar" 1
+    run_test "diff with non-existent first archive" "$MAR_BIN diff nonexistent.mar valid.mar" 3
+    run_test "diff with non-existent second archive" "$MAR_BIN diff valid.mar nonexistent.mar" 3
     
     # Test invalid/corrupt archive - should return non-zero
     echo "not a valid mar file" > fake.mar
-    run_test "diff with invalid first archive" "$MAR_BIN diff fake.mar valid.mar" 1
-    run_test "diff with invalid second archive" "$MAR_BIN diff valid.mar fake.mar" 1
+    run_test "diff with invalid first archive" "$MAR_BIN diff fake.mar valid.mar" 3
+    run_test "diff with invalid second archive" "$MAR_BIN diff valid.mar fake.mar" 3
     
     # Test missing arguments - returns 2 (usage error)
     run_test "diff with missing arguments" "$MAR_BIN diff" 2

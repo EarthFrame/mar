@@ -61,14 +61,15 @@ ARCH_FLAGS ?=
 TARGET_NAME ?= mar
 
 # Include paths
-INCLUDES = -I./include -I./deps/simde
+INCLUDES = -I./include -isystem ./deps -isystem ./deps/simde -isystem ./deps/hnswlib
 
 # Source files
 SRCS = src/format.cpp src/checksum.cpp src/compression.cpp src/compression_gzip.cpp \
        src/compression_zstd.cpp src/compression_lz4.cpp src/compression_bzip2.cpp \
        src/sections.cpp src/name_index.cpp src/reader.cpp src/writer.cpp \
        src/file_descriptor_manager.cpp src/async_io.cpp src/thread_pool.cpp src/redact.cpp src/diff.cpp \
-       src/index_registry.cpp src/index_minhash.cpp
+       src/index_registry.cpp src/index_minhash.cpp src/embed_server.cpp \
+       src/index_vector.cpp src/index_genomic.cpp src/index_email.cpp src/index_timeseries.cpp
 MAIN_SRC = src/main.cpp
 TEST_SRC = tests/test_main.cpp
 
