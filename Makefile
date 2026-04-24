@@ -24,13 +24,14 @@ PROJECT_REPO = https://github.com/earthframe/mar
 PROJECT_MAINTAINER = EarthFrame Corporation
 PROJECT_LICENSE = MIT
 
-CXX = g++
+CXX ?= g++
 # -----------------------------------------------------------------------------
 # Build configuration knobs
 # -----------------------------------------------------------------------------
 #
 # Examples:
 #   make BUILD=release
+#   make CXX=clang++
 #   make BUILD=debug SANITIZERS=address,undefined
 #   make BUILD=gprof
 #   make BUILD=release NATIVE=1 LTO=1
@@ -178,6 +179,7 @@ else
 endif
 
 ifeq ($(BZIP2_FOUND),yes)
+    CXXFLAGS += -DMAR_HAVE_BZIP2=1
     LDFLAGS += -lbz2
 endif
 
@@ -288,7 +290,7 @@ endif
 
 # Phony targets
 .PHONY: all clean test install check-deps drop-cache static release \
-        deps debug \
+        deps debug system-deps \
         dist-linux-x86_64 \
 		dist-linux-x86_64-sse42 \
 		dist-linux-x86_64-avx2 \
@@ -370,6 +372,37 @@ deps:
 		git subtree add --prefix deps/libdeflate https://github.com/ebiggers/libdeflate.git master --squash; \
 	else \
 		echo "deps/libdeflate already exists, skipping."; \
+	fi
+
+# System dependency installation
+system-deps:
+	@echo "Detecting OS for system dependency installation..."
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+		if command -v brew >/dev/null 2>&1; then \
+			echo "Installing dependencies via Homebrew..."; \
+			brew install gcc zstd lz4 bzip2 libdeflate; \
+		else \
+			echo "Error: Homebrew not found. Please install Homebrew or install dependencies manually."; \
+			exit 1; \
+		fi \
+	elif [ "$(UNAME_S)" = "Linux" ]; then \
+		if [ -f /etc/debian_version ]; then \
+			echo "Detected Debian/Ubuntu. Installing via apt..."; \
+			sudo apt update && sudo apt install -y build-essential cmake libzstd-dev liblz4-dev libbz2-dev zlib1g-dev libdeflate-dev; \
+		elif [ -f /etc/fedora-release ] || [ -f /etc/redhat-release ]; then \
+			echo "Detected Fedora/RHEL. Installing via dnf..."; \
+			sudo dnf install -y gcc-c++ cmake zstd-devel lz4-devel bzip2-devel zlib-devel libdeflate-devel; \
+		elif [ -f /etc/arch-release ]; then \
+			echo "Detected Arch Linux. Installing via pacman..."; \
+			sudo pacman -S --noconfirm gcc cmake zstd lz4 bzip2 zlib libdeflate; \
+		else \
+			echo "Unsupported Linux distribution for automatic installation."; \
+			echo "Please install dependencies manually as listed in README.md"; \
+			exit 1; \
+		fi \
+	else \
+		echo "Unsupported OS: $(UNAME_S)"; \
+		exit 1; \
 	fi
 
 # Debug build
@@ -621,6 +654,7 @@ help:
 	@echo ""
 	@echo "Standard Builds:"
 	@echo "  make              - Build release binary (optimized)"
+	@echo "  make CXX=clang++  - Build using Clang instead of GCC"
 	@echo "  make debug        - Build with debug symbols"
 	@echo "  make static       - Build static binary"
 	@echo "  make release      - Build optimized static binary"
@@ -650,5 +684,6 @@ help:
 	@echo "  make NATIVE=1     - Force native optimization"
 	@echo "  make LTO=1        - Enable link-time optimization"
 	@echo "  make perf-smoke   - Run performance smoke tests"
+	@echo "  make system-deps  - Install system dependencies (macOS/Linux)"
 	@echo ""
 	@echo "See docs/BUILD_CONFIGURATIONS.md for details"

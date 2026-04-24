@@ -31,45 +31,50 @@ Package manager installation and static builds are on the way. For now, if you w
 
 ### Dependencies
 
-Required:
+To build `mar` with all features enabled, you need the following dependencies:
 
-- C++17 compatible compiler (GCC 8+, Clang 7+)
-- zlib (for gzip support)
+- **C++17 compatible compiler** (GCC 8+, Clang 7+)
+- **zlib** (for Gzip support)
+- **libzstd** (for Zstandard compression - default)
+- **liblz4** (for LZ4 compression)
+- **libbz2** (for Bzip2 compression)
+- **libdeflate** (for faster Gzip/Deflate implementation)
+- **libblake3** (for accelerated BLAKE3 checksums - vendored in `deps/`, so no system install is required)
 
+#### Installation Commands
+
+**Apple macOS (using Homebrew):**
 ```bash
-## Apple Mac OS X
-brew install g++
-
-## Debian / Ubuntu
-sudo apt-get install g++
+brew install gcc zstd lz4 bzip2 libdeflate
 ```
 
-Beyond the *very* basics, we recommend the following to enable all of mar's features:
-
-- libzstd (for ZSTD compression - default)
-- liblz4 (for LZ4 compression)
-- libbz2 (for BZIP2 compression)
-- libblake3 (for accelerated BLAKE3 - has builtin fallback)
-- libdeflate (faster DEFLATE implementation)
-
-On macOS with Homebrew:
-
-```bash
-brew install zstd lz4 bzip2 xxh3 blake3 libdeflate
-```
-
-On Ubuntu/Debian:
-
+**Debian / Ubuntu / Linux Mint:**
 ```bash
 sudo apt update
 sudo apt install build-essential cmake libzstd-dev liblz4-dev libbz2-dev zlib1g-dev libdeflate-dev
 ```
 
+**Fedora / RHEL / CentOS:**
+```bash
+sudo dnf install gcc-c++ cmake zstd-devel lz4-devel bzip2-devel zlib-devel libdeflate-devel
+```
+
+**Arch Linux:**
+```bash
+sudo pacman -S gcc cmake zstd lz4 bzip2 zlib libdeflate
+```
+
 #### Building
 
 ```bash
+# Install system dependencies (macOS/Linux)
+make system-deps
+
 # Build the tool
 make
+
+# Build using Clang instead of GCC
+make CXX=clang++
 
 # Run unit tests
 make test
