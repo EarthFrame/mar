@@ -195,7 +195,7 @@ bool AsyncIO::submit_sync(Request& req) {
 // Wait: Block for next completion
 // ============================================================================
 
-bool AsyncIO::wait(Request** req_out) {
+bool AsyncIO::wait([[maybe_unused]] Request** req_out) {
     switch (backend_) {
 #ifdef MAR_HAS_URING
         case Backend::URING: {
@@ -260,7 +260,7 @@ bool AsyncIO::wait(Request** req_out) {
 // Poll: Non-blocking check for completions
 // ============================================================================
 
-int AsyncIO::poll(Request** requests, size_t max_requests) {
+int AsyncIO::poll([[maybe_unused]] Request** requests, [[maybe_unused]] size_t max_requests) {
     switch (backend_) {
 #ifdef MAR_HAS_URING
         case Backend::URING: {
