@@ -1018,6 +1018,14 @@ void MarWriter::finish() {
     if (archive.pwriteFull(meta_stored.data(), meta_stored.size(), FIXED_HEADER_SIZE) != (ssize_t)meta_stored.size())
         throw IOError("Write failed: meta container");
 
+    // Zero out the gap between meta and blocks if any
+    if (FIXED_HEADER_SIZE + meta_stored.size() < header_size_bytes) {
+        size_t gap = header_size_bytes - (FIXED_HEADER_SIZE + meta_stored.size());
+        std::vector<u8> zeros(gap, 0);
+        if (archive.pwriteFull(zeros.data(), gap, FIXED_HEADER_SIZE + meta_stored.size()) != (ssize_t)gap)
+            throw IOError("Write failed: metadata padding");
+    }
+
     archive.close();
 }
 

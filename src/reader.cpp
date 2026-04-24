@@ -1148,10 +1148,11 @@ bool MarReader::validate_parallel(size_t num_threads, bool verbose) {
                     if (!verify_fast_checksum(payload_ptr, block_header.stored_size, block_header.fast_checksum_type, block_header.fast_checksum)) {
                         throw ChecksumError("Block checksum mismatch");
                     }
-                    return;
                 }
 
-                // No checksum: attempt a decode for compressed payloads to ensure integrity.
+                // Attempt a decode for compressed payloads to ensure integrity.
+                // This is now done even if a fast checksum is present, to ensure
+                // that the data is actually decompressible and consistent.
                 if (block_header.comp_algo != CompressionAlgo::None && block_header.raw_size > 0) {
                     (void)decompress(payload_ptr, block_header.stored_size, block_header.comp_algo, block_header.raw_size);
                 }
