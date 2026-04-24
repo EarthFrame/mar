@@ -7,10 +7,14 @@
 #include <optional>
 
 // Try to include BLAKE3 - falls back to reference implementation if not available
-#if __has_include(<blake3.h>)
+#if defined(HAVE_BLAKE3) && HAVE_BLAKE3
     #include <blake3.h>
+#elif __has_include(<blake3.h>)
+    #include <blake3.h>
+    #undef HAVE_BLAKE3
     #define HAVE_BLAKE3 1
 #else
+    #undef HAVE_BLAKE3
     #define HAVE_BLAKE3 0
 #endif
 
