@@ -3,6 +3,7 @@
 #include "mar/xxhash3.h"
 #include "mar/thread_pool.hpp"
 #include <iostream>
+#include <fstream>
 #include <vector>
 #include <set>
 #include <cmath>
@@ -13,7 +14,7 @@
 namespace mar {
 
 // ============================================================================
-// Progress Bar Utility
+// Progress bar
 // ============================================================================
 
 class ProgressBar {
@@ -23,18 +24,19 @@ public:
 
     void update(size_t current) {
         if (total_ == 0) return;
-        float progress = static_cast<float>(current) / total_;
+        float progress = static_cast<float>(current) / static_cast<float>(total_);
         int pos = static_cast<int>(width_ * progress);
 
         std::lock_guard<std::mutex> lock(mutex_);
-        std::cout << "\r" << prefix_ << " [";
+        std::cerr << "\r" << prefix_ << " [";
         for (int i = 0; i < width_; ++i) {
-            if (i < pos) std::cout << "=";
-            else if (i == pos) std::cout << ">";
-            else std::cout << " ";
+            if (i < pos)        std::cerr << "=";
+            else if (i == pos)  std::cerr << ">";
+            else                std::cerr << " ";
         }
-        std::cout << "] " << int(progress * 100.0) << "% (" << current << "/" << total_ << ")" << std::flush;
-        if (current == total_) std::cout << std::endl;
+        std::cerr << "] " << int(progress * 100.f) << "%"
+                  << " (" << current << "/" << total_ << ")" << std::flush;
+        if (current == total_) std::cerr << "\n";
     }
 
 private:
@@ -45,81 +47,99 @@ private:
 };
 
 // ============================================================================
-// MinHash Logic
+// MinHash section type codes
+// ============================================================================
+
+constexpr u32 SEC_MINHASH_PARAMS   = 1;
+constexpr u32 SEC_MINHASH_SKETCHES = 2;
+
+// ============================================================================
+// On-disk params block (32 bytes, Sec 1)
+// ============================================================================
+
+#pragma pack(push, 1)
+struct MinHashParamsBlock {   // 32 bytes total
+    u32 file_count;           // archive file count at build time
+    u32 num_hashes;
+    u8  bit_width;            // 8, 16, 32, or 64
+    u8  reserved[3];
+    u64 seed;
+    u8  padding[12];
+};
+#pragma pack(pop)
+
+static_assert(sizeof(MinHashParamsBlock) == 32, "MinHashParamsBlock must be 32 bytes");
+
+// ============================================================================
+// MinHash computation helpers
 // ============================================================================
 
 namespace {
 
-u64 hash_with_seed(const void* data, size_t len, u64 seed) {
-    mar::xxhash3::XXHash3_64 hasher(seed);
-    hasher.update(static_cast<const u8*>(data), len);
-    return hasher.finalize();
+u64 hash64(const void* data, size_t len, u64 seed) {
+    mar::xxhash3::XXHash3_64 h(seed);
+    h.update(static_cast<const u8*>(data), len);
+    return h.finalize();
 }
 
-struct MinHashParams {
-    u32 num_hashes = 128;
-    u8 bit_width = 64;
-    u64 seed = 42;
-};
+// Returns a sketch of `num_hashes` u64 values.
+std::vector<u64> compute_minhash(const std::vector<u8>& content,
+                                  u32 num_hashes, u64 seed, u8 bit_width) {
+    constexpr size_t SHINGLE = 8;
+    std::vector<u64> sketch(num_hashes, 0xFFFFFFFFFFFFFFFFULL);
 
-std::vector<u64> compute_minhash(const std::vector<u8>& content, const MinHashParams& params) {
-    std::vector<u64> sketch(params.num_hashes, 0xFFFFFFFFFFFFFFFFULL);
-    if (content.empty()) return sketch;
-
-    // Use two base hashes to generate N hashes (Double Hashing)
-    // This is a standard technique to make MinHash O(N + H) instead of O(N * H)
-    constexpr size_t shingle_size = 8;
-    
-    auto process_hash = [&](u64 h1, u64 h2) {
-        for (u32 h = 0; h < params.num_hashes; ++h) {
-            u64 val = h1 + static_cast<u64>(h) * h2;
-            if (val < sketch[h]) sketch[h] = val;
+    auto process = [&](u64 h1, u64 h2) {
+        for (u32 i = 0; i < num_hashes; ++i) {
+            u64 v = h1 + static_cast<u64>(i) * h2;
+            if (v < sketch[i]) sketch[i] = v;
         }
     };
 
-    if (content.size() < shingle_size) {
-        u64 h1 = hash_with_seed(content.data(), content.size(), params.seed);
-        u64 h2 = hash_with_seed(content.data(), content.size(), params.seed + 1);
-        process_hash(h1, h2);
+    if (content.size() < SHINGLE) {
+        process(hash64(content.data(), content.size(), seed),
+                hash64(content.data(), content.size(), seed + 1));
     } else {
-        for (size_t i = 0; i <= content.size() - shingle_size; ++i) {
-            u64 h1 = hash_with_seed(content.data() + i, shingle_size, params.seed);
-            u64 h2 = hash_with_seed(content.data() + i, shingle_size, params.seed + 1);
-            process_hash(h1, h2);
+        for (size_t i = 0; i <= content.size() - SHINGLE; ++i) {
+            process(hash64(content.data() + i, SHINGLE, seed),
+                    hash64(content.data() + i, SHINGLE, seed + 1));
         }
     }
-    
-    // Truncate to bit_width if necessary
-    if (params.bit_width < 64) {
-        u64 mask = (1ULL << params.bit_width) - 1;
-        for (auto& val : sketch) {
-            if (val != 0xFFFFFFFFFFFFFFFFULL) val &= mask;
+
+    if (bit_width < 64) {
+        u64 mask = (1ULL << bit_width) - 1;
+        for (auto& v : sketch) {
+            if (v != 0xFFFFFFFFFFFFFFFFULL) v &= mask;
         }
     }
-    
+
     return sketch;
 }
 
-double estimate_jaccard(const u8* s1, const u8* s2, u32 num_hashes, u8 bit_width) {
-    u32 intersection = 0;
-    u32 valid_hashes = 0;
+// Pack a u64 sketch into its bit-width representation.
+void pack_sketch(const std::vector<u64>& sketch, u8* dest, u32 num_hashes, u8 bit_width) {
     size_t stride = bit_width / 8;
+    for (u32 h = 0; h < num_hashes; ++h) {
+        std::memcpy(dest + h * stride, &sketch[h], stride);
+    }
+}
 
+double estimate_jaccard(const u8* a, const u8* b, u32 num_hashes, u8 bit_width) {
+    size_t stride = bit_width / 8;
+    u32 match = 0, valid = 0;
     for (u32 i = 0; i < num_hashes; ++i) {
-        bool is_padding = true;
-        bool match = true;
-        for (size_t b = 0; b < stride; ++b) {
-            if (s1[i * stride + b] != 0xFF) is_padding = false;
-            if (s1[i * stride + b] != s2[i * stride + b]) match = false;
+        const u8* pa = a + i * stride;
+        const u8* pb = b + i * stride;
+        bool pad = true, eq = true;
+        for (size_t j = 0; j < stride; ++j) {
+            if (pa[j] != 0xFF) pad = false;
+            if (pa[j] != pb[j]) eq = false;
         }
-        
-        if (!is_padding) {
-            valid_hashes++;
-            if (match) intersection++;
+        if (!pad) {
+            ++valid;
+            if (eq) ++match;
         }
     }
-    
-    return valid_hashes == 0 ? 0.0 : static_cast<double>(intersection) / num_hashes;
+    return valid == 0 ? 0.0 : static_cast<double>(match) / num_hashes;
 }
 
 } // anonymous namespace
@@ -130,27 +150,37 @@ double estimate_jaccard(const u8* s1, const u8* s2, u32 num_hashes, u8 bit_width
 
 class MinHashIndexer : public Indexer {
 public:
-    const char* type_name() const override { return "minhash"; }
+    const char*  type_name()  const override { return "minhash"; }
+    MAIIndexType index_type() const override { return MAIIndexType::MinHash; }
 
     void build(const MarReader& reader, MAIWriter& writer, const IndexOptions& opts) override {
-        MinHashParams params;
-        if (opts.params.count("hashes")) params.num_hashes = std::stoul(opts.params.at("hashes"));
-        if (opts.params.count("bit_width")) params.bit_width = std::stoi(opts.params.at("bit_width"));
-        if (opts.params.count("seed")) params.seed = std::stoull(opts.params.at("seed"));
+        u32 num_hashes = 128;
+        u8  bit_width  = 64;
+        u64 seed       = 42;
+
+        if (opts.has("hashes"))    num_hashes = static_cast<u32>(std::stoul(opts.get("hashes")));
+        if (opts.has("num_hashes")) num_hashes = static_cast<u32>(std::stoul(opts.get("num_hashes")));
+        if (opts.has("bit_width")) bit_width  = static_cast<u8>(std::stoi(opts.get("bit_width")));
+        if (opts.has("seed"))      seed        = std::stoull(opts.get("seed"));
+
+        if (bit_width != 8 && bit_width != 16 && bit_width != 32 && bit_width != 64) {
+            throw std::runtime_error("bit_width must be 8, 16, 32, or 64");
+        }
 
         size_t threads = std::thread::hardware_concurrency();
-        if (opts.params.count("threads")) threads = std::stoul(opts.params.at("threads"));
+        if (opts.has("threads")) threads = std::stoul(opts.get("threads"));
         if (threads < 1) threads = 1;
 
-        std::cout << "Building MinHash index (" << params.num_hashes << " hashes, " 
-                  << (int)params.bit_width << "-bit, " << threads << " threads)..." << std::endl;
+        const size_t file_count = reader.file_count();
+        const size_t stride     = bit_width / 8;
 
-        size_t file_count = reader.file_count();
-        size_t stride = params.bit_width / 8;
-        std::vector<u8> all_sketches(file_count * params.num_hashes * stride);
+        std::cerr << "Building MinHash index: " << num_hashes << " hashes, "
+                  << (int)bit_width << "-bit, seed=" << seed
+                  << ", " << threads << " thread(s)\n";
 
-        ProgressBar pb(file_count, "Indexing");
-        std::atomic<size_t> completed_files{0};
+        std::vector<u8> all_sketches(file_count * num_hashes * stride);
+        ProgressBar pb(file_count, "MinHash");
+        std::atomic<size_t> done{0};
 
         {
             ThreadPool pool(threads);
@@ -159,44 +189,53 @@ public:
                     auto entry_opt = reader.get_file_entry(i);
                     std::vector<u8> content;
                     if (entry_opt && entry_opt->entry_type == EntryType::RegularFile) {
-                        auto& mutable_reader = const_cast<MarReader&>(reader);
-                        content = mutable_reader.read_file(i);
+                        content = const_cast<MarReader&>(reader).read_file(i);
                     }
-                    
-                    auto sketch = compute_minhash(content, params);
-                    
-                    u8* dest = &all_sketches[i * params.num_hashes * stride];
-                    for (u32 h = 0; h < params.num_hashes; ++h) {
-                        std::memcpy(dest + h * stride, &sketch[h], stride);
-                    }
-                    
-                    size_t current = ++completed_files;
-                    if (current % 10 == 0 || current == file_count) {
-                        pb.update(current);
-                    }
+
+                    auto sketch = compute_minhash(content, num_hashes, seed, bit_width);
+                    pack_sketch(sketch, &all_sketches[i * num_hashes * stride],
+                                num_hashes, bit_width);
+
+                    size_t n = ++done;
+                    if (n % 20 == 0 || n == file_count) pb.update(n);
                 });
             }
         }
-        std::cout << std::endl;
 
-        // Write section
-        std::vector<u8> section_data;
-        section_data.resize(4 + 1 + 8 + all_sketches.size());
-        u8* p = section_data.data();
-        std::memcpy(p, &params.num_hashes, 4); p += 4;
-        *p++ = params.bit_width;
-        std::memcpy(p, &params.seed, 8); p += 8;
-        std::memcpy(p, all_sketches.data(), all_sketches.size());
+        // Section 1: MINHASH_PARAMS (32 bytes)
+        MinHashParamsBlock blk{};
+        blk.file_count = static_cast<u32>(file_count);
+        blk.num_hashes = num_hashes;
+        blk.bit_width  = bit_width;
+        blk.seed       = seed;
 
-        writer.add_section(1, section_data); // Section 1: MINHASH_SKETCHES
+        std::vector<u8> params_data(sizeof(blk));
+        std::memcpy(params_data.data(), &blk, sizeof(blk));
+        writer.add_section(SEC_MINHASH_PARAMS, params_data);
+
+        // Section 2: MINHASH_SKETCHES
+        writer.add_section(SEC_MINHASH_SKETCHES, all_sketches);
+
+        std::cerr << "MinHash index complete: " << file_count << " files\n";
     }
 
     void show_help() const override {
-        std::cout << "MinHash Index Options (--with key=value):\n"
-                  << "  hashes=N      Number of hash functions (default: 128)\n"
-                  << "  bit_width=W   Bit width of hashes (8, 16, 32, 64; default: 64)\n"
-                  << "  seed=S        Base seed for hash functions (default: 42)\n"
-                  << "  threads=N     Number of parallel threads (default: CPU cores)\n";
+        std::cout << R"(MinHash index build options (--with key=value):
+  hashes=N      Number of hash functions (default: 128)
+  bit_width=W   Hash bit width: 8, 16, 32, or 64 (default: 64)
+  seed=S        Base seed (default: 42)
+  threads=N     Build threads (default: CPU cores)
+
+Search options (--with key=value):
+  file=NAME     Find files similar to archive file NAME
+  topk=N        Maximum results (default: 10)
+  format=X      Output format: text, json, filenames (default: text)
+
+Examples:
+  mar index -i data.mar --type minhash --with bit_width=16
+  mar search -i data.mar --index data.minhash.mai query.txt
+  mar search -i data.mar --index data.minhash.mai --with file=doc.txt --with topk=5
+)";
     }
 };
 
@@ -210,78 +249,144 @@ public:
         return type == MAIIndexType::MinHash;
     }
 
-    void search(const MarReader& archive, const MAIReader& index, const std::string& query, const IndexOptions& opts) override {
-        size_t sec_size;
-        const u8* p = index.get_section_ptr(1, &sec_size);
-        if (!p) throw std::runtime_error("Index missing MinHash section");
+    std::vector<SearchResult> search(const MarReader& archive,
+                                     const MAIReader& index,
+                                     const std::string& query,
+                                     const IndexOptions& opts) override {
+        // --------------- Load params & sketches ---------------
+        u32 num_hashes = 0;
+        u8  bit_width  = 0;
+        u64 seed       = 0;
+        u32 stored_file_count = 0;
+        const u8* sketch_data = nullptr;
+        size_t    sketch_size = 0;
 
-        u32 num_hashes; std::memcpy(&num_hashes, p, 4); p += 4;
-        u8 bit_width = *p++;
-        u64 seed; std::memcpy(&seed, p, 8); p += 8;
-        const u8* all_sketches = p;
-
-        MinHashParams params{num_hashes, bit_width, seed};
-        std::vector<u64> query_sketch;
-
-        if (opts.params.count("file")) {
-            // Case 1: Find files similar to an existing file in the archive
-            auto res_opt = archive.find_file(opts.params.at("file"));
-            if (!res_opt) throw std::runtime_error("File not found in archive: " + opts.params.at("file"));
-            u32 target_id = static_cast<u32>(res_opt->first);
-            size_t stride = bit_width / 8;
-            const u8* target_ptr = all_sketches + (target_id * num_hashes * stride);
-            query_sketch.resize(num_hashes);
-            for (u32 h = 0; h < num_hashes; ++h) {
-                std::memcpy(&query_sketch[h], target_ptr + h * stride, stride);
+        if (index.has_section(SEC_MINHASH_PARAMS) &&
+            index.has_section(SEC_MINHASH_SKETCHES)) {
+            // New two-section format
+            size_t params_size = 0;
+            const u8* pp = index.get_section_ptr(SEC_MINHASH_PARAMS, &params_size);
+            if (!pp || params_size < sizeof(MinHashParamsBlock)) {
+                throw std::runtime_error("Corrupt MinHash params section");
             }
-        } else if (!query.empty()) {
-            // Case 2: Find files similar to an external file (path provided as positional query)
-            std::ifstream in(query, std::ios::binary);
-            if (!in) throw std::runtime_error("Failed to open query file: " + query);
-            std::vector<u8> content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-            query_sketch = compute_minhash(content, params);
+            MinHashParamsBlock blk;
+            std::memcpy(&blk, pp, sizeof(blk));
+            stored_file_count = blk.file_count;
+            num_hashes        = blk.num_hashes;
+            bit_width         = blk.bit_width;
+            seed              = blk.seed;
+
+            sketch_data = index.get_section_ptr(SEC_MINHASH_SKETCHES, &sketch_size);
+            if (!sketch_data) throw std::runtime_error("MinHash sketches section missing");
+        } else if (index.has_section(1)) {
+            // v0 combined format: [num_hashes(4)][bit_width(1)][seed(8)][sketches...]
+            size_t sec_size = 0;
+            const u8* p = index.get_section_ptr(1, &sec_size);
+            if (!p || sec_size < 13) throw std::runtime_error("Corrupt MinHash v0 section");
+
+            std::memcpy(&num_hashes, p, 4); p += 4;
+            bit_width = *p++;
+            std::memcpy(&seed, p, 8); p += 8;
+            sketch_data = p;
+            sketch_size = sec_size - 13;
+            stored_file_count = 0; // unknown in v0
         } else {
-            throw std::runtime_error("Similarity search requires an external file path as a query or --with file=INTERNAL_NAME");
+            throw std::runtime_error("Index missing MinHash sections");
         }
-
-        std::cout << std::left << std::setw(40) << "FILENAME" << "SIMILARITY" << std::endl;
-        std::cout << std::string(50, '-') << std::endl;
-
-        struct Result { u32 id; double score; };
-        std::vector<Result> results;
 
         size_t stride = bit_width / 8;
-        std::vector<u8> query_sketch_packed(num_hashes * stride);
-        for (u32 h = 0; h < num_hashes; ++h) {
-            std::memcpy(query_sketch_packed.data() + h * stride, &query_sketch[h], stride);
+        if (stride == 0) throw std::runtime_error("Invalid bit_width in index");
+
+        // Sanity check against live archive file count.
+        size_t live_file_count = archive.file_count();
+        if (stored_file_count != 0 && stored_file_count != live_file_count) {
+            std::cerr << "mar: warning: MinHash index has " << stored_file_count
+                      << " files, archive has " << live_file_count
+                      << " -- index may be stale\n";
+        }
+        size_t file_count = live_file_count;
+
+        // Validate sketch section size.
+        size_t expected_sketch = file_count * num_hashes * stride;
+        if (sketch_size < expected_sketch) {
+            std::cerr << "mar: warning: sketch section smaller than expected ("
+                      << sketch_size << " vs " << expected_sketch << ")\n";
+            file_count = sketch_size / (num_hashes * stride);
         }
 
-        for (u32 i = 0; i < archive.file_count(); ++i) {
-            const u8* other_sketch = all_sketches + (i * num_hashes * stride);
-            double score = estimate_jaccard(query_sketch_packed.data(), other_sketch, num_hashes, bit_width);
-            if (score > 0.0) results.push_back({i, score});
+        // --------------- Build query sketch ---------------
+        std::vector<u64> q_sketch;
+
+        if (opts.has("file")) {
+            auto found = archive.find_file(opts.get("file"));
+            if (!found) {
+                throw std::runtime_error("File not found in archive: " + opts.get("file"));
+            }
+            u32 tid = static_cast<u32>(found->first);
+            const u8* tp = sketch_data + tid * num_hashes * stride;
+            q_sketch.resize(num_hashes);
+            for (u32 h = 0; h < num_hashes; ++h) {
+                q_sketch[h] = 0;
+                std::memcpy(&q_sketch[h], tp + h * stride, stride);
+            }
+        } else if (!query.empty()) {
+            std::ifstream in(query, std::ios::binary);
+            if (!in) throw std::runtime_error("Failed to open query file: " + query);
+            std::vector<u8> content(std::istreambuf_iterator<char>(in), {});
+            q_sketch = compute_minhash(content, num_hashes, seed, bit_width);
+        } else {
+            throw std::runtime_error(
+                "MinHash search requires an external file path as query or --with file=<name>");
         }
 
-        std::sort(results.begin(), results.end(), [](const Result& a, const Result& b) {
-            return a.score > b.score;
-        });
+        // Pack query sketch.
+        std::vector<u8> q_packed(num_hashes * stride);
+        pack_sketch(q_sketch, q_packed.data(), num_hashes, bit_width);
 
-        size_t top_n = results.size();
-        if (opts.params.count("topN")) {
-            top_n = std::min(top_n, static_cast<size_t>(std::stoul(opts.params.at("topN"))));
+        // --------------- Score all files ---------------
+        std::vector<SearchResult> results;
+        results.reserve(file_count);
+
+        for (u32 i = 0; i < file_count; ++i) {
+            const u8* other = sketch_data + i * num_hashes * stride;
+            double score = estimate_jaccard(q_packed.data(), other, num_hashes, bit_width);
+            if (score <= 0.0) continue;
+
+            SearchResult r;
+            r.file_id = i;
+            r.score   = score;
+            auto name_opt = archive.get_name(i);
+            r.filename = name_opt ? *name_opt : "(unknown)";
+            r.metadata["similarity"] = [&]() {
+                std::ostringstream ss;
+                ss << std::fixed << std::setprecision(4) << score;
+                return ss.str();
+            }();
+            results.push_back(std::move(r));
         }
 
-        for (size_t i = 0; i < top_n; ++i) {
-            const auto& res = results[i];
-            auto name_opt = archive.get_name(res.id);
-            std::string name = name_opt ? *name_opt : "unknown";
-            std::cout << std::left << std::setw(40) << name
-                      << std::fixed << std::setprecision(4) << res.score << std::endl;
+        std::sort(results.begin(), results.end(),
+                  [](const SearchResult& a, const SearchResult& b) {
+                      return a.score > b.score;
+                  });
+
+        // topk (renamed from topN; keep topN as deprecated alias)
+        size_t topk = 10;
+        if (opts.has("topk"))  topk = std::stoul(opts.get("topk"));
+        if (opts.has("topN")) {
+            std::cerr << "mar: warning: --with topN is deprecated, use --with topk\n";
+            topk = std::stoul(opts.get("topN"));
         }
+        if (results.size() > topk) results.resize(topk);
+
+        return results;
     }
 };
 
-// Register modules
+// ============================================================================
+// Registration
+// ============================================================================
+
 static struct RegisterMinHash {
     RegisterMinHash() {
         IndexRegistry::instance().register_indexer(std::make_unique<MinHashIndexer>());
