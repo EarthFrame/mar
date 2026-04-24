@@ -312,9 +312,8 @@ all: all-internal
 
 # Build local BLAKE3
 $(LOCAL_BLAKE3_LIB):
-	@echo "Building local BLAKE3..."
-	@cd $(LOCAL_BLAKE3_DIR) && $(CC) -O3 -c blake3.c blake3_dispatch.c blake3_portable.c
-	@cd $(LOCAL_BLAKE3_DIR) && ar rcs libblake3.a blake3.o blake3_dispatch.o blake3_portable.o
+	@echo "Building local BLAKE3 (portable)..."
+	@cd $(LOCAL_BLAKE3_DIR) && cmake . && make -j
 
 # Build local libdeflate
 $(LOCAL_LIBDEFLATE_LIB):
