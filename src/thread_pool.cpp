@@ -15,14 +15,12 @@ ThreadPool::ThreadPool(size_t num_threads) : stop_(false) {
                 std::function<void()> task;
                 {
                     std::unique_lock<std::mutex> lock(queue_mutex_);
-                    condition_.wait(lock, [this] { 
-                        return stop_ || !tasks_.empty(); 
-                    });
-                    
+                    condition_.wait(lock, [this] { return stop_ || !tasks_.empty(); });
+
                     if (stop_ && tasks_.empty()) {
                         return;
                     }
-                    
+
                     task = std::move(tasks_.front());
                     tasks_.pop();
                 }
@@ -45,4 +43,4 @@ ThreadPool::~ThreadPool() {
     }
 }
 
-} // namespace mar
+}  // namespace mar

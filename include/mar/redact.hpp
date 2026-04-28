@@ -19,12 +19,7 @@ struct RedactOptions {
 //
 // When in_place is false, the original archive is copied to output_path first, and
 // the copy is modified.
-void redact_archive(
-    const std::string& input_path,
-    const std::string& output_path,
-    const std::vector<std::string>& files_to_redact,
-    const RedactOptions& options = {}
-);
+void redact_archive(const std::string& input_path, const std::string& output_path,
+                    const std::vector<std::string>& files_to_redact, const RedactOptions& options = {});
 
-} // namespace mar
-
+}  // namespace mar

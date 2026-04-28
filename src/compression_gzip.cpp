@@ -1,17 +1,18 @@
 #include "mar/compression_gzip.hpp"
+
 #include "mar/compression.hpp"
 #include "mar/compression_config.hpp"
 #include "mar/errors.hpp"
 
-#include <cstring>
 #include <cstdlib>
+#include <cstring>
 
 #if HAVE_ZLIB
-    #include <zlib.h>
+#include <zlib.h>
 #endif
 
 #if HAVE_LIBDEFLATE
-    #include <libdeflate.h>
+#include <libdeflate.h>
 #endif
 
 namespace mar {
@@ -23,12 +24,16 @@ struct LibdeflateCompressorHolder {
     libdeflate_compressor* p = nullptr;
     int level = -1;
     ~LibdeflateCompressorHolder() {
-        if (p) libdeflate_free_compressor(p);
+        if (p)
+            libdeflate_free_compressor(p);
     }
     libdeflate_compressor* get(int l) {
-        if (l < 0) l = 6;
-        if (p && level == l) return p;
-        if (p) libdeflate_free_compressor(p);
+        if (l < 0)
+            l = 6;
+        if (p && level == l)
+            return p;
+        if (p)
+            libdeflate_free_compressor(p);
         p = libdeflate_alloc_compressor(l);
         level = l;
         return p;
@@ -38,16 +43,18 @@ struct LibdeflateCompressorHolder {
 struct LibdeflateDecompressorHolder {
     libdeflate_decompressor* p = nullptr;
     ~LibdeflateDecompressorHolder() {
-        if (p) libdeflate_free_decompressor(p);
+        if (p)
+            libdeflate_free_decompressor(p);
     }
     libdeflate_decompressor* get() {
-        if (!p) p = libdeflate_alloc_decompressor();
+        if (!p)
+            p = libdeflate_alloc_decompressor();
         return p;
     }
 };
 #endif
 
-} // namespace
+}  // namespace
 
 #if HAVE_ZLIB
 
@@ -78,7 +85,8 @@ size_t gzip_stream_buffer_size() {
 }
 
 std::vector<u8> compress_gzip_zlib(const u8* data, size_t len, int level) {
-    if (level < 0) level = Z_DEFAULT_COMPRESSION;
+    if (level < 0)
+        level = Z_DEFAULT_COMPRESSION;
 
     z_stream strm = {};
     if (deflateInit2(&strm, level, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
@@ -108,13 +116,15 @@ std::vector<u8> compress_gzip_backend(const u8* data, size_t len, int level) {
 #if HAVE_LIBDEFLATE
     static thread_local LibdeflateCompressorHolder holder;
     libdeflate_compressor* compressor = holder.get(level);
-    if (!compressor) throw CompressionError("Failed to allocate libdeflate compressor");
-    
+    if (!compressor)
+        throw CompressionError("Failed to allocate libdeflate compressor");
+
     size_t bound = libdeflate_gzip_compress_bound(compressor, len);
     std::vector<u8> output(bound);
     size_t result = libdeflate_gzip_compress(compressor, data, len, output.data(), bound);
-    
-    if (result == 0) throw CompressionError("libdeflate compression failed");
+
+    if (result == 0)
+        throw CompressionError("libdeflate compression failed");
     output.resize(result);
     if (output.size() >= 2 && output[0] == 0x1f && output[1] == 0x8b) {
         return output;
@@ -144,14 +154,17 @@ std::vector<u8> decompress_gzip(const u8* data, size_t len, u64 raw_size) {
         if (decompressor) {
             std::vector<u8> output(raw_size);
             size_t actual_size = 0;
-            
+
             // Try gzip first
-            enum libdeflate_result res = libdeflate_gzip_decompress(decompressor, data, len, output.data(), raw_size, &actual_size);
-            if (res == LIBDEFLATE_SUCCESS) return output;
-            
+            enum libdeflate_result res =
+                libdeflate_gzip_decompress(decompressor, data, len, output.data(), raw_size, &actual_size);
+            if (res == LIBDEFLATE_SUCCESS)
+                return output;
+
             // Try zlib if gzip fails (some older archives might use zlib format for gzip algo)
             res = libdeflate_zlib_decompress(decompressor, data, len, output.data(), raw_size, &actual_size);
-            if (res == LIBDEFLATE_SUCCESS) return output;
+            if (res == LIBDEFLATE_SUCCESS)
+                return output;
         }
     }
 #endif
@@ -197,7 +210,8 @@ struct GzipStreamCompressor::Impl {};
 
 GzipStreamCompressor::GzipStreamCompressor(int level) : impl_(new Impl()) {
 #if HAVE_ZLIB
-    if (level < 0) level = Z_DEFAULT_COMPRESSION;
+    if (level < 0)
+        level = Z_DEFAULT_COMPRESSION;
     // Use raw deflate and emit our own gzip header/trailer for deterministic output.
     if (deflateInit2(&impl_->stream, level, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
         delete impl_;
@@ -234,7 +248,8 @@ GzipStreamCompressor::~GzipStreamCompressor() {
 
 size_t GzipStreamCompressor::write(const u8* data, size_t len, CompressionSink& sink) {
 #if HAVE_ZLIB
-    if (len == 0) return 0;
+    if (len == 0)
+        return 0;
     size_t total_out = 0;
     if (!impl_->header_written) {
         const u8 header[10] = {0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03};
@@ -334,6 +349,6 @@ std::vector<u8> decompress_gzip(const u8*, size_t, u64) {
     throw UnsupportedError("Gzip decompression not available");
 }
 
-#endif // !HAVE_ZLIB
+#endif  // !HAVE_ZLIB
 
-} // namespace mar
+}  // namespace mar

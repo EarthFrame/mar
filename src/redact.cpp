@@ -1,10 +1,10 @@
 #include "mar/redact.hpp"
 
-#include "mar/reader.hpp"
-#include "mar/sections.hpp"
+#include "mar/constants.hpp"
 #include "mar/errors.hpp"
 #include "mar/file_handle.hpp"
-#include "mar/constants.hpp"
+#include "mar/reader.hpp"
+#include "mar/sections.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -20,9 +20,12 @@ namespace {
 
 u32 name_table_flags(NameTableFormat fmt) {
     switch (fmt) {
-        case NameTableFormat::FrontCoded: return name_table_format::FRONT_CODED;
-        case NameTableFormat::RawArray: return name_table_format::RAW_ARRAY;
-        case NameTableFormat::CompactTrie: return name_table_format::COMPACT_TRIE;
+        case NameTableFormat::FrontCoded:
+            return name_table_format::FRONT_CODED;
+        case NameTableFormat::RawArray:
+            return name_table_format::RAW_ARRAY;
+        case NameTableFormat::CompactTrie:
+            return name_table_format::COMPACT_TRIE;
     }
     return name_table_format::FRONT_CODED;
 }
@@ -50,40 +53,44 @@ void pwrite_zeros(FileHandle& fh, u64 offset, u64 len) {
 }
 
 std::vector<u8> build_meta_container_uncompressed(
-    const std::vector<std::string>& names,
-    NameTableFormat name_fmt,
-    const std::vector<FileEntry>& files,
+    const std::vector<std::string>& names, NameTableFormat name_fmt, const std::vector<FileEntry>& files,
     const std::optional<std::vector<PosixEntry>>& posix,
     const std::optional<std::vector<std::optional<std::string>>>& symlinks,
     const std::optional<std::pair<HashAlgo, std::vector<FileHashEntry>>>& hashes,
-    const std::optional<std::vector<std::vector<Span>>>& all_spans,
-    const std::vector<BlockDesc>& block_table
-) {
-    struct Section { u32 type; u32 flags; std::vector<u8> data; };
+    const std::optional<std::vector<std::vector<Span>>>& all_spans, const std::vector<BlockDesc>& block_table) {
+    struct Section {
+        u32 type;
+        u32 flags;
+        std::vector<u8> data;
+    };
     std::vector<Section> sections;
 
-    sections.push_back({ section_type::NAME_TABLE, name_table_flags(name_fmt), write_name_table(names, name_fmt) });
-    sections.push_back({ section_type::FILE_TABLE, 0, write_file_table(files) });
+    sections.push_back({section_type::NAME_TABLE, name_table_flags(name_fmt), write_name_table(names, name_fmt)});
+    sections.push_back({section_type::FILE_TABLE, 0, write_file_table(files)});
 
     if (all_spans) {
-        sections.push_back({ section_type::FILE_SPANS, 0, write_file_spans(*all_spans) });
+        sections.push_back({section_type::FILE_SPANS, 0, write_file_spans(*all_spans)});
     }
-    sections.push_back({ section_type::BLOCK_TABLE, 0, write_block_table(block_table) });
+    sections.push_back({section_type::BLOCK_TABLE, 0, write_block_table(block_table)});
 
     if (posix) {
-        sections.push_back({ section_type::POSIX_META, 0, write_posix_meta(*posix) });
+        sections.push_back({section_type::POSIX_META, 0, write_posix_meta(*posix)});
     }
 
     if (symlinks) {
         bool any = false;
         for (const auto& s : *symlinks) {
-            if (s.has_value()) { any = true; break; }
+            if (s.has_value()) {
+                any = true;
+                break;
+            }
         }
-        if (any) sections.push_back({ section_type::SYMLINK_TARGETS, 0, write_symlink_targets(*symlinks) });
+        if (any)
+            sections.push_back({section_type::SYMLINK_TARGETS, 0, write_symlink_targets(*symlinks)});
     }
 
     if (hashes) {
-        sections.push_back({ section_type::FILE_HASHES, 0, write_file_hashes(hashes->first, hashes->second) });
+        sections.push_back({section_type::FILE_HASHES, 0, write_file_hashes(hashes->first, hashes->second)});
     }
 
     // Meta container header
@@ -99,7 +106,7 @@ std::vector<u8> build_meta_container_uncompressed(
     };
 
     push_u32(section_count);
-    push_u32(0); // reserved0
+    push_u32(0);  // reserved0
 
     // Section directory (payload offsets are relative to meta start)
     u64 payload_offset = META_CONTAINER_HEADER_SIZE + section_count * SECTION_ENTRY_SIZE;
@@ -124,14 +131,10 @@ std::vector<u8> build_meta_container_uncompressed(
     return meta;
 }
 
-} // namespace
+}  // namespace
 
-void redact_archive(
-    const std::string& input_path,
-    const std::string& output_path,
-    const std::vector<std::string>& files_to_redact,
-    const RedactOptions& options
-) {
+void redact_archive(const std::string& input_path, const std::string& output_path,
+                    const std::vector<std::string>& files_to_redact, const RedactOptions& options) {
     if (files_to_redact.empty()) {
         throw InvalidArchiveError("No files specified for redaction");
     }
@@ -153,7 +156,7 @@ void redact_archive(
     // Redaction currently works by zeroing out block payloads on disk, which is
     // only safe for uncompressed data. Compressed blocks would become invalid
     // and fail checksum/decompression.
-    // Note: Compressed metadata is allowed because redaction replaces the 
+    // Note: Compressed metadata is allowed because redaction replaces the
     // metadata container with a new uncompressed one.
     FileHandle fh_check;
     if (!fh_check.openRead(target_path.c_str(), OpenHints::sequential())) {
@@ -162,9 +165,10 @@ void redact_archive(
     for (size_t i = 0; i < reader.block_count(); ++i) {
         auto bh = read_block_header(fh_check, reader.block_offsets()[i]);
         if (bh.comp_algo != CompressionAlgo::None) {
-            throw InvalidArchiveError("Redaction is not supported for compressed archives. "
-                                     "Block " + std::to_string(i) + " uses " + 
-                                     compression_algo_name(bh.comp_algo) + ".");
+            throw InvalidArchiveError(
+                "Redaction is not supported for compressed archives. "
+                "Block " +
+                std::to_string(i) + " uses " + compression_algo_name(bh.comp_algo) + ".");
         }
     }
     fh_check.close();
@@ -191,7 +195,8 @@ void redact_archive(
     std::unordered_set<size_t> affected_files = requested;
     for (size_t i = 0; i < reader.file_count(); ++i) {
         auto e = reader.get_file_entry(i);
-        if (!e || e->entry_type != EntryType::RegularFile) continue;
+        if (!e || e->entry_type != EntryType::RegularFile)
+            continue;
         for (u32 b : reader.get_block_ids_for_file(i)) {
             if (blocks_to_zero.count(b) != 0) {
                 affected_files.insert(i);
@@ -219,7 +224,8 @@ void redact_archive(
     // Rebuild metadata (uncompressed) with REDACTED flags set.
     std::vector<FileEntry> new_entries = reader.get_file_entries();
     for (size_t i : affected_files) {
-        if (i >= new_entries.size()) continue;
+        if (i >= new_entries.size())
+            continue;
         new_entries[i].entry_flags |= entry_flags::REDACTED;
         new_entries[i].entry_flags &= ~entry_flags::HAS_STRONG_HASH;
     }
@@ -259,10 +265,12 @@ void redact_archive(
         bool any = false;
         for (size_t i = 0; i < reader.file_count(); ++i) {
             auto s = reader.get_symlink_target(i);
-            if (s) any = true;
+            if (s)
+                any = true;
             v.push_back(s);
         }
-        if (any) symlinks = std::move(v);
+        if (any)
+            symlinks = std::move(v);
     }
 
     std::optional<std::vector<std::vector<Span>>> all_spans;
@@ -284,16 +292,9 @@ void redact_archive(
         block_table.push_back(BlockDesc{off, bh.raw_size, bh.stored_size});
     }
 
-    const std::vector<u8> meta = build_meta_container_uncompressed(
-        reader.get_names(),
-        reader.name_table_format(),
-        new_entries,
-        posix,
-        symlinks,
-        hashes,
-        all_spans,
-        block_table
-    );
+    const std::vector<u8> meta =
+        build_meta_container_uncompressed(reader.get_names(), reader.name_table_format(), new_entries, posix, symlinks,
+                                          hashes, all_spans, block_table);
 
     const u64 meta_offset = static_cast<u64>(fs::file_size(target_path));
     if (fh.pwriteFull(meta.data(), meta.size(), static_cast<off_t>(meta_offset)) != (ssize_t)meta.size()) {
@@ -317,5 +318,4 @@ void redact_archive(
     fh.close();
 }
 
-} // namespace mar
-
+}  // namespace mar

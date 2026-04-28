@@ -4,10 +4,11 @@
  */
 
 #include "mar/async_io.hpp"
-#include <fcntl.h>
-#include <unistd.h>
+
 #include <cerrno>
 #include <cstring>
+#include <fcntl.h>
+#include <unistd.h>
 
 #ifdef MAR_HAS_URING
 #include <sys/errno.h>
@@ -21,7 +22,7 @@ namespace mar {
 
 AsyncIO::AsyncIO(size_t entries) : backend_(Backend::SYNC) {
     // Try backends in order of preference
-    
+
 #ifdef MAR_HAS_URING
     if (init_uring(entries)) {
         backend_ = Backend::URING;
@@ -74,7 +75,9 @@ bool AsyncIO::init_uring(size_t entries) {
     return false;
 }
 #else
-bool AsyncIO::init_uring(size_t) { return false; }
+bool AsyncIO::init_uring(size_t) {
+    return false;
+}
 #endif
 
 #ifdef MAR_HAS_KQUEUE
@@ -83,13 +86,15 @@ bool AsyncIO::init_kqueue(size_t entries) {
     if (kq_ < 0) {
         return false;
     }
-    
+
     // Pre-allocate event buffer for poll operations
     events_.resize(entries);
     return true;
 }
 #else
-bool AsyncIO::init_kqueue(size_t) { return false; }
+bool AsyncIO::init_kqueue(size_t) {
+    return false;
+}
 #endif
 
 // ============================================================================
@@ -105,7 +110,7 @@ bool AsyncIO::submit(Request& req) {
                 backend_ = Backend::SYNC;  // Degrade to sync permanently
                 return submit_sync(req);
             }
-            
+
             struct io_uring_sqe* sqe = io_uring_get_sqe(&ring_);
             if (!sqe) {
                 // SQE exhausted - fall back to sync for this operation
@@ -118,7 +123,7 @@ bool AsyncIO::submit(Request& req) {
             } else {
                 io_uring_prep_write(sqe, req.fd, req.buf, req.len, req.offset);
             }
-            
+
             io_uring_sqe_set_data(sqe, &req);
             int submitted = io_uring_submit(&ring_);
             if (submitted < 0) {
@@ -136,35 +141,34 @@ bool AsyncIO::submit(Request& req) {
                 backend_ = Backend::SYNC;  // Degrade to sync permanently
                 return submit_sync(req);
             }
-            
+
             // Perform I/O immediately (kqueue is for notification, not I/O itself)
             if (req.op == Op::READ) {
                 req.result = ::pread(req.fd, req.buf, req.len, req.offset);
             } else {
                 req.result = ::pwrite(req.fd, req.buf, req.len, req.offset);
             }
-            
+
             // Set errno-style error if I/O failed
             if (req.result < 0) {
                 req.result = -errno;
             }
-            
+
             // Set up kevent for completion notification
             // Use request address as unique identifier
             req.kqueue_ident = reinterpret_cast<uintptr_t>(&req);
-            
+
             struct kevent kev;
             // Use EVFILT_USER for custom event notification
             // We've already done the I/O, just need to signal completion
-            EV_SET(&kev, req.kqueue_ident, EVFILT_USER, EV_ADD | EV_ONESHOT | EV_ENABLE, 
-                   NOTE_TRIGGER, 0, &req);
-            
+            EV_SET(&kev, req.kqueue_ident, EVFILT_USER, EV_ADD | EV_ONESHOT | EV_ENABLE, NOTE_TRIGGER, 0, &req);
+
             if (kevent(kq_, &kev, 1, nullptr, 0, nullptr) < 0) {
                 // kevent failed - I/O is already done, so just return success
                 // (we lose async notification but operation completed)
                 return true;
             }
-            
+
             return true;
         }
 #endif
@@ -182,12 +186,12 @@ bool AsyncIO::submit_sync(Request& req) {
     } else {
         req.result = ::pwrite(req.fd, req.buf, req.len, req.offset);
     }
-    
+
     // Set errno-style error if failed
     if (req.result < 0) {
         req.result = -errno;
     }
-    
+
     return true;
 }
 
@@ -204,7 +208,7 @@ bool AsyncIO::wait([[maybe_unused]] Request** req_out) {
                 backend_ = Backend::SYNC;
                 return false;
             }
-            
+
             struct io_uring_cqe* cqe;
             int ret = io_uring_wait_cqe(&ring_, &cqe);
             if (ret != 0) {
@@ -214,7 +218,7 @@ bool AsyncIO::wait([[maybe_unused]] Request** req_out) {
                 }
                 return false;
             }
-            
+
             *req_out = static_cast<Request*>(io_uring_cqe_get_data(cqe));
             (*req_out)->result = cqe->res;
             io_uring_cqe_seen(&ring_, cqe);
@@ -229,7 +233,7 @@ bool AsyncIO::wait([[maybe_unused]] Request** req_out) {
                 backend_ = Backend::SYNC;
                 return false;
             }
-            
+
             struct kevent kev;
             int n = kevent(kq_, nullptr, 0, &kev, 1, nullptr);
             if (n < 0) {
@@ -243,7 +247,7 @@ bool AsyncIO::wait([[maybe_unused]] Request** req_out) {
                 // Timeout or interrupted (shouldn't happen with infinite timeout)
                 return false;
             }
-            
+
             *req_out = static_cast<Request*>(kev.udata);
             return true;
         }
@@ -268,10 +272,10 @@ int AsyncIO::poll([[maybe_unused]] Request** requests, [[maybe_unused]] size_t m
                 backend_ = Backend::SYNC;
                 return 0;
             }
-            
+
             int count = 0;
             struct io_uring_cqe* cqe;
-            
+
             while (count < static_cast<int>(max_requests)) {
                 int ret = io_uring_peek_cqe(&ring_, &cqe);
                 if (ret != 0) {
@@ -284,13 +288,13 @@ int AsyncIO::poll([[maybe_unused]] Request** requests, [[maybe_unused]] size_t m
                     }
                     break;
                 }
-                
+
                 requests[count] = static_cast<Request*>(io_uring_cqe_get_data(cqe));
                 requests[count]->result = cqe->res;
                 io_uring_cqe_seen(&ring_, cqe);
                 count++;
             }
-            
+
             return count;
         }
 #endif
@@ -301,11 +305,10 @@ int AsyncIO::poll([[maybe_unused]] Request** requests, [[maybe_unused]] size_t m
                 backend_ = Backend::SYNC;
                 return 0;
             }
-            
+
             struct timespec timeout = {0, 0};  // Non-blocking
-            int n = kevent(kq_, nullptr, 0, events_.data(), 
-                          std::min(max_requests, events_.size()), &timeout);
-            
+            int n = kevent(kq_, nullptr, 0, events_.data(), std::min(max_requests, events_.size()), &timeout);
+
             if (n < 0) {
                 // Error occurred
                 if (errno == EBADF || errno == EINVAL) {
@@ -313,13 +316,14 @@ int AsyncIO::poll([[maybe_unused]] Request** requests, [[maybe_unused]] size_t m
                 }
                 return 0;
             }
-            
-            if (n == 0) return 0;  // No events (normal for non-blocking)
-            
+
+            if (n == 0)
+                return 0;  // No events (normal for non-blocking)
+
             for (int i = 0; i < n; ++i) {
                 requests[i] = static_cast<Request*>(events_[i].udata);
             }
-            
+
             return n;
         }
 #endif
@@ -330,4 +334,4 @@ int AsyncIO::poll([[maybe_unused]] Request** requests, [[maybe_unused]] size_t m
     }
 }
 
-} // namespace mar
+}  // namespace mar

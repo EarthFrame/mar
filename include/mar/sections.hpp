@@ -1,9 +1,9 @@
 #pragma once
 
-#include "mar/types.hpp"
 #include "mar/enums.hpp"
 #include "mar/format.hpp"
 #include "mar/name_index.hpp"
+#include "mar/types.hpp"
 
 #include <array>
 #include <memory>
@@ -120,4 +120,4 @@ std::pair<HashAlgo, std::vector<FileHashEntry>> read_file_hashes(const u8* data,
 // Write file hashes to FILE_HASHES section
 std::vector<u8> write_file_hashes(HashAlgo algo, const std::vector<FileHashEntry>& hashes);
 
-} // namespace mar
+}  // namespace mar

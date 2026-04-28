@@ -1,18 +1,19 @@
 #include "mar/name_index.hpp"
-#include "mar/errors.hpp"
+
 #include "mar/constants.hpp"
+#include "mar/errors.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <functional>
 #include <unordered_map>
-#include <cstring>
 
 namespace mar {
 
 namespace {
 
 // Little-endian helpers
-template<typename T>
+template <typename T>
 T read_le(const u8*& p) {
     T val = 0;
     for (size_t i = 0; i < sizeof(T); ++i) {
@@ -21,7 +22,7 @@ T read_le(const u8*& p) {
     return val;
 }
 
-template<typename T>
+template <typename T>
 void write_le(std::vector<u8>& out, T value) {
     for (size_t i = 0; i < sizeof(T); ++i) {
         out.push_back(static_cast<u8>(value >> (i * 8)));
@@ -32,12 +33,13 @@ void write_le(std::vector<u8>& out, T value) {
 size_t common_prefix_len(const std::string& a, const std::string& b) {
     size_t len = std::min(a.size(), b.size());
     for (size_t i = 0; i < len; ++i) {
-        if (a[i] != b[i]) return i;
+        if (a[i] != b[i])
+            return i;
     }
     return len;
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
 // ============================================================================
 // NameIndex factory methods
@@ -87,21 +89,21 @@ NameTableFormat NameIndex::recommend_format(const std::vector<std::string>& name
     bool sorted = std::is_sorted(names.begin(), names.end());
 
     // Estimate compression ratios
-    size_t raw_size = 4; // name_count
+    size_t raw_size = 4;  // name_count
     for (const auto& name : names) {
         raw_size += 4 + name.size();
     }
 
     // Estimate front-coded size
-    size_t front_coded_size = 8; // name_count + reset_interval
+    size_t front_coded_size = 8;  // name_count + reset_interval
     if (sorted) {
         std::string prev;
         for (size_t i = 0; i < names.size(); ++i) {
             if (i % DEFAULT_RESET_INTERVAL == 0) {
-                front_coded_size += 4 + names[i].size(); // full name
+                front_coded_size += 4 + names[i].size();  // full name
             } else {
                 size_t prefix = common_prefix_len(prev, names[i]);
-                front_coded_size += 4 + (names[i].size() - prefix); // prefix_len + suffix
+                front_coded_size += 4 + (names[i].size() - prefix);  // prefix_len + suffix
             }
             prev = names[i];
         }
@@ -122,24 +124,27 @@ NameTableFormat NameIndex::recommend_format(const std::vector<std::string>& name
             // Back up to the last '/' in the common prefix to find the last shared node
             size_t shared_until = 0;
             for (size_t i = 0; i < common; ++i) {
-                if (curr[i] == '/') shared_until = i + 1;
+                if (curr[i] == '/')
+                    shared_until = i + 1;
             }
 
             // Every '/' after shared_until in curr marks a new segment
             for (size_t i = shared_until; i < curr.size(); ++i) {
-                if (curr[i] == '/') unique_segments++;
+                if (curr[i] == '/')
+                    unique_segments++;
             }
-            if (!curr.empty()) unique_segments++;
-            
+            if (!curr.empty())
+                unique_segments++;
+
             prev = curr;
         }
     } else {
         // Fallback for unsorted
-        unique_segments = names.size() * 2; 
+        unique_segments = names.size() * 2;
     }
 
     // Rough trie size estimate
-    size_t trie_size = unique_segments * 8; // overhead per unique segment
+    size_t trie_size = unique_segments * 8;  // overhead per unique segment
 
     // Choose best format with a performance bias toward simpler layouts.
     if (sorted && front_coded_size <= raw_size * 0.9) {
@@ -155,8 +160,7 @@ NameTableFormat NameIndex::recommend_format(const std::vector<std::string>& name
 // RawArrayIndex
 // ============================================================================
 
-RawArrayIndex::RawArrayIndex(std::vector<std::string> names)
-    : names_(std::move(names)) {}
+RawArrayIndex::RawArrayIndex(std::vector<std::string> names) : names_(std::move(names)) {}
 
 std::unique_ptr<RawArrayIndex> RawArrayIndex::deserialize(const u8* data, size_t len) {
     if (len < 4) {
@@ -185,13 +189,15 @@ std::unique_ptr<RawArrayIndex> RawArrayIndex::deserialize(const u8* data, size_t
 }
 
 std::optional<std::string> RawArrayIndex::get(u32 index) const {
-    if (index >= names_.size()) return std::nullopt;
+    if (index >= names_.size())
+        return std::nullopt;
     return names_[index];
 }
 
 std::optional<u32> RawArrayIndex::find(const std::string& name) const {
     for (u32 i = 0; i < names_.size(); ++i) {
-        if (names_[i] == name) return i;
+        if (names_[i] == name)
+            return i;
     }
     return std::nullopt;
 }
@@ -254,7 +260,8 @@ std::unique_ptr<FrontCodedIndex> FrontCodedIndex::deserialize(const u8* data, si
 }
 
 std::optional<std::string> FrontCodedIndex::get(u32 index) const {
-    if (index >= names_.size()) return std::nullopt;
+    if (index >= names_.size())
+        return std::nullopt;
     return names_[index];
 }
 
@@ -310,9 +317,11 @@ u32 CompactTrieIndex::read_varint(const u8*& p, const u8* end) {
     while (p < end) {
         u8 byte = *p++;
         result |= static_cast<u32>(byte & 0x7F) << shift;
-        if ((byte & 0x80) == 0) break;
+        if ((byte & 0x80) == 0)
+            break;
         shift += 7;
-        if (shift > 28) throw InvalidArchiveError("Varint too large");
+        if (shift > 28)
+            throw InvalidArchiveError("Varint too large");
     }
     return result;
 }
@@ -337,7 +346,7 @@ void CompactTrieIndex::build_trie(const std::vector<std::string>& names) {
                 if (i > start) {
                     std::string_view segment = path.substr(start, i - start);
                     any_segments = true;
-                    
+
                     bool found = false;
                     // Since names are sorted, the segment we're looking for is most likely
                     // the one we just added or are currently working on.
@@ -409,18 +418,18 @@ std::unique_ptr<CompactTrieIndex> CompactTrieIndex::deserialize(const u8* data, 
 
     // Re-collect as ordered vector
     std::vector<std::string> all;
-    std::function<void(const TrieNode*, const std::string&)> collect = 
-        [&](const TrieNode* node, const std::string& prefix) {
-            if (node->file_index) {
-                if (*node->file_index < index->index_to_name_.size()) {
-                    index->index_to_name_[*node->file_index] = prefix;
-                }
+    std::function<void(const TrieNode*, const std::string&)> collect = [&](const TrieNode* node,
+                                                                           const std::string& prefix) {
+        if (node->file_index) {
+            if (*node->file_index < index->index_to_name_.size()) {
+                index->index_to_name_[*node->file_index] = prefix;
             }
-            for (const auto& [label, child] : node->children) {
-                std::string child_path = prefix.empty() ? label : prefix + "/" + label;
-                collect(child.get(), child_path);
-            }
-        };
+        }
+        for (const auto& [label, child] : node->children) {
+            std::string child_path = prefix.empty() ? label : prefix + "/" + label;
+            collect(child.get(), child_path);
+        }
+    };
     collect(index->root_.get(), "");
 
     return index;
@@ -449,19 +458,21 @@ std::unique_ptr<CompactTrieIndex::TrieNode> CompactTrieIndex::deserialize_node(c
             // Read label length
             u32 label_len = 0;
             switch (label_encoding) {
-                case 0: // Packed in header (not used for children)
+                case 0:  // Packed in header (not used for children)
                     label_len = read_varint(p, end);
                     break;
-                case 1: // u8
-                    if (p >= end) throw InvalidArchiveError("Label length truncated");
+                case 1:  // u8
+                    if (p >= end)
+                        throw InvalidArchiveError("Label length truncated");
                     label_len = *p++;
                     break;
-                case 2: // u16
-                    if (p + 2 > end) throw InvalidArchiveError("Label length truncated");
+                case 2:  // u16
+                    if (p + 2 > end)
+                        throw InvalidArchiveError("Label length truncated");
                     label_len = p[0] | (p[1] << 8);
                     p += 2;
                     break;
-                case 3: // varint
+                case 3:  // varint
                     label_len = read_varint(p, end);
                     break;
             }
@@ -494,12 +505,14 @@ void CompactTrieIndex::collect_names(const TrieNode* node, const std::string& pr
 }
 
 std::optional<std::string> CompactTrieIndex::get(u32 index) const {
-    if (index >= index_to_name_.size()) return std::nullopt;
+    if (index >= index_to_name_.size())
+        return std::nullopt;
     return index_to_name_[index];
 }
 
 std::optional<u32> CompactTrieIndex::find(const std::string& name) const {
-    if (!root_) return std::nullopt;
+    if (!root_)
+        return std::nullopt;
 
     const TrieNode* node = root_.get();
 
@@ -529,7 +542,8 @@ std::optional<u32> CompactTrieIndex::find(const std::string& name) const {
                 break;
             }
         }
-        if (!found) return std::nullopt;
+        if (!found)
+            return std::nullopt;
     }
 
     return node->file_index;
@@ -541,8 +555,10 @@ std::vector<std::string> CompactTrieIndex::all_names() const {
 
 void CompactTrieIndex::serialize_node(const TrieNode* node, std::vector<u8>& out) const {
     u8 header = 0;
-    if (node->file_index) header |= 0x01;
-    if (!node->children.empty()) header |= 0x02;
+    if (node->file_index)
+        header |= 0x01;
+    if (!node->children.empty())
+        header |= 0x02;
 
     // Determine label encoding based on max label length
     u32 max_label_len = 0;
@@ -551,11 +567,11 @@ void CompactTrieIndex::serialize_node(const TrieNode* node, std::vector<u8>& out
     }
 
     // Per spec Section 7.3: 00/11=varint, 01=u8, 10=u16
-    u8 label_encoding = 0; // Default to varint
+    u8 label_encoding = 0;  // Default to varint
     if (max_label_len <= 0xFF && max_label_len > 0) {
-        label_encoding = 1; // u8 - more compact for short labels
+        label_encoding = 1;  // u8 - more compact for short labels
     } else if (max_label_len <= 0xFFFF && max_label_len > 0xFF) {
-        label_encoding = 2; // u16
+        label_encoding = 2;  // u16
     }
     // else use 0 (varint) for very long labels or empty
     header |= (label_encoding << 2);
@@ -621,4 +637,4 @@ std::vector<u8> CompactTrieIndex::serialize() const {
     return out;
 }
 
-} // namespace mar
+}  // namespace mar

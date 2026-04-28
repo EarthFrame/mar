@@ -1,7 +1,8 @@
 #include "mar/file_descriptor_manager.hpp"
+
+#include <deque>
 #include <fcntl.h>
 #include <unistd.h>
-#include <deque>
 
 #ifdef POSIX_FADV_SEQUENTIAL
 #include <fcntl.h>
@@ -21,7 +22,7 @@ ThreadLocalFdCache& get_fd_cache() {
     static thread_local ThreadLocalFdCache cache;
     return cache;
 }
-} // namespace
+}  // namespace
 #endif
 
 FileDescriptorManager::~FileDescriptorManager() {
@@ -103,4 +104,4 @@ void FileDescriptorManager::close_all() {
 #endif
 }
 
-} // namespace mar
+}  // namespace mar

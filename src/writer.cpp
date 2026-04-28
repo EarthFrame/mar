@@ -1,30 +1,31 @@
 #include "mar/writer.hpp"
-#include "mar/compression.hpp"
+
 #include "mar/checksum.hpp"
+#include "mar/compression.hpp"
 #include "mar/errors.hpp"
-#include "mar/thread_pool.hpp"
-#include "mar/file_handle.hpp"
 #include "mar/file_descriptor_manager.hpp"
+#include "mar/file_handle.hpp"
+#include "mar/thread_pool.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <dirent.h>
+#include <fcntl.h>
 #include <filesystem>
-#include <future>
+#include <fstream>
 #include <functional>
+#include <future>
 #include <iostream>
 #include <mutex>
 #include <sstream>
-#include <thread>
-#include <fstream>
-#include <atomic>
-#include <unordered_map>
 #include <sys/stat.h>
-#include <dirent.h>
-#include <fcntl.h>
+#include <thread>
 #include <unistd.h>
-#include <cerrno>
+#include <unordered_map>
 
 namespace fs = std::filesystem;
 
@@ -34,14 +35,22 @@ namespace {
 
 u32 mode_for_type(fs::file_type type) {
     switch (type) {
-        case fs::file_type::regular: return 0100000;
-        case fs::file_type::directory: return 0040000;
-        case fs::file_type::symlink: return 0120000;
-        case fs::file_type::block: return 0060000;
-        case fs::file_type::character: return 0020000;
-        case fs::file_type::fifo: return 0010000;
-        case fs::file_type::socket: return 0140000;
-        default: return 0;
+        case fs::file_type::regular:
+            return 0100000;
+        case fs::file_type::directory:
+            return 0040000;
+        case fs::file_type::symlink:
+            return 0120000;
+        case fs::file_type::block:
+            return 0060000;
+        case fs::file_type::character:
+            return 0020000;
+        case fs::file_type::fifo:
+            return 0010000;
+        case fs::file_type::socket:
+            return 0140000;
+        default:
+            return 0;
     }
 }
 
@@ -67,13 +76,20 @@ bool stat_path_fast(const std::string& path, fs::file_status& status, u64& size,
     }
 
     fs::file_type type = fs::file_type::unknown;
-    if (S_ISREG(st.st_mode)) type = fs::file_type::regular;
-    else if (S_ISDIR(st.st_mode)) type = fs::file_type::directory;
-    else if (S_ISLNK(st.st_mode)) type = fs::file_type::symlink;
-    else if (S_ISCHR(st.st_mode)) type = fs::file_type::character;
-    else if (S_ISBLK(st.st_mode)) type = fs::file_type::block;
-    else if (S_ISFIFO(st.st_mode)) type = fs::file_type::fifo;
-    else if (S_ISSOCK(st.st_mode)) type = fs::file_type::socket;
+    if (S_ISREG(st.st_mode))
+        type = fs::file_type::regular;
+    else if (S_ISDIR(st.st_mode))
+        type = fs::file_type::directory;
+    else if (S_ISLNK(st.st_mode))
+        type = fs::file_type::symlink;
+    else if (S_ISCHR(st.st_mode))
+        type = fs::file_type::character;
+    else if (S_ISBLK(st.st_mode))
+        type = fs::file_type::block;
+    else if (S_ISFIFO(st.st_mode))
+        type = fs::file_type::fifo;
+    else if (S_ISSOCK(st.st_mode))
+        type = fs::file_type::socket;
 
     status = fs::file_status(type, static_cast<fs::perms>(st.st_mode));
     size = (type == fs::file_type::regular) ? static_cast<u64>(st.st_size) : 0;
@@ -93,8 +109,10 @@ bool stat_path_fast(const std::string& path, fs::file_status& status, u64& size,
 
 /** Join two paths without normalizing separators. */
 std::string join_path(const std::string& base, const std::string& rel) {
-    if (base.empty()) return rel;
-    if (!base.empty() && base.back() == '/') return base + rel;
+    if (base.empty())
+        return rel;
+    if (!base.empty() && base.back() == '/')
+        return base + rel;
     return base + "/" + rel;
 }
 
@@ -108,13 +126,20 @@ std::string join_path(const std::string& base, const std::string& rel) {
  */
 void status_from_stat(const struct stat& st, fs::file_status& status, u64& size, i64& mtime, bool want_mtime) {
     fs::file_type type = fs::file_type::unknown;
-    if (S_ISREG(st.st_mode)) type = fs::file_type::regular;
-    else if (S_ISDIR(st.st_mode)) type = fs::file_type::directory;
-    else if (S_ISLNK(st.st_mode)) type = fs::file_type::symlink;
-    else if (S_ISCHR(st.st_mode)) type = fs::file_type::character;
-    else if (S_ISBLK(st.st_mode)) type = fs::file_type::block;
-    else if (S_ISFIFO(st.st_mode)) type = fs::file_type::fifo;
-    else if (S_ISSOCK(st.st_mode)) type = fs::file_type::socket;
+    if (S_ISREG(st.st_mode))
+        type = fs::file_type::regular;
+    else if (S_ISDIR(st.st_mode))
+        type = fs::file_type::directory;
+    else if (S_ISLNK(st.st_mode))
+        type = fs::file_type::symlink;
+    else if (S_ISCHR(st.st_mode))
+        type = fs::file_type::character;
+    else if (S_ISBLK(st.st_mode))
+        type = fs::file_type::block;
+    else if (S_ISFIFO(st.st_mode))
+        type = fs::file_type::fifo;
+    else if (S_ISSOCK(st.st_mode))
+        type = fs::file_type::socket;
 
     status = fs::file_status(type, static_cast<fs::perms>(st.st_mode));
     size = (type == fs::file_type::regular) ? static_cast<u64>(st.st_size) : 0;
@@ -132,14 +157,16 @@ struct DirHandle {
     DirHandle(DirHandle&& other) noexcept : dir(other.dir) { other.dir = nullptr; }
     DirHandle& operator=(DirHandle&& other) noexcept {
         if (this != &other) {
-            if (dir) ::closedir(dir);
+            if (dir)
+                ::closedir(dir);
             dir = other.dir;
             other.dir = nullptr;
         }
         return *this;
     }
     ~DirHandle() {
-        if (dir) ::closedir(dir);
+        if (dir)
+            ::closedir(dir);
     }
     int fd() const { return dir ? ::dirfd(dir) : -1; }
     explicit operator bool() const { return dir != nullptr; }
@@ -152,7 +179,8 @@ struct DirHandle {
  */
 DirHandle open_dir_handle(const std::string& path) {
     int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY);
-    if (fd < 0) return DirHandle();
+    if (fd < 0)
+        return DirHandle();
     DIR* dir = ::fdopendir(fd);
     if (!dir) {
         ::close(fd);
@@ -182,7 +210,7 @@ inline size_t reserve_hint_for_streamed_compression(CompressionAlgo algo, u64 ra
     return n;
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
 // Extended FileData - stores file metadata and path, not content
 struct MarWriter::FileData {
@@ -198,10 +226,7 @@ struct MarWriter::FileData {
     // Spans/hash are written after pre-sizing and task join.
 };
 
-MarWriter::MarWriter(const std::string& path, const WriteOptions& options)
-    : options_(options), path_(path)
-{
-}
+MarWriter::MarWriter(const std::string& path, const WriteOptions& options) : options_(options), path_(path) {}
 
 MarWriter::~MarWriter() {
     if (!finished_) {
@@ -219,8 +244,8 @@ MarWriter::~MarWriter() {
 }
 
 // Internal version of add_file that uses already-fetched metadata
-void MarWriter::add_file_internal(const std::string& path, const std::string& archive_name, 
-                                 fs::file_status status, u64 size, i64 mtime) {
+void MarWriter::add_file_internal(const std::string& path, const std::string& archive_name, fs::file_status status,
+                                  u64 size, i64 mtime) {
     auto type = status.type();
 
     if (type == fs::file_type::regular) {
@@ -280,7 +305,8 @@ void MarWriter::add_file(const std::string& path, const std::string& archive_nam
             try {
                 auto ftime = entry.last_write_time();
                 mtime = std::chrono::duration_cast<std::chrono::seconds>(ftime.time_since_epoch()).count();
-            } catch (...) {}
+            } catch (...) {
+            }
         }
     }
 
@@ -299,7 +325,8 @@ void MarWriter::add_directory(const std::string& path, const std::string& prefix
             try {
                 auto ftime = dir_entry.last_write_time();
                 dir_mtime = std::chrono::duration_cast<std::chrono::seconds>(ftime.time_since_epoch()).count();
-            } catch (...) {}
+            } catch (...) {
+            }
         }
     }
     if (!fs::is_directory(dir_status)) {
@@ -337,13 +364,15 @@ void MarWriter::add_directory(const std::string& path, const std::string& prefix
             if (entry.is_regular_file()) {
                 try {
                     size = entry.file_size();
-                } catch (...) {}
+                } catch (...) {
+                }
             }
             if (want_entry_mtime) {
                 try {
                     auto ftime = entry.last_write_time();
                     mtime = std::chrono::duration_cast<std::chrono::seconds>(ftime.time_since_epoch()).count();
-                } catch (...) {}
+                } catch (...) {
+                }
             }
         }
 
@@ -386,9 +415,8 @@ void MarWriter::walk_directory_posix(const std::string& root_path, const std::st
         }
 
         std::string full_path = join_path(frame.fs_path, name);
-        std::string archive_name = frame.archive_prefix.empty()
-            ? std::string(name)
-            : (frame.archive_prefix + "/" + name);
+        std::string archive_name =
+            frame.archive_prefix.empty() ? std::string(name) : (frame.archive_prefix + "/" + name);
 
         auto stat_and_add = [&](const struct stat& st) {
             fs::file_status status;
@@ -456,8 +484,7 @@ void MarWriter::walk_directory_posix(const std::string& root_path, const std::st
 #endif
 }
 
-void MarWriter::add_memory(const std::string& name, const std::vector<u8>& content,
-                           u32 mode, i64 mtime) {
+void MarWriter::add_memory(const std::string& name, const std::vector<u8>& content, u32 mode, i64 mtime) {
     FileData fd;
     fd.name = name;
     fd.entry.name_id = static_cast<u32>(files_.size());
@@ -494,8 +521,7 @@ void MarWriter::add_directory_entry(const std::string& name, u32 mode, i64 mtime
     files_.push_back(std::move(fd));
 }
 
-void MarWriter::add_symlink(const std::string& name, const std::string& target,
-                            u32 mode, i64 mtime) {
+void MarWriter::add_symlink(const std::string& name, const std::string& target, u32 mode, i64 mtime) {
     FileData fd;
     fd.name = name;
     fd.entry.name_id = static_cast<u32>(files_.size());
@@ -527,9 +553,11 @@ std::vector<u8> MarWriter::compress_block(const std::vector<u8>& data, BlockHead
 }
 
 // Stream compress a file directly (more efficient for large files)
-std::vector<u8> MarWriter::compress_file_range(const std::string& file_path, u64 offset, u64 length, BlockHeader& header) {
+std::vector<u8> MarWriter::compress_file_range(const std::string& file_path, u64 offset, u64 length,
+                                               BlockHeader& header) {
     int fd = fd_manager_.acquire(file_path);
-    if (fd < 0) throw IOError("Failed to open file for reading: " + file_path);
+    if (fd < 0)
+        throw IOError("Failed to open file for reading: " + file_path);
     std::vector<u8> compressed;
     try {
         compress_file_range_fd(fd, file_path, offset, length, compressed, header);
@@ -572,7 +600,8 @@ size_t MarWriter::compress_file_range_fd(int fd, const std::string& file_path, u
                 throw IOError("Failed to read file range for LZ4 compression: " + file_path);
             }
         }
-        if (raw_data_callback) raw_data_callback(chunk.data(), chunk.size());
+        if (raw_data_callback)
+            raw_data_callback(chunk.data(), chunk.size());
         out_compressed = compress_block(chunk, header);
         return out_compressed.size();
     }
@@ -585,15 +614,15 @@ size_t MarWriter::compress_file_range_fd(int fd, const std::string& file_path, u
                 throw IOError("Failed to read file range for uncompressed block: " + file_path);
             }
         }
-        if (raw_data_callback) raw_data_callback(out_compressed.data(), out_compressed.size());
+        if (raw_data_callback)
+            raw_data_callback(out_compressed.data(), out_compressed.size());
 
         header.raw_size = length;
         header.stored_size = length;
         header.comp_algo = CompressionAlgo::None;
         header.fast_checksum_type = options_.checksum;
-        header.fast_checksum = (options_.checksum == ChecksumType::None)
-            ? 0
-            : compute_fast_checksum(out_compressed, options_.checksum);
+        header.fast_checksum =
+            (options_.checksum == ChecksumType::None) ? 0 : compute_fast_checksum(out_compressed, options_.checksum);
         header.reserved0 = 0;
         header.block_flags = 0;
 
@@ -604,25 +633,15 @@ size_t MarWriter::compress_file_range_fd(int fd, const std::string& file_path, u
     // bytes (i.e., compressed bytes), because readers verify before decompressing.
     // The streaming compressor hashes output bytes as they are produced.
     u32 output_checksum = 0;
-    u64 compressed_size = stream_compress_fd_range_to_sink(
-        fd,
-        offset,
-        length,
-        options_.compression,
-        sink,
-        options_.compression_level,
-        options_.checksum,
-        &output_checksum,
-        std::move(raw_data_callback)
-    );
+    u64 compressed_size =
+        stream_compress_fd_range_to_sink(fd, offset, length, options_.compression, sink, options_.compression_level,
+                                         options_.checksum, &output_checksum, std::move(raw_data_callback));
 
     header.raw_size = length;
     header.stored_size = compressed_size;
     header.comp_algo = options_.compression;
     header.fast_checksum_type = options_.checksum;
-    header.fast_checksum = (options_.checksum == ChecksumType::None)
-        ? 0
-        : output_checksum;
+    header.fast_checksum = (options_.checksum == ChecksumType::None) ? 0 : output_checksum;
     header.reserved0 = 0;
     header.block_flags = 0;
 
@@ -637,71 +656,85 @@ std::vector<u8> MarWriter::build_meta_container() {
     std::vector<FileEntry> entries;
     entries.reserve(count);
     std::vector<PosixEntry> posix_entries;
-    if (options_.include_posix) posix_entries.reserve(count);
+    if (options_.include_posix)
+        posix_entries.reserve(count);
     std::vector<std::optional<std::string>> symlink_targets;
     symlink_targets.reserve(count);
     std::vector<FileHashEntry> hashes;
-    if (options_.compute_hashes) hashes.reserve(count);
+    if (options_.compute_hashes)
+        hashes.reserve(count);
     std::vector<std::vector<Span>> all_spans;
-    if (options_.multiblock) all_spans.reserve(count);
+    if (options_.multiblock)
+        all_spans.reserve(count);
 
     for (size_t i = 0; i < files_.size(); ++i) {
         names.push_back(files_[i].name);
-        
+
         FileEntry fe = files_[i].entry;
         fe.name_id = static_cast<u32>(i);
         entries.push_back(fe);
-        
-        if (options_.include_posix) posix_entries.push_back(files_[i].posix);
+
+        if (options_.include_posix)
+            posix_entries.push_back(files_[i].posix);
         symlink_targets.push_back(files_[i].symlink_target);
         if (options_.compute_hashes) {
             FileHashEntry he;
             he.has_hash = files_[i].hash.has_value();
-            if (files_[i].hash) he.digest = *files_[i].hash;
+            if (files_[i].hash)
+                he.digest = *files_[i].hash;
             hashes.push_back(he);
         }
-        if (options_.multiblock) all_spans.push_back(files_[i].spans);
+        if (options_.multiblock)
+            all_spans.push_back(files_[i].spans);
     }
 
     // 2. Serialize sections
     NameTableFormat name_format = options_.name_table_format.value_or(NameIndex::recommend_format(names));
     auto name_data = write_name_table(names, name_format);
     auto file_data = write_file_table(entries);
-    
-    struct Section { u32 type; u32 flags; std::vector<u8> data; };
+
+    struct Section {
+        u32 type;
+        u32 flags;
+        std::vector<u8> data;
+    };
     std::vector<Section> sections;
-    sections.push_back({ section_type::NAME_TABLE, (u32)name_format, std::move(name_data) });
-    sections.push_back({ section_type::FILE_TABLE, 0, std::move(file_data) });
+    sections.push_back({section_type::NAME_TABLE, (u32)name_format, std::move(name_data)});
+    sections.push_back({section_type::FILE_TABLE, 0, std::move(file_data)});
 
     if (options_.multiblock) {
-        sections.push_back({ section_type::FILE_SPANS, 0, write_file_spans(all_spans) });
+        sections.push_back({section_type::FILE_SPANS, 0, write_file_spans(all_spans)});
     }
     // Always include BLOCK_TABLE when available. This is critical for
     // SingleFilePerBlock mode because blocks may be written out-of-order when
     // using multiple threads, and scanning blocks in file order would produce a
     // block_offsets_ sequence that doesn't correspond to file order.
-    if (!block_table_.empty()) sections.push_back({ section_type::BLOCK_TABLE, 0, write_block_table(block_table_) });
-    if (options_.include_posix) sections.push_back({ section_type::POSIX_META, 0, write_posix_meta(posix_entries) });
-    
-    bool has_symlinks = std::any_of(files_.begin(), files_.end(), [](auto& f){ return f.symlink_target.has_value(); });
-    if (has_symlinks) sections.push_back({ section_type::SYMLINK_TARGETS, 0, write_symlink_targets(symlink_targets) });
-    
-    if (options_.compute_hashes) sections.push_back({ section_type::FILE_HASHES, 0, write_file_hashes(HashAlgo::XXHash3, hashes) });
+    if (!block_table_.empty())
+        sections.push_back({section_type::BLOCK_TABLE, 0, write_block_table(block_table_)});
+    if (options_.include_posix)
+        sections.push_back({section_type::POSIX_META, 0, write_posix_meta(posix_entries)});
+
+    bool has_symlinks = std::any_of(files_.begin(), files_.end(), [](auto& f) { return f.symlink_target.has_value(); });
+    if (has_symlinks)
+        sections.push_back({section_type::SYMLINK_TARGETS, 0, write_symlink_targets(symlink_targets)});
+
+    if (options_.compute_hashes)
+        sections.push_back({section_type::FILE_HASHES, 0, write_file_hashes(HashAlgo::XXHash3, hashes)});
 
     // 3. Assemble meta container
     std::vector<u8> meta;
     u32 section_count = (u32)sections.size();
     for (int i = 0; i < 4; ++i) meta.push_back((u8)(section_count >> (i * 8)));
-    for (int i = 0; i < 4; ++i) meta.push_back(0); // Reserved
+    for (int i = 0; i < 4; ++i) meta.push_back(0);  // Reserved
 
     u64 offset = META_CONTAINER_HEADER_SIZE + sections.size() * SECTION_ENTRY_SIZE;
     std::ostringstream section_headers;
     for (auto& s : sections) {
-        SectionEntry se{ s.type, s.flags, offset, s.data.size(), 0 };
+        SectionEntry se{s.type, s.flags, offset, s.data.size(), 0};
         se.write(section_headers);
         offset += s.data.size();
     }
-    
+
     std::string headers = section_headers.str();
     meta.insert(meta.end(), headers.begin(), headers.end());
     for (auto& s : sections) meta.insert(meta.end(), s.data.begin(), s.data.end());
@@ -711,21 +744,21 @@ std::vector<u8> MarWriter::build_meta_container() {
 
 // Simplified and optimized archive finalization
 void MarWriter::finish() {
-    if (finished_) return;
+    if (finished_)
+        return;
     finished_ = true;
 
     // 1. Sort files for deterministic output and consistent structure
-    std::sort(files_.begin(), files_.end(), [](const FileData& a, const FileData& b) {
-        return a.name < b.name;
-    });
+    std::sort(files_.begin(), files_.end(), [](const FileData& a, const FileData& b) { return a.name < b.name; });
 
     // Thread pool for hashing + compression
     // Deterministic archives must be byte-identical across runs. Parallel work
     // introduces unavoidable nondeterminism unless every write ordering is
     // explicitly stabilized, so force single-threaded execution here.
-    size_t num_threads = options_.deterministic ? 1 :
-                         (options_.num_threads ? options_.num_threads :
-                          std::max(1u, std::thread::hardware_concurrency()));
+    size_t num_threads =
+        options_.deterministic
+            ? 1
+            : (options_.num_threads ? options_.num_threads : std::max(1u, std::thread::hardware_concurrency()));
     ThreadPool pool(num_threads);
     std::vector<std::future<void>> futures;
 
@@ -733,8 +766,10 @@ void MarWriter::finish() {
     if (options_.compute_hashes && options_.dedup_by_hash) {
         for (size_t i = 0; i < files_.size(); ++i) {
             auto& fd_meta = files_[i];
-            if (fd_meta.entry.entry_type != EntryType::RegularFile) continue;
-            if (fd_meta.entry.logical_size == 0) continue;
+            if (fd_meta.entry.entry_type != EntryType::RegularFile)
+                continue;
+            if (fd_meta.entry.logical_size == 0)
+                continue;
 
             if (fd_meta.source_path.empty()) {
                 // In-memory files: compute immediately if missing.
@@ -747,23 +782,28 @@ void MarWriter::finish() {
 
             futures.push_back(pool.enqueue([this, i]() {
                 auto& fd_ref = files_[i];
-                if (fd_ref.entry.entry_type != EntryType::RegularFile) return;
-                if (fd_ref.entry.logical_size == 0) return;
-                if (fd_ref.hash.has_value()) return;
+                if (fd_ref.entry.entry_type != EntryType::RegularFile)
+                    return;
+                if (fd_ref.entry.logical_size == 0)
+                    return;
+                if (fd_ref.hash.has_value())
+                    return;
 
                 int fd = fd_manager_.acquire(fd_ref.source_path);
-                if (fd < 0) return;
+                if (fd < 0)
+                    return;
 
                 mar::xxhash3::XXHash3_64 hasher(0);
                 // Use smaller buffer for small files, larger for big files
-                size_t buf_size = std::min(size_t(1024 * 1024), 
-                                           std::max(size_t(4096), (size_t)fd_ref.entry.logical_size));
+                size_t buf_size =
+                    std::min(size_t(1024 * 1024), std::max(size_t(4096), (size_t)fd_ref.entry.logical_size));
                 u8* buf_ptr = ThreadLocalBufferPool::acquire(buf_size);
                 u64 total_read = 0;
                 while (total_read < fd_ref.entry.logical_size) {
                     size_t to_read = std::min((size_t)(fd_ref.entry.logical_size - total_read), buf_size);
                     ssize_t n = ::pread(fd, buf_ptr, to_read, total_read);
-                    if (n <= 0) break;
+                    if (n <= 0)
+                        break;
                     hasher.update(buf_ptr, (size_t)n);
                     total_read += (u64)n;
                 }
@@ -791,9 +831,12 @@ void MarWriter::finish() {
 
         for (size_t i = 0; i < files_.size(); ++i) {
             auto& fd = files_[i];
-            if (fd.entry.entry_type != EntryType::RegularFile) continue;
-            if (fd.entry.logical_size == 0) continue;
-            if (!fd.hash) continue;
+            if (fd.entry.entry_type != EntryType::RegularFile)
+                continue;
+            if (fd.entry.logical_size == 0)
+                continue;
+            if (!fd.hash)
+                continue;
 
             const std::string key = hash_key(*fd.hash);
             auto it = seen.find(key);
@@ -827,7 +870,8 @@ void MarWriter::finish() {
 
     for (size_t i = 0; i < files_.size(); ++i) {
         auto& fd = files_[i];
-        if (fd.entry.entry_type != EntryType::RegularFile) continue;
+        if (fd.entry.entry_type != EntryType::RegularFile)
+            continue;
 
         u64 file_size = fd.entry.logical_size;
         if (file_size == 0) {
@@ -850,8 +894,10 @@ void MarWriter::finish() {
     }
 
     std::sort(tasks.begin(), tasks.end(), [](const BlockTask& a, const BlockTask& b) {
-        if (a.file_index != b.file_index) return a.file_index < b.file_index;
-        if (a.offset != b.offset) return a.offset < b.offset;
+        if (a.file_index != b.file_index)
+            return a.file_index < b.file_index;
+        if (a.offset != b.offset)
+            return a.offset < b.offset;
         return a.sequence < b.sequence;
     });
 
@@ -891,7 +937,8 @@ void MarWriter::finish() {
             std::vector<u8> compressed;
             while (true) {
                 size_t range_id = next_range_id++;
-                if (range_id >= ranges.size()) break;
+                if (range_id >= ranges.size())
+                    break;
 
                 const auto& range = ranges[range_id];
                 auto& fd = files_[range.file_index];
@@ -899,7 +946,8 @@ void MarWriter::finish() {
                 if (options_.compute_hashes && !options_.dedup_by_hash && !fd.hash.has_value()) {
                     fd.stream_hasher.emplace(0);
                     hash_callback = [&fd](const u8* data, size_t len) {
-                        if (len == 0) return;
+                        if (len == 0)
+                            return;
                         fd.stream_hasher->update(data, len);
                     };
                 }
@@ -922,7 +970,8 @@ void MarWriter::finish() {
                             }
                             cached_path = fd.source_path;
                         }
-                        compress_file_range_fd(cached_fd, fd.source_path, task.offset, task.length, compressed, bh, hash_callback);
+                        compress_file_range_fd(cached_fd, fd.source_path, task.offset, task.length, compressed, bh,
+                                               hash_callback);
                         compressed_ptr = compressed.data();
                         compressed_size = compressed.size();
                     } else {
@@ -930,7 +979,8 @@ void MarWriter::finish() {
                         auto range_start = fd.content.begin() + task.offset;
                         auto range_end = range_start + task.length;
                         std::vector<u8> chunk(range_start, range_end);
-                        if (hash_callback) hash_callback(chunk.data(), chunk.size());
+                        if (hash_callback)
+                            hash_callback(chunk.data(), chunk.size());
                         compressed = compress_block(chunk, bh);
                         compressed_ptr = compressed.data();
                         compressed_size = compressed.size();
@@ -946,12 +996,13 @@ void MarWriter::finish() {
 
                     if (archive.pwriteFull(hdr_buf, BLOCK_HEADER_SIZE, block_start) != (ssize_t)BLOCK_HEADER_SIZE)
                         throw IOError("Write failed: block header");
-                    if (archive.pwriteFull(compressed_ptr, compressed_size, block_start + BLOCK_HEADER_SIZE) != (ssize_t)compressed_size)
+                    if (archive.pwriteFull(compressed_ptr, compressed_size, block_start + BLOCK_HEADER_SIZE) !=
+                        (ssize_t)compressed_size)
                         throw IOError("Write failed: block data");
 
                     // Update metadata (task_id and sequence are unique per task).
-                    fd.spans[task.sequence] = { (u32)task_id, 0, (u32)task.length, task.sequence };
-                    block_table_[task_id] = { block_start, task.length, (u64)compressed_size };
+                    fd.spans[task.sequence] = {(u32)task_id, 0, (u32)task.length, task.sequence};
+                    block_table_[task_id] = {block_start, task.length, (u64)compressed_size};
                 }
             }
             if (cached_fd >= 0) {
@@ -965,8 +1016,10 @@ void MarWriter::finish() {
 
     if (options_.compute_hashes && !options_.dedup_by_hash) {
         for (auto& fd : files_) {
-            if (fd.entry.entry_type != EntryType::RegularFile) continue;
-            if (fd.hash.has_value()) continue;
+            if (fd.entry.entry_type != EntryType::RegularFile)
+                continue;
+            if (fd.hash.has_value())
+                continue;
             if (!fd.stream_hasher) {
                 fd.stream_hasher.emplace(0);
             }
@@ -979,9 +1032,11 @@ void MarWriter::finish() {
     // 6. Finalize dedup: copy canonical spans into duplicates
     if (options_.dedup_by_hash && options_.compute_hashes) {
         for (size_t i = 0; i < files_.size(); ++i) {
-            if (canonical[i] == i) continue;
+            if (canonical[i] == i)
+                continue;
             auto& fd = files_[i];
-            if (fd.entry.entry_type != EntryType::RegularFile) continue;
+            if (fd.entry.entry_type != EntryType::RegularFile)
+                continue;
             fd.spans = files_[canonical[i]].spans;
         }
     }
@@ -1029,4 +1084,4 @@ void MarWriter::finish() {
     archive.close();
 }
 
-} // namespace mar
+}  // namespace mar

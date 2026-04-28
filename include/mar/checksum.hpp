@@ -1,7 +1,7 @@
 #pragma once
 
-#include "mar/types.hpp"
 #include "mar/enums.hpp"
+#include "mar/types.hpp"
 #include "mar/xxhash3.h"
 
 #include <array>
@@ -205,7 +205,7 @@ std::vector<ChecksumType> available_checksum_types();
 // Returns std::nullopt if unknown
 std::optional<ChecksumType> checksum_from_string(const std::string& name);
 
-} // namespace mar
+}  // namespace mar
 
 // C linkage for format.cpp
 extern "C" mar::u32 mar_crc32c(const mar::u8* data, size_t len);

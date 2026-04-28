@@ -1,10 +1,12 @@
 #include "mar/index_registry.hpp"
+
 #include "mar/errors.hpp"
-#include <fstream>
-#include <iostream>
+
 #include <algorithm>
 #include <cstring>
 #include <ctime>
+#include <fstream>
+#include <iostream>
 
 namespace mar {
 
@@ -16,7 +18,7 @@ MAIWriter::MAIWriter(const std::string& archive_path, MAIIndexType type, u64 arc
     header_.index_type = static_cast<u8>(type);
     header_.archive_hash = archive_hash;
     header_.timestamp = static_cast<u64>(std::time(nullptr));
-    
+
     // Extract filename from path
     size_t last_slash = archive_path.find_last_of("/\\");
     archive_name_ = (last_slash == std::string::npos) ? archive_path : archive_path.substr(last_slash + 1);
@@ -28,13 +30,14 @@ void MAIWriter::add_section(u32 section_type, const std::vector<u8>& data, u32 f
     sec.section_type = section_type;
     sec.flags = flags;
     sec.size = data.size();
-    sec.offset = 0; // Will be calculated during write
+    sec.offset = 0;  // Will be calculated during write
     sections_.push_back({sec, data});
 }
 
 void MAIWriter::write_to_file(const std::string& path, u8 align_log2) {
     std::ofstream out(path, std::ios::binary);
-    if (!out) throw std::runtime_error("Failed to open output file: " + path);
+    if (!out)
+        throw std::runtime_error("Failed to open output file: " + path);
 
     header_.align_log2 = align_log2;
     u64 alignment = align_log2 ? (1ULL << align_log2) : 1;
@@ -48,7 +51,7 @@ void MAIWriter::write_to_file(const std::string& path, u8 align_log2) {
     // 3. Write Section Directory
     u32 section_count = static_cast<u32>(sections_.size());
     out.write(reinterpret_cast<const char*>(&section_count), sizeof(section_count));
-    
+
     u64 dir_pos = out.tellp();
     // Placeholder for directory
     for (size_t i = 0; i < sections_.size(); ++i) {
@@ -76,7 +79,7 @@ void MAIWriter::write_to_file(const std::string& path, u8 align_log2) {
     header_.index_data_offset = sections_.empty() ? 0 : sections_[0].first.offset;
     out.seekp(0);
     out.write(reinterpret_cast<const char*>(&header_), sizeof(header_));
-    
+
     out.seekp(dir_pos);
     for (const auto& pair : sections_) {
         out.write(reinterpret_cast<const char*>(&pair.first), sizeof(pair.first));
@@ -89,7 +92,8 @@ void MAIWriter::write_to_file(const std::string& path, u8 align_log2) {
 
 std::unique_ptr<MAIReader> MAIReader::open(const std::string& path) {
     std::ifstream in(path, std::ios::binary | std::ios::ate);
-    if (!in) return nullptr;
+    if (!in)
+        return nullptr;
 
     size_t file_size = in.tellg();
     in.seekg(0);
@@ -102,7 +106,8 @@ std::unique_ptr<MAIReader> MAIReader::open(const std::string& path) {
     std::memcpy(&reader->header_, p, sizeof(MAIFixedHeader));
     p += sizeof(MAIFixedHeader);
 
-    if (reader->header_.magic != MAI_MAGIC) return nullptr;
+    if (reader->header_.magic != MAI_MAGIC)
+        return nullptr;
 
     reader->archive_name_.assign(reinterpret_cast<const char*>(p), reader->header_.archive_name_len);
     p += reader->header_.archive_name_len;
@@ -127,8 +132,9 @@ bool MAIReader::has_section(u32 section_type) const {
 
 std::vector<u8> MAIReader::read_section(u32 section_type) const {
     auto it = sections_.find(section_type);
-    if (it == sections_.end()) return {};
-    
+    if (it == sections_.end())
+        return {};
+
     const auto& sec = it->second;
     std::vector<u8> data(sec.size);
     std::memcpy(data.data(), mmap_data_.data() + sec.offset, sec.size);
@@ -137,8 +143,10 @@ std::vector<u8> MAIReader::read_section(u32 section_type) const {
 
 const u8* MAIReader::get_section_ptr(u32 section_type, size_t* size_out) const {
     auto it = sections_.find(section_type);
-    if (it == sections_.end()) return nullptr;
-    if (size_out) *size_out = it->second.size;
+    if (it == sections_.end())
+        return nullptr;
+    if (size_out)
+        *size_out = it->second.size;
     return mmap_data_.data() + it->second.offset;
 }
 
@@ -161,14 +169,16 @@ void IndexRegistry::register_searcher(std::unique_ptr<Searcher> searcher) {
 
 Indexer* IndexRegistry::get_indexer(const std::string& type_name) {
     for (auto& idx : indexers_) {
-        if (type_name == idx->type_name()) return idx.get();
+        if (type_name == idx->type_name())
+            return idx.get();
     }
     return nullptr;
 }
 
 Searcher* IndexRegistry::get_searcher(MAIIndexType type) {
     for (auto& s : searchers_) {
-        if (s->supports_type(type)) return s.get();
+        if (s->supports_type(type))
+            return s.get();
     }
     return nullptr;
 }
@@ -179,4 +189,4 @@ std::vector<std::string> IndexRegistry::list_index_types() const {
     return types;
 }
 
-} // namespace mar
+}  // namespace mar
