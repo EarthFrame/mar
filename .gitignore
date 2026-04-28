@@ -22,3 +22,17 @@ casp15/
 
 
 **/*.DS_Store
+
+deps/BLAKE3/c/CMakeCache.txt
+deps/BLAKE3/c/CMakeFiles/
+deps/BLAKE3/c/CTestTestfile.cmake
+deps/BLAKE3/c/DartConfiguration.tcl
+deps/BLAKE3/c/Makefile
+deps/BLAKE3/c/blake3-config-version.cmake
+deps/BLAKE3/c/blake3-config.cmake
+deps/BLAKE3/c/cmake_install.cmake
+deps/BLAKE3/c/dependencies/CMakeFiles/
+deps/BLAKE3/c/dependencies/CTestTestfile.cmake
+deps/BLAKE3/c/dependencies/Makefile
+deps/BLAKE3/c/dependencies/cmake_install.cmake
+deps/BLAKE3/c/libblake3.pc
