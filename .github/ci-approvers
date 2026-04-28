@@ -1,0 +1,13 @@
+# CI-approved users — one GitHub username per line.
+#
+# Only users listed here can trigger CI on pull requests via comments.
+# Comments (lines starting with #) and blank lines are ignored.
+#
+# IMPORTANT: This file is always read from the main branch, never from
+# the PR branch. A PR author cannot grant themselves access by modifying
+# this file in their PR — the change must be merged to main first.
+#
+# To add a user:    add their GitHub username below and merge to main.
+# To remove a user: delete their line and merge to main.
+# Changes take effect immediately on the next comment.
+edawson
