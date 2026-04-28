@@ -1,11 +1,12 @@
 #pragma once
 
-#include "mar/types.hpp"
 #include "mar/reader.hpp"
-#include <string>
-#include <vector>
-#include <unordered_set>
+#include "mar/types.hpp"
+
 #include <ostream>
+#include <string>
+#include <unordered_set>
+#include <vector>
 
 namespace mar {
 
@@ -16,13 +17,13 @@ struct DiffStatistics {
     u32 files_deleted = 0;
     u32 files_modified = 0;
     u32 files_unchanged = 0;
-    
+
     // Size information
     u64 bytes_added = 0;
     u64 bytes_deleted = 0;
     u64 bytes_modified = 0;
     u64 bytes_unchanged = 0;
-    
+
     // Block-level (for detailed analysis)
     u32 blocks_added = 0;
     u32 blocks_deleted = 0;
@@ -45,20 +46,14 @@ struct FileDiff {
 class ArchiveDiffer {
 public:
     // Compare two archives and get statistics
-    DiffStatistics compare(
-        const MarReader& source,
-        const MarReader& target
-    );
-    
+    DiffStatistics compare(const MarReader& source, const MarReader& target);
+
     // Get detailed file-by-file diffs
-    std::vector<FileDiff> get_file_diffs(
-        const MarReader& source,
-        const MarReader& target
-    );
-    
+    std::vector<FileDiff> get_file_diffs(const MarReader& source, const MarReader& target);
+
     // Print human-readable diff report (like git diff --stat)
     void print_summary(std::ostream& out, const std::string& source_name, const std::string& target_name);
-    
+
     // Print git-diff style output for files
     void print_file_diffs(std::ostream& out, const std::vector<FileDiff>& diffs);
 
@@ -66,4 +61,4 @@ private:
     DiffStatistics stats_;
 };
 
-} // namespace mar
+}  // namespace mar

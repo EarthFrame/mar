@@ -3,20 +3,20 @@
  * @brief MAR command-line tool implementing mar-command-reference.md
  */
 
-#include "mar/mar.hpp"
-#include "mar/stopwatch.hpp"
-#include "mar/diff.hpp"
 #include "mar/async_io.hpp"
-#include "mar/index_registry.hpp"
-#include "mar/xxhash3.h"
-#include "mar/writer.hpp"
-#include "mar/redact.hpp"
+#include "mar/diff.hpp"
 #include "mar/feature_flags.hpp"
+#include "mar/index_registry.hpp"
+#include "mar/mar.hpp"
+#include "mar/redact.hpp"
+#include "mar/stopwatch.hpp"
+#include "mar/writer.hpp"
+#include "mar/xxhash3.h"
 
 #include <algorithm>
+#include <csignal>
 #include <cstdlib>
 #include <cstring>
-#include <csignal>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -30,24 +30,21 @@ using namespace mar;
 
 // Tool version (built from constants)
 std::string get_tool_version() {
-    return std::to_string(TOOL_VERSION_MAJOR) + "." +
-           std::to_string(TOOL_VERSION_MINOR) + "." +
+    return std::to_string(TOOL_VERSION_MAJOR) + "." + std::to_string(TOOL_VERSION_MINOR) + "." +
            std::to_string(TOOL_VERSION_PATCH);
 }
 
 // Build MAR format version string from constants
 std::string get_mar_version() {
-    return std::to_string(VERSION_MAJOR) + "." +
-           std::to_string(VERSION_MINOR) + "." +
-           std::to_string(VERSION_PATCH);
+    return std::to_string(VERSION_MAJOR) + "." + std::to_string(VERSION_MINOR) + "." + std::to_string(VERSION_PATCH);
 }
 
 // Exit codes per spec
-constexpr int EXIT_OK         = 0;
-constexpr int EXIT_NO_RESULTS = 1;   // search: no matches found
-constexpr int EXIT_USAGE      = 2;   // bad command-line arguments
-constexpr int EXIT_ERROR      = 3;   // runtime / I-O error
-constexpr int EXIT_INTEGRITY  = 65;
+constexpr int EXIT_OK = 0;
+constexpr int EXIT_NO_RESULTS = 1;  // search: no matches found
+constexpr int EXIT_USAGE = 2;       // bad command-line arguments
+constexpr int EXIT_ERROR = 3;       // runtime / I-O error
+constexpr int EXIT_INTEGRITY = 65;
 constexpr int EXIT_UNAVAILABLE = 69;
 
 // Global CLI options structure
@@ -119,8 +116,7 @@ void print_usage() {
               << "  --stopwatch     Report command execution time\n\n"
               << "Use 'mar <command> --help' for command-specific options.\n";
 
-    if (!is_feature_enabled(FeatureFlag::IndexCommand) ||
-        !is_feature_enabled(FeatureFlag::SearchCommand)) {
+    if (!is_feature_enabled(FeatureFlag::IndexCommand) || !is_feature_enabled(FeatureFlag::SearchCommand)) {
         std::cout << "\nFeature flags (use MAR_FEATURE_<name>=0|1 to override defaults):\n";
         if (!is_feature_enabled(FeatureFlag::IndexCommand)) {
             std::cout << "  MAR_FEATURE_INDEX=1  Enable the index command\n";
@@ -441,8 +437,8 @@ int cmd_create(int argc, char* argv[]) {
                 return EXIT_USAGE;
             }
             if (!is_checksum_available(*cs)) {
-                print_error("Checksum type not available: " + std::string(argv[i]) + 
-                           " (library not installed)", "create");
+                print_error("Checksum type not available: " + std::string(argv[i]) + " (library not installed)",
+                            "create");
                 return EXIT_UNAVAILABLE;
             }
             opts.checksum = *cs;
@@ -456,7 +452,7 @@ int cmd_create(int argc, char* argv[]) {
         } else if (arg == "--no-metadata") {
             opts.include_posix = false;
             opts.compute_hashes = false;
-            opts.compress_meta = false; // Also skip compressing if we're skipping content
+            opts.compress_meta = false;  // Also skip compressing if we're skipping content
         } else if (arg == "--deterministic") {
             opts.deterministic = true;
         } else if (arg == "--name-format") {
@@ -492,11 +488,9 @@ int cmd_create(int argc, char* argv[]) {
     }
 
     if (opts.compression_level != -1 && !is_compression_level_valid(opts.compression, opts.compression_level)) {
-        print_error(
-            "Invalid --compression-level for " + std::string(compression_to_string(opts.compression))
-            + ". Valid levels: " + compression_level_help(opts.compression),
-            "create"
-        );
+        print_error("Invalid --compression-level for " + std::string(compression_to_string(opts.compression)) +
+                        ". Valid levels: " + compression_level_help(opts.compression),
+                    "create");
         return EXIT_USAGE;
     }
 
@@ -550,8 +544,7 @@ int cmd_create(int argc, char* argv[]) {
             std::filesystem::path p(path);
             bool is_self_archive = false;
             try {
-                if (std::filesystem::exists(p) &&
-                    std::filesystem::exists(archive_abs) &&
+                if (std::filesystem::exists(p) && std::filesystem::exists(archive_abs) &&
                     std::filesystem::equivalent(p, archive_abs)) {
                     is_self_archive = true;
                 }
@@ -564,7 +557,7 @@ int cmd_create(int argc, char* argv[]) {
                 print_verbose("Skipping self-referential archive: " + path);
                 continue;
             }
-            
+
             print_verbose("Adding: " + path);
             if (std::filesystem::is_directory(p)) {
                 writer.add_directory(path);
@@ -681,11 +674,14 @@ int cmd_extract(int argc, char* argv[]) {
                 // Extract all files
                 for (size_t i = 0; i < reader.file_count(); ++i) {
                     auto name_opt = reader.get_name(i);
-                    if (!name_opt) continue;
+                    if (!name_opt)
+                        continue;
                     auto entry = reader.get_file_entry(i);
-                    if (!entry || entry->entry_type != EntryType::RegularFile) continue;
+                    if (!entry || entry->entry_type != EntryType::RegularFile)
+                        continue;
                     if (!reader.extract_file_to_sink(i, sink)) {
-                        if (errno == EPIPE) return EXIT_OK;
+                        if (errno == EPIPE)
+                            return EXIT_OK;
                         print_error("Failed to extract: " + *name_opt);
                     }
                 }
@@ -695,7 +691,8 @@ int cmd_extract(int argc, char* argv[]) {
                     auto found = reader.find_file(pattern);
                     if (found) {
                         if (!reader.extract_file_to_sink(found->first, sink)) {
-                            if (errno == EPIPE) return EXIT_OK;
+                            if (errno == EPIPE)
+                                return EXIT_OK;
                             print_error("Failed to extract: " + pattern);
                         }
                     } else {
@@ -789,8 +786,8 @@ int cmd_list(int argc, char* argv[]) {
     try {
         MarReader reader(archive_path);
         reader.apply_archive_read_hints(true);
-        
-        // If listing is very large, some parts could potentially be parallelized, 
+
+        // If listing is very large, some parts could potentially be parallelized,
         // but currently listing is metadata-only and fast.
         // We still accept -j for consistency across commands.
         (void)num_threads;
@@ -802,11 +799,11 @@ int cmd_list(int argc, char* argv[]) {
         if (cli_options.verbose > 0 && show_meta) {
             const auto& h = reader.header();
             std::cout << "Archive: " << archive_path << "\n";
-            std::cout << "Version: " << (int)h.version_major << "."
-                      << (int)h.version_minor << "." << (int)h.version_patch << "\n";
+            std::cout << "Version: " << (int)h.version_major << "." << (int)h.version_minor << "."
+                      << (int)h.version_patch << "\n";
             std::cout << "Files: " << files.size() << "\n";
             std::cout << "Blocks: " << reader.block_count() << "\n";
-            
+
             // Show compression and checksum algorithm from first block
             if (reader.block_count() > 0) {
                 try {
@@ -815,11 +812,11 @@ int cmd_list(int argc, char* argv[]) {
                     if (block_file.is_open()) {
                         block_file.seekg(h.header_size_bytes);
                         auto block_hdr = BlockHeader::read(block_file);
-                        
+
                         if (block_hdr.comp_algo != CompressionAlgo::None) {
                             std::cout << "Compression: " << compression_to_string(block_hdr.comp_algo) << "\n";
                         }
-                        
+
                         if (show_checksum && block_hdr.fast_checksum_type != ChecksumType::None) {
                             std::cout << "Checksum: " << checksum_type_name(block_hdr.fast_checksum_type) << "\n";
                         }
@@ -833,13 +830,13 @@ int cmd_list(int argc, char* argv[]) {
             if (show_checksum && reader.has_hashes()) {
                 std::cout << "File Hash Algorithm: " << hash_algo_name(reader.get_hash_algo()) << "\n";
             }
-            
+
             std::cout << "---\n";
         }
 
         if (show_json) {
             std::cout << "[\n";
-            
+
             // Add metadata object if verbose
             if (cli_options.verbose > 0) {
                 std::cout << "  {\"_metadata\": {";
@@ -851,7 +848,7 @@ int cmd_list(int argc, char* argv[]) {
                 }
                 std::cout << "}},\n";
             }
-            
+
             for (size_t i = 0; i < files.size(); ++i) {
                 const auto& entry = files[i];
                 std::string name = entry.name_id < names.size() ? names[entry.name_id] : "";
@@ -860,10 +857,18 @@ int cmd_list(int argc, char* argv[]) {
                 std::cout << ", \"size\": " << entry.logical_size;
                 std::cout << ", \"type\": \"";
                 switch (entry.entry_type) {
-                    case EntryType::RegularFile: std::cout << "file"; break;
-                    case EntryType::Directory:   std::cout << "dir"; break;
-                    case EntryType::Symlink:     std::cout << "symlink"; break;
-                    default:                     std::cout << "other"; break;
+                    case EntryType::RegularFile:
+                        std::cout << "file";
+                        break;
+                    case EntryType::Directory:
+                        std::cout << "dir";
+                        break;
+                    case EntryType::Symlink:
+                        std::cout << "symlink";
+                        break;
+                    default:
+                        std::cout << "other";
+                        break;
                 }
                 std::cout << "\"";
 
@@ -892,7 +897,8 @@ int cmd_list(int argc, char* argv[]) {
                 }
 
                 std::cout << "}";
-                if (i + 1 < files.size()) std::cout << ",";
+                if (i + 1 < files.size())
+                    std::cout << ",";
                 std::cout << "\n";
             }
             std::cout << "]\n";
@@ -922,7 +928,7 @@ int cmd_list(int argc, char* argv[]) {
                 }
                 std::cout << "\n";
             }
-            
+
             for (size_t i = 0; i < files.size(); ++i) {
                 const auto& entry = files[i];
                 std::string name = entry.name_id < names.size() ? names[entry.name_id] : "";
@@ -937,7 +943,7 @@ int cmd_list(int argc, char* argv[]) {
                 std::cout << std::setw(5) << uid << " ";
                 std::cout << std::setw(5) << gid << " ";
                 std::cout << std::setw(10) << entry.logical_size << " ";
-                
+
                 if (show_checksum && reader.has_hashes()) {
                     auto hash = reader.get_hash(i);
                     if (hash) {
@@ -1043,7 +1049,8 @@ int cmd_hash(int argc, char* argv[]) {
                 std::vector<u8> buffer(kBufSize);
                 while (true) {
                     ssize_t n = in.read(buffer.data(), buffer.size());
-                    if (n <= 0) break;
+                    if (n <= 0)
+                        break;
                     hasher.update(buffer.data(), static_cast<size_t>(n));
                 }
             }
@@ -1068,7 +1075,8 @@ int cmd_hash(int argc, char* argv[]) {
                 std::vector<u8> buffer(kBufSize);
                 while (true) {
                     ssize_t n = in.read(buffer.data(), buffer.size());
-                    if (n <= 0) break;
+                    if (n <= 0)
+                        break;
                     hasher.update(buffer.data(), static_cast<size_t>(n));
                 }
             }
@@ -1091,7 +1099,8 @@ int cmd_hash(int argc, char* argv[]) {
                 std::vector<u8> buffer(kBufSize);
                 while (true) {
                     ssize_t n = in.read(buffer.data(), buffer.size());
-                    if (n <= 0) break;
+                    if (n <= 0)
+                        break;
                     hasher.update(buffer.data(), static_cast<size_t>(n));
                 }
             }
@@ -1214,7 +1223,8 @@ int cmd_get(int argc, char* argv[]) {
                     }
                 } else if (as_json) {
                     auto content = reader.read_file(found->first);
-                    if (!first) std::cout << ",\n";
+                    if (!first)
+                        std::cout << ",\n";
                     first = false;
 
                     // Output as JSON object with filename and decompressed content (JSON-escaped)
@@ -1224,13 +1234,20 @@ int cmd_get(int argc, char* argv[]) {
                     std::cout << "\"";
                     for (size_t i = 0; i < content.size(); ++i) {
                         u8 c = content[i];
-                        if (c == '"') std::cout << "\\\"";
-                        else if (c == '\\') std::cout << "\\\\";
-                        else if (c == '\b') std::cout << "\\b";
-                        else if (c == '\f') std::cout << "\\f";
-                        else if (c == '\n') std::cout << "\\n";
-                        else if (c == '\r') std::cout << "\\r";
-                        else if (c == '\t') std::cout << "\\t";
+                        if (c == '"')
+                            std::cout << "\\\"";
+                        else if (c == '\\')
+                            std::cout << "\\\\";
+                        else if (c == '\b')
+                            std::cout << "\\b";
+                        else if (c == '\f')
+                            std::cout << "\\f";
+                        else if (c == '\n')
+                            std::cout << "\\n";
+                        else if (c == '\r')
+                            std::cout << "\\r";
+                        else if (c == '\t')
+                            std::cout << "\\t";
                         else if (c < 32 || c >= 127) {
                             // Non-printable: output as \uXXXX
                             char buf[7];
@@ -1253,7 +1270,8 @@ int cmd_get(int argc, char* argv[]) {
                         }
                     }
 
-                    if (out_name.empty()) continue;
+                    if (out_name.empty())
+                        continue;
 
                     std::filesystem::path out_path = std::filesystem::path(output_dir) / out_name;
                     if (out_path.has_parent_path()) {
@@ -1270,7 +1288,8 @@ int cmd_get(int argc, char* argv[]) {
                     }
                 }
             }
-            if (not_found > 0) return EXIT_ERROR;
+            if (not_found > 0)
+                return EXIT_ERROR;
         }
 
         if (as_json) {
@@ -1357,7 +1376,7 @@ int cmd_cat(int argc, char* argv[]) {
 
     try {
         MarReader reader(archive_path);
-        
+
         if (all_files) {
             file_names.clear();
             const auto& entries = reader.get_file_entries();
@@ -1406,7 +1425,8 @@ int cmd_cat(int argc, char* argv[]) {
                 if (as_json) {
                     auto content = reader.read_file(found->first);
 
-                    if (!first) *output << ",\n";
+                    if (!first)
+                        *output << ",\n";
                     first = false;
 
                     // Output as JSON object with filename and decompressed content
@@ -1416,13 +1436,20 @@ int cmd_cat(int argc, char* argv[]) {
                     *output << "\"";
                     for (size_t i = 0; i < content.size(); ++i) {
                         u8 c = content[i];
-                        if (c == '"') *output << "\\\"";
-                        else if (c == '\\') *output << "\\\\";
-                        else if (c == '\b') *output << "\\b";
-                        else if (c == '\f') *output << "\\f";
-                        else if (c == '\n') *output << "\\n";
-                        else if (c == '\r') *output << "\\r";
-                        else if (c == '\t') *output << "\\t";
+                        if (c == '"')
+                            *output << "\\\"";
+                        else if (c == '\\')
+                            *output << "\\\\";
+                        else if (c == '\b')
+                            *output << "\\b";
+                        else if (c == '\f')
+                            *output << "\\f";
+                        else if (c == '\n')
+                            *output << "\\n";
+                        else if (c == '\r')
+                            *output << "\\r";
+                        else if (c == '\t')
+                            *output << "\\t";
                         else if (c < 32 || c >= 127) {
                             // Non-printable: output as \uXXXX or raw byte
                             char buf[7];
@@ -1448,7 +1475,8 @@ int cmd_cat(int argc, char* argv[]) {
 
                 print_verbose("Read: " + name);
             }
-            if (not_found > 0 && not_found == (int)file_names.size()) return EXIT_ERROR;
+            if (not_found > 0 && not_found == (int)file_names.size())
+                return EXIT_ERROR;
         }
 
         if (as_json) {
@@ -1614,18 +1642,28 @@ int cmd_header(int argc, char* argv[]) {
                 auto entry = reader.get_file_entry(i);
                 if (entry) {
                     switch (entry->entry_type) {
-                        case EntryType::RegularFile: reg_files++; break;
-                        case EntryType::Directory: dirs++; break;
-                        case EntryType::Symlink: symlinks++; break;
-                        default: break;
+                        case EntryType::RegularFile:
+                            reg_files++;
+                            break;
+                        case EntryType::Directory:
+                            dirs++;
+                            break;
+                        case EntryType::Symlink:
+                            symlinks++;
+                            break;
+                        default:
+                            break;
                     }
                 }
             }
 
             std::cout << "\nEntry types:\n";
-            if (reg_files > 0) std::cout << "  Regular files: " << reg_files << "\n";
-            if (dirs > 0) std::cout << "  Directories: " << dirs << "\n";
-            if (symlinks > 0) std::cout << "  Symlinks: " << symlinks << "\n";
+            if (reg_files > 0)
+                std::cout << "  Regular files: " << reg_files << "\n";
+            if (dirs > 0)
+                std::cout << "  Directories: " << dirs << "\n";
+            if (symlinks > 0)
+                std::cout << "  Symlinks: " << symlinks << "\n";
         }
 
         return EXIT_OK;
@@ -1748,11 +1786,10 @@ Examples:
         std::cout << "Compression backends:\n";
         std::cout << "  - zstd: " << (have_zstd() ? "yes" : "no") << "\n";
         std::cout << "  - zlib: " << (have_zlib() ? "yes" : "no") << "\n";
-        std::cout << "  - lz4: "  << (have_lz4()  ? "yes" : "no") << "\n";
+        std::cout << "  - lz4: " << (have_lz4() ? "yes" : "no") << "\n";
         std::cout << "  - bzip2: " << (have_bzip2() ? "yes" : "no")
                   << " (requires compile-time opt-in: MAR_HAVE_BZIP2)\n";
-        std::cout << "  - libdeflate: " << (have_libdeflate() ? "yes" : "no")
-                  << " (gzip backend)\n";
+        std::cout << "  - libdeflate: " << (have_libdeflate() ? "yes" : "no") << " (gzip backend)\n";
 
         std::cout << "Checksums:\n";
         for (auto cs : available_checksum_types()) {
@@ -1761,13 +1798,13 @@ Examples:
 
         std::cout << "File hash algorithms:\n";
         std::cout << "  - " << hash_algo_name(HashAlgo::Blake3) << "\n";
-        
+
         std::cout << "Async I/O backends:\n";
         std::cout << "  Available backends: " << AsyncIO::getAvailableBackends() << "\n";
         std::cout << "  io_uring support: " << (AsyncIO::hasUringSupport() ? "yes (Linux)" : "no") << "\n";
         std::cout << "  kqueue support: " << (AsyncIO::hasKqueueSupport() ? "yes (macOS/BSD)" : "no") << "\n";
         std::cout << "  Runtime: Creates AsyncIO instance per thread, auto-selects best backend\n";
-        
+
         return EXIT_OK;
     }
 
@@ -1798,12 +1835,18 @@ int cmd_redact(int argc, char* argv[]) {
             print_redact_usage();
             return EXIT_OK;
         } else if (arg == "-o" || arg == "--output") {
-            if (++i >= argc) { print_error("Missing output path", "redact"); return EXIT_USAGE; }
+            if (++i >= argc) {
+                print_error("Missing output path", "redact");
+                return EXIT_USAGE;
+            }
             output_path = argv[i];
         } else if (arg == "-I") {
             in_place = true;
         } else if (arg == "-T" || arg == "--files-from") {
-            if (++i >= argc) { print_error("Missing files-from path", "redact"); return EXIT_USAGE; }
+            if (++i >= argc) {
+                print_error("Missing files-from path", "redact");
+                return EXIT_USAGE;
+            }
             files_from = argv[i];
         } else if (arg == "-f" || arg == "--force") {
             force = true;
@@ -1819,7 +1862,10 @@ int cmd_redact(int argc, char* argv[]) {
         }
     }
 
-    if (archive_path.empty()) { print_error("Missing archive path", "redact"); return EXIT_USAGE; }
+    if (archive_path.empty()) {
+        print_error("Missing archive path", "redact");
+        return EXIT_USAGE;
+    }
 
     // Read names from file/stdin.
     if (!files_from.empty()) {
@@ -1835,12 +1881,19 @@ int cmd_redact(int argc, char* argv[]) {
         }
         std::string line;
         while (std::getline(*in, line)) {
-            if (!line.empty()) names.push_back(line);
+            if (!line.empty())
+                names.push_back(line);
         }
     }
 
-    if (names.empty()) { print_error("No files specified for redaction", "redact"); return EXIT_USAGE; }
-    if (!in_place && output_path.empty()) { print_error("Missing output path (use -o, or -I for in-place)", "redact"); return EXIT_USAGE; }
+    if (names.empty()) {
+        print_error("No files specified for redaction", "redact");
+        return EXIT_USAGE;
+    }
+    if (!in_place && output_path.empty()) {
+        print_error("Missing output path (use -o, or -I for in-place)", "redact");
+        return EXIT_USAGE;
+    }
 
     try {
         RedactOptions opt;
@@ -2023,11 +2076,16 @@ static std::string json_escape(const std::string& s) {
     std::string out;
     out.reserve(s.size() + 4);
     for (unsigned char c : s) {
-        if      (c == '"')  out += "\\\"";
-        else if (c == '\\') out += "\\\\";
-        else if (c == '\n') out += "\\n";
-        else if (c == '\r') out += "\\r";
-        else if (c == '\t') out += "\\t";
+        if (c == '"')
+            out += "\\\"";
+        else if (c == '\\')
+            out += "\\\\";
+        else if (c == '\n')
+            out += "\\n";
+        else if (c == '\r')
+            out += "\\r";
+        else if (c == '\t')
+            out += "\\t";
         else if (c < 0x20) {
             char buf[8];
             snprintf(buf, sizeof(buf), "\\u%04x", (unsigned)c);
@@ -2098,8 +2156,7 @@ int cmd_search(int argc, char* argv[]) {
             }
         }
 
-        auto searcher = IndexRegistry::instance().get_searcher(
-            static_cast<MAIIndexType>(index->header().index_type));
+        auto searcher = IndexRegistry::instance().get_searcher(static_cast<MAIIndexType>(index->header().index_type));
         if (!searcher) {
             print_error("No searcher available for this index type", "search");
             return EXIT_ERROR;
@@ -2121,9 +2178,8 @@ int cmd_search(int argc, char* argv[]) {
         } else if (fmt == "json") {
             for (size_t i = 0; i < results.size(); ++i) {
                 const auto& r = results[i];
-                std::cout << "{\"rank\":" << (i + 1)
-                          << ",\"score\":" << r.score
-                          << ",\"file\":\"" << json_escape(r.filename) << "\"";
+                std::cout << "{\"rank\":" << (i + 1) << ",\"score\":" << r.score << ",\"file\":\""
+                          << json_escape(r.filename) << "\"";
                 if (!r.content.empty()) {
                     std::cout << ",\"content\":\"" << json_escape(r.content) << "\"";
                 }
@@ -2131,7 +2187,8 @@ int cmd_search(int argc, char* argv[]) {
                     std::cout << ",\"metadata\":{";
                     bool first = true;
                     for (const auto& [k, v] : r.metadata) {
-                        if (!first) std::cout << ",";
+                        if (!first)
+                            std::cout << ",";
                         std::cout << "\"" << json_escape(k) << "\":\"" << json_escape(v) << "\"";
                         first = false;
                     }
@@ -2144,19 +2201,18 @@ int cmd_search(int argc, char* argv[]) {
             // Determine whether any result has a content snippet.
             bool has_content = false;
             for (const auto& r : results) {
-                if (!r.content.empty()) { has_content = true; break; }
+                if (!r.content.empty()) {
+                    has_content = true;
+                    break;
+                }
             }
 
             if (has_content) {
-                std::cout << std::left
-                          << std::setw(4)  << "RANK" << "  "
-                          << std::setw(8)  << "SCORE"  << "  "
-                          << std::setw(40) << "FILE"   << "  "
+                std::cout << std::left << std::setw(4) << "RANK" << "  " << std::setw(8) << "SCORE" << "  "
+                          << std::setw(40) << "FILE" << "  "
                           << "SNIPPET\n";
             } else {
-                std::cout << std::left
-                          << std::setw(4)  << "RANK" << "  "
-                          << std::setw(8)  << "SCORE"  << "  "
+                std::cout << std::left << std::setw(4) << "RANK" << "  " << std::setw(8) << "SCORE" << "  "
                           << "FILE\n";
             }
 
@@ -2165,17 +2221,19 @@ int cmd_search(int argc, char* argv[]) {
                 std::ostringstream score_str;
                 score_str << std::fixed << std::setprecision(4) << r.score;
 
-                std::cout << std::left
-                          << std::setw(4)  << (i + 1)          << "  "
-                          << std::setw(8)  << score_str.str()  << "  ";
+                std::cout << std::left << std::setw(4) << (i + 1) << "  " << std::setw(8) << score_str.str() << "  ";
 
                 if (has_content) {
                     std::cout << std::setw(40) << r.filename << "  ";
                     // Print snippet on one line, truncated at 80 chars.
                     std::string snip = r.content;
-                    if (snip.size() > 80) snip = snip.substr(0, 77) + "...";
+                    if (snip.size() > 80)
+                        snip = snip.substr(0, 77) + "...";
                     // Collapse newlines for display.
-                    for (char& c : snip) { if (c == '\n' || c == '\r') c = ' '; }
+                    for (char& c : snip) {
+                        if (c == '\n' || c == '\r')
+                            c = ' ';
+                    }
                     std::cout << "\"" << snip << "\"";
                 } else {
                     std::cout << r.filename;
@@ -2200,7 +2258,7 @@ int cmd_search(int argc, char* argv[]) {
 // ============================================================================
 
 /// Run a command with optional stopwatch timing
-template<typename Func>
+template <typename Func>
 int run_with_timing(const std::string& cmd_name, Func&& cmd) {
     Stopwatch sw;
     int result = cmd();
@@ -2237,7 +2295,7 @@ int main(int argc, char* argv[]) {
     // Optimization: Handle no-argument case and simple help/version checks immediately
     // to avoid overhead of feature flag initialization and argument scanning.
     if (argc < 2) {
-        // We need feature flags for print_usage, but we can call it directly if we're okay 
+        // We need feature flags for print_usage, but we can call it directly if we're okay
         // with default flags, or just do a quick init.
         init_feature_flags_from_env();
         print_usage();
@@ -2260,10 +2318,10 @@ int main(int argc, char* argv[]) {
     // First pass: find command and extract global options
     std::string command;
     int cmd_start = -1;
-    
+
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        
+
         // Check for top-level help/version before command
         if (cmd_start < 0) {
             if (arg == "-h" || arg == "--help") {
@@ -2275,12 +2333,12 @@ int main(int argc, char* argv[]) {
                 return EXIT_OK;
             }
         }
-        
+
         // Check for global options (can appear anywhere)
         if (is_global_option(arg)) {
             continue;
         }
-        
+
         // First non-global-option is the command
         if (cmd_start < 0) {
             command = arg;
@@ -2306,8 +2364,7 @@ int main(int argc, char* argv[]) {
     std::vector<char*> cmd_args;
     for (int i = cmd_start + 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "--stopwatch" || arg == "-q" || arg == "--quiet" ||
-            arg == "-v" || arg == "--verbose") {
+        if (arg == "--stopwatch" || arg == "-q" || arg == "--quiet" || arg == "-v" || arg == "--verbose") {
             continue;  // Skip global options
         }
         cmd_args.push_back(argv[i]);

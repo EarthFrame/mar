@@ -1,11 +1,11 @@
 #pragma once
 
-#include "mar/types.hpp"
+#include "mar/checksum.hpp"
 #include "mar/enums.hpp"
+#include "mar/file_descriptor_manager.hpp"
 #include "mar/format.hpp"
 #include "mar/sections.hpp"
-#include "mar/checksum.hpp"
-#include "mar/file_descriptor_manager.hpp"
+#include "mar/types.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -87,20 +87,19 @@ public:
     void add_directory(const std::string& path, const std::string& prefix = "");
 
     // Add file from memory
-    void add_memory(const std::string& name, const std::vector<u8>& content,
-                    u32 mode = DEFAULT_FILE_MODE, i64 mtime = 0);
+    void add_memory(const std::string& name, const std::vector<u8>& content, u32 mode = DEFAULT_FILE_MODE,
+                    i64 mtime = 0);
 
     // Add directory entry (no content)
     void add_directory_entry(const std::string& name, u32 mode = DEFAULT_DIR_MODE, i64 mtime = 0);
 
     // Add symbolic link
-    void add_symlink(const std::string& name, const std::string& target,
-                     u32 mode = 0120777, i64 mtime = 0);
+    void add_symlink(const std::string& name, const std::string& target, u32 mode = 0120777, i64 mtime = 0);
 
 private:
     // Internal version of add_file that uses already-fetched metadata
-    void add_file_internal(const std::string& path, const std::string& archive_name, 
-                          std::filesystem::file_status status, u64 size, i64 mtime);
+    void add_file_internal(const std::string& path, const std::string& archive_name,
+                           std::filesystem::file_status status, u64 size, i64 mtime);
 
 public:
     // ========================================================================
@@ -162,4 +161,4 @@ private:
     FileDescriptorManager fd_manager_;
 };
 
-} // namespace mar
+}  // namespace mar

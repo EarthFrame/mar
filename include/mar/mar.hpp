@@ -61,16 +61,15 @@
 
 #pragma once
 
-#include "mar/types.hpp"
+#include "mar/checksum.hpp"
+#include "mar/compression.hpp"
 #include "mar/constants.hpp"
 #include "mar/enums.hpp"
 #include "mar/errors.hpp"
 #include "mar/format.hpp"
-#include "mar/checksum.hpp"
-#include "mar/compression.hpp"
 #include "mar/name_index.hpp"
-#include "mar/sections.hpp"
 #include "mar/reader.hpp"
-#include "mar/writer.hpp"
 #include "mar/redact.hpp"
-
+#include "mar/sections.hpp"
+#include "mar/types.hpp"
+#include "mar/writer.hpp"
