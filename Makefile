@@ -30,6 +30,11 @@ ZIG_VERSION = 0.16.0
 # Developer tool paths — override if your tools are not on PATH.
 # macOS users: after 'brew install llvm', these will be under $(brew --prefix llvm)/bin/.
 # 'make dev-deps' will print the correct paths for your system.
+#
+# Required version: clang-format and clang-tidy 21.x
+# CI installs LLVM 21 from apt.llvm.org. Local dev should match:
+#   macOS: brew install llvm  (currently ships 21.x)
+#   Linux: apt-get install clang-format-21 clang-tidy-21
 CLANG_TIDY   ?= clang-tidy
 CLANG_FORMAT ?= clang-format
 ZIG          ?= zig

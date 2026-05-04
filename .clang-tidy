@@ -1,0 +1,69 @@
+---
+# Only report findings in our own source and headers, not in deps/ or
+# system headers. The regex is matched against the full file path.
+HeaderFilterRegex: '^.*(src|include/mar)/.*'
+
+# Format source edits using the project .clang-format when --fix is used.
+FormatStyle: file
+
+Checks: >
+  bugprone-assert-side-effect,
+  bugprone-bool-pointer-implicit-conversion,
+  bugprone-copy-constructor-init,
+  bugprone-dangling-handle,
+  bugprone-exception-escape,
+  bugprone-fold-init-type,
+  bugprone-forward-declaration-namespace,
+  bugprone-inaccurate-erase,
+  bugprone-incorrect-roundings,
+  bugprone-integer-division,
+  bugprone-macro-parentheses,
+  bugprone-misplaced-widening-cast,
+  bugprone-move-forwarding-reference,
+  bugprone-multiple-statement-macro,
+  bugprone-narrowing-conversions,
+  bugprone-not-null-terminated-result,
+  bugprone-signed-char-misuse,
+  bugprone-sizeof-container,
+  bugprone-sizeof-expression,
+  bugprone-spuriously-wake-up-functions,
+  bugprone-string-constructor,
+  bugprone-string-integer-assignment,
+  bugprone-suspicious-enum-usage,
+  bugprone-suspicious-memset-usage,
+  bugprone-suspicious-missing-comma,
+  bugprone-suspicious-semicolon,
+  bugprone-suspicious-string-compare,
+  bugprone-swapped-arguments,
+  bugprone-too-small-loop-variable,
+  bugprone-unhandled-self-assignment,
+  bugprone-unused-return-value,
+  bugprone-use-after-move,
+  bugprone-virtual-near-miss,
+  modernize-loop-convert,
+  modernize-use-emplace,
+  modernize-use-nullptr,
+  modernize-use-override,
+  performance-move-const-arg,
+  performance-move-constructor-init,
+  performance-no-automatic-move,
+  performance-unnecessary-copy-initialization,
+  performance-unnecessary-value-param,
+  readability-redundant-declaration,
+  readability-redundant-smartptr-get,
+
+# WarningsAsErrors is intentionally empty for now.
+# Once the codebase is clean, set this to '*' to make all warnings
+# hard errors in CI.
+WarningsAsErrors: ''
+
+CheckOptions:
+  # Flag narrowing conversions that lose floating-point precision as well
+  - key:   bugprone-narrowing-conversions.WarnOnFloatingPointNarrowingConversion
+    value: 'true'
+  # Only flag unused return values for [[nodiscard]]-annotated functions
+  # and a known list of functions where ignoring the return is almost
+  # always a bug (write, read, etc). Avoids excessive noise on helpers
+  # that return error codes by convention.
+  - key:   bugprone-unused-return-value.CheckedFunctions
+    value: '::std::.*'
