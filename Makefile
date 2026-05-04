@@ -34,6 +34,15 @@ CLANG_TIDY   ?= clang-tidy
 CLANG_FORMAT ?= clang-format
 ZIG          ?= zig
 
+# On macOS, Homebrew's clang-tidy doesn't know where Apple's SDK headers live.
+# Pass --sysroot so it can find <string>, <mutex>, etc. without errors.
+ifeq ($(UNAME_S),Darwin)
+    _MACOS_SDK := $(shell xcrun --show-sdk-path 2>/dev/null)
+    CLANG_TIDY_ARGS ?= $(if $(_MACOS_SDK),--extra-arg=--sysroot=$(_MACOS_SDK),)
+else
+    CLANG_TIDY_ARGS ?=
+endif
+
 CXX ?= g++
 # -----------------------------------------------------------------------------
 # Build configuration knobs
@@ -548,12 +557,19 @@ lint:
 	    echo ""; \
 	    exit 1; \
 	fi
+	@if [ "$$(wc -c < compile_commands.json)" -lt 10 ]; then \
+	    echo ""; \
+	    echo "  Error: compile_commands.json is empty."; \
+	    echo "  Regenerate it by running:  bear -- make"; \
+	    echo ""; \
+	    exit 1; \
+	fi
 	@echo "==> clang-format (check)"
 	@$(CLANG_FORMAT) --dry-run --Werror $(LINT_SRCS) \
 	    && echo "    OK" \
 	    || { echo "    Formatting issues found. Run 'make lint-fix' to apply fixes."; exit 1; }
 	@echo "==> clang-tidy"
-	@$(CLANG_TIDY) $(_LINT_CPP_SRCS) -p . 2>&1
+	@$(CLANG_TIDY) $(_LINT_CPP_SRCS) -p . $(CLANG_TIDY_ARGS) 2>&1
 	@echo "==> lint passed"
 
 # Apply clang-format fixes in place. Does not apply clang-tidy fixes
