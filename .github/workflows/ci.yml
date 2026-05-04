@@ -1,0 +1,300 @@
+name: CI/CD
+
+# Triggers:
+#   - push to main and version tags (always run)
+#   - pull_request to main (always run)
+#   - workflow_dispatch (manual, with optional SHA for testing a specific commit)
+#   - workflow_call (called by trigger.yml for PR comment gating — Phase 3)
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Commit SHA to build (leave empty to use the current ref)'
+        required: false
+        default: ''
+  workflow_call:
+    inputs:
+      sha:
+        description: 'Commit SHA to build'
+        required: false
+        default: ''
+        type: string
+
+# Cancel any in-progress run for the same ref or SHA when a new one starts.
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.sha || github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZIG_VERSION: '0.16.0'
+
+# =============================================================================
+# Job graph
+#
+#   lint ──────────────────────────────────────────────────────────────┐
+#                                                                       │
+#   test (matrix: 22.04 / 24.04 / macOS) ──► dist (22.04 / macOS) ──► integration-test ──► release
+#
+# lint and test start in parallel. A compile failure on any test matrix
+# entry (fail-fast: true) cancels the other matrix entries immediately.
+# dist, integration-test, and release only run if all preceding jobs pass.
+# release only runs on v* tag pushes.
+# =============================================================================
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # Lint — formatting + static analysis
+  # Runs on ubuntu-24.04 so clang-tidy/clang-format default to LLVM 18.
+  # Runs in parallel with test; does not gate test but gates release.
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ inputs.sha || github.sha }}
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-lint-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-lint-
+
+      - name: Install dependencies + lint tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libzstd-dev zlib1g-dev liblz4-dev libdeflate-dev libbz2-dev \
+            bear clang-tidy clang-format
+
+      - name: Generate compile_commands.json
+        run: bear -- make -j
+
+      - name: Run lint
+        run: make lint
+
+  # ---------------------------------------------------------------------------
+  # Test — build from source + unit tests + perf regression check
+  # All three OS versions must pass (fail-fast: true cancels on first failure).
+  # ---------------------------------------------------------------------------
+  test:
+    name: Build & Test (${{ matrix.os }})
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ inputs.sha || github.sha }}
+
+      - name: Cache apt packages
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ matrix.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-${{ matrix.os }}-
+
+      - name: Cache Homebrew downloads
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: brew-${{ runner.os }}-
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libzstd-dev zlib1g-dev liblz4-dev libdeflate-dev libbz2-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install pkg-config zstd lz4 libdeflate bzip2 blake3 || true
+
+      - name: Build
+        run: make -j
+
+      - name: Unit tests
+        run: make test
+
+      - name: Performance regression check
+        # Always exits 0 — treated as a warning, not a gate.
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            BASELINE="benchmarks/baselines/linux-baseline.txt"
+          else
+            BASELINE="benchmarks/baselines/macos-baseline.txt"
+          fi
+          ./scripts/perf_check.sh "${{ runner.os }}" "$BASELINE"
+
+  # ---------------------------------------------------------------------------
+  # Distribution build — produces the release artifacts
+  #
+  # Linux (ubuntu-22.04): installs zig and runs make dist-all, which builds
+  #   musl static binaries (no glibc dependency) when zig is available.
+  # macOS (macos-latest): builds a Universal Binary (ARM64 + x86_64).
+  #
+  # Only runs after all test matrix entries pass.
+  # ---------------------------------------------------------------------------
+  dist:
+    name: Distribution Build (${{ matrix.platform }})
+    needs: test
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+          - os: macos-latest
+            platform: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ inputs.sha || github.sha }}
+
+      - name: Cache apt packages
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ matrix.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-${{ matrix.os }}-
+
+      - name: Cache Homebrew downloads
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: brew-${{ runner.os }}-
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libzstd-dev zlib1g-dev liblz4-dev libdeflate-dev libbz2-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install pkg-config zstd lz4 libdeflate bzip2 blake3 || true
+
+      - name: Install zig (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ZIG_ARCH=$(uname -m)
+          ZIG_DIR="zig-linux-${ZIG_ARCH}-${{ env.ZIG_VERSION }}"
+          curl -fsSL "https://ziglang.org/download/${{ env.ZIG_VERSION }}/${ZIG_DIR}.tar.xz" \
+            | tar xJ -C /tmp
+          echo "/tmp/${ZIG_DIR}" >> "$GITHUB_PATH"
+
+      - name: Build distribution binaries
+        run: make dist-all
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mar-binaries-${{ matrix.platform }}
+          path: dist/mar-*
+          # 30 days for release tags, 1 day for everything else
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 30 || 1 }}
+
+  # ---------------------------------------------------------------------------
+  # Integration tests — run against the dist binary, not the build-dir binary
+  #
+  # This is the key bootstrapping step: the binary under test is the exact
+  # artifact that would be shipped to users. MAR_BIN overrides the default
+  # ./mar path in integration_test.sh.
+  #
+  # macOS: the dist binary dynamically links system libs, so brew deps must
+  # be installed here too.
+  # Linux: the musl binary is fully static — no extra deps needed.
+  # ---------------------------------------------------------------------------
+  integration-test:
+    name: Integration Tests (${{ matrix.platform }})
+    needs: dist
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+            dist_bin: mar-linux-x86_64-musl
+          - os: macos-latest
+            platform: macos
+            dist_bin: mar-macos-universal
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ inputs.sha || github.sha }}
+
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mar-binaries-${{ matrix.platform }}
+          path: dist/
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install pkg-config zstd lz4 libdeflate bzip2 blake3 || true
+
+      - name: Run integration tests
+        run: |
+          chmod +x dist/${{ matrix.dist_bin }}
+          MAR_BIN="${GITHUB_WORKSPACE}/dist/${{ matrix.dist_bin }}" \
+            ./tests/integration_test.sh
+
+  # ---------------------------------------------------------------------------
+  # Release — creates a GitHub Release and attaches distribution binaries
+  # Only runs on v* tag pushes. Both lint and integration-test must pass.
+  # ---------------------------------------------------------------------------
+  release:
+    name: Create Release
+    needs: [lint, integration-test]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-dist
+          pattern: mar-binaries-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: all-dist/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
