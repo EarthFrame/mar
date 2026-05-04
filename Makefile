@@ -313,7 +313,7 @@ endif
 
 # Phony targets
 .PHONY: all clean test install check-deps check-dev-deps drop-cache static release \
-        deps debug system-deps dev-deps lint lint-fix \
+        deps debug system-deps dev-deps lint lint-fix format \
         dist-linux-x86_64 \
 		dist-linux-x86_64-sse42 \
 		dist-linux-x86_64-avx2 \
@@ -574,7 +574,10 @@ lint:
 
 # Apply clang-format fixes in place. Does not apply clang-tidy fixes
 # automatically since those require careful review.
-lint-fix:
+lint-fix: format
+
+# Alias for lint-fix: reformat all source files in place.
+format:
 	@echo "==> clang-format (fix)"
 	@$(CLANG_FORMAT) -i $(LINT_SRCS)
 	@echo "    Done. Review changes with 'git diff' before committing."
@@ -935,8 +938,9 @@ help:
 	@echo ""
 	@echo "Lint & Static Analysis:"
 	@echo "  bear -- make         - Generate compile_commands.json (run once before lint)"
+	@echo "  make format          - Reformat all source files in place (clang-format)"
 	@echo "  make lint            - Check formatting + run clang-tidy (requires compile_commands.json)"
-	@echo "  make lint-fix        - Apply clang-format fixes in place"
+	@echo "  make lint-fix        - Alias for 'make format'"
 	@echo ""
 	@echo "Developer Tools:"
 	@echo "  make dev-deps        - Install dev tools: bear, clang-tidy, clang-format, zig"
