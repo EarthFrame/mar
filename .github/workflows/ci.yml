@@ -193,12 +193,12 @@ jobs:
           set -e
           apk add --no-cache build-base linux-headers pkgconf cmake \
             zstd-dev lz4-dev bzip2-dev zlib-dev libdeflate-dev liburing-dev
-          make clean
+          make clean && mkdir -p dist
           make STATIC=1 BUILD=release \
             ARCH_FLAGS="-march=x86-64 -mtune=generic" \
             TARGET_NAME=dist/mar-linux-x86_64-musl \
             all-internal
-          make clean
+          make clean && mkdir -p dist
           make STATIC=1 BUILD=release \
             ARCH_FLAGS="-march=nehalem -mtune=generic" \
             TARGET_NAME=dist/mar-linux-x86_64-sse42-musl \
