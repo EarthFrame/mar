@@ -156,22 +156,14 @@ jobs:
   # Linux (ubuntu-22.04): builds inside an Alpine 3.20 Docker container.
   #   Alpine uses musl natively, so STATIC=1 produces a fully static musl
   #   binary with no glibc dependency. No zig required.
-  # macOS (macos-latest): builds a Universal Binary (ARM64 + x86_64).
+  # macOS: removed in favor of Homebrew distribution.
   #
   # Only runs after all test matrix entries pass.
   # ---------------------------------------------------------------------------
   dist:
-    name: Distribution Build (${{ matrix.platform }})
+    name: Distribution Build (Linux)
     needs: test
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - os: ubuntu-22.04
-            platform: linux
-          - os: macos-latest
-            platform: macos
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -179,20 +171,7 @@ jobs:
           submodules: recursive
           ref: ${{ inputs.sha || github.sha }}
 
-      - name: Cache Homebrew downloads
-        if: runner.os == 'macOS'
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Caches/Homebrew
-          key: brew-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
-          restore-keys: brew-${{ runner.os }}-
-
-      - name: Install dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: brew install pkg-config zstd lz4 libdeflate bzip2 blake3 || true
-
       - name: Build distribution binaries (Linux, musl via Alpine)
-        if: runner.os == 'Linux'
         run: |
           mkdir -p dist
           # Write a build script to run inside the Alpine container.
@@ -224,43 +203,28 @@ jobs:
             alpine:3.20 \
             sh alpine-build.sh
 
-      - name: Build distribution binaries (macOS)
-        if: runner.os == 'macOS'
-        run: make dist-macos-universal
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mar-binaries-${{ matrix.platform }}
+          name: mar-binaries-linux
           path: dist/mar-*
           # 30 days for release tags, 1 day for everything else
           retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 30 || 1 }}
 
   # ---------------------------------------------------------------------------
-  # Integration tests — run against the dist binary, not the build-dir binary
+  # Integration tests — run against the dist binary (Linux only)
+  # macOS testing uses the non-static build from the test matrix.
   #
   # This is the key bootstrapping step: the binary under test is the exact
   # artifact that would be shipped to users. MAR_BIN overrides the default
   # ./mar path in integration_test.sh.
   #
-  # macOS: the dist binary dynamically links system libs, so brew deps must
-  # be installed here too.
   # Linux: the musl binary is fully static — no extra deps needed.
   # ---------------------------------------------------------------------------
   integration-test:
-    name: Integration Tests (${{ matrix.platform }})
+    name: Integration Tests (Linux)
     needs: dist
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - os: ubuntu-22.04
-            platform: linux
-            dist_bin: mar-linux-x86_64-musl
-          - os: macos-latest
-            platform: macos
-            dist_bin: mar-macos-universal
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -271,17 +235,13 @@ jobs:
       - name: Download distribution artifacts
         uses: actions/download-artifact@v4
         with:
-          name: mar-binaries-${{ matrix.platform }}
+          name: mar-binaries-linux
           path: dist/
-
-      - name: Install dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: brew install pkg-config zstd lz4 libdeflate bzip2 blake3 || true
 
       - name: Run integration tests
         run: |
-          chmod +x dist/${{ matrix.dist_bin }}
-          MAR_BIN="${GITHUB_WORKSPACE}/dist/${{ matrix.dist_bin }}" \
+          chmod +x dist/mar-linux-x86_64-musl
+          MAR_BIN="${GITHUB_WORKSPACE}/dist/mar-linux-x86_64-musl" \
             ./tests/integration_test.sh
 
   # ---------------------------------------------------------------------------
@@ -311,4 +271,47 @@ jobs:
           prerelease: false
           generate_release_notes: true
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout (for formula update)
+        uses: actions/checkout@v4
+
+      - name: Update Homebrew formula with SHA256
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          TARBALL_URL="https://github.com/earthframe/mar/archive/refs/tags/v${VERSION}.tar.gz"
+          
+          # Download and compute SHA256 from the public GitHub release tarball
+          SHA256=$(curl -sL "$TARBALL_URL" | sha256sum | cut -d' ' -f1)
+          
+          # Validate SHA256 format (should be 64 hex characters)
+          if ! [[ "$SHA256" =~ ^[a-f0-9]{64}$ ]]; then
+            echo "ERROR: Invalid SHA256 hash computed: $SHA256"
+            exit 1
+          fi
+          
+          # Update the formula file with version-specific values
+          sed -i.bak "s|url \".*\"|url \"$TARBALL_URL\"|" .homebrew/mar.rb
+          sed -i.bak "s/sha256 \".*\"/sha256 \"$SHA256\"/" .homebrew/mar.rb
+          rm .homebrew/mar.rb.bak
+          
+          # Verify the file was updated correctly
+          if ! grep -q "$SHA256" .homebrew/mar.rb; then
+            echo "ERROR: Failed to update formula with SHA256"
+            exit 1
+          fi
+          
+          # Create a commit with the updated formula
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .homebrew/mar.rb
+          git commit -m "Update Homebrew formula for v${VERSION}
+
+This commit was auto-generated by CI/CD when the release tag was pushed.
+SHA256 was computed from the public source tarball on GitHub.
+No secrets or credentials are embedded in this commit."
+          git push
+        env:
+          # GitHub automatically provides a scoped token for this repository
+          # It only has access to this repo and expires after the workflow completes
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
