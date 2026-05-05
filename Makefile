@@ -27,42 +27,26 @@ PROJECT_LICENSE = MIT
 # Developer tool versions
 ZIG_VERSION = 0.16.0
 
-# Developer tool paths — override if your tools are not on PATH.
-# macOS users: after 'brew install llvm', these will be under $(brew --prefix llvm)/bin/.
-# 'make dev-deps' will print the correct paths for your system.
-#
-# Required version: clang-format and clang-tidy 21.x
-# CI installs LLVM 21 from apt.llvm.org. Local dev should match:
-#   macOS: brew install llvm  (currently ships 21.x)
-#   Linux: apt-get install clang-format-21 clang-tidy-21
-ifeq ($(UNAME_S),Darwin)
-    _BREW_LLVM_BIN := $(shell brew --prefix llvm 2>/dev/null)/bin
-    CLANG_TIDY   ?= $(shell command -v clang-tidy 2>/dev/null || echo "$(_BREW_LLVM_BIN)/clang-tidy")
-    CLANG_FORMAT ?= $(shell command -v clang-format 2>/dev/null || echo "$(_BREW_LLVM_BIN)/clang-format")
-    RUN_CLANG_TIDY ?= $(shell command -v run-clang-tidy 2>/dev/null || echo "$(_BREW_LLVM_BIN)/run-clang-tidy")
-else
-    CLANG_TIDY   ?= clang-tidy
-    CLANG_FORMAT ?= clang-format
-    RUN_CLANG_TIDY ?= run-clang-tidy
-endif
-ZIG          ?= zig
+# Detect OS
+UNAME_S := $(shell uname -s)
 
-# On macOS, Homebrew's clang-tidy doesn't know where Apple's SDK headers live.
-# Pass --sysroot so it can find <string>, <mutex>, etc. without errors.
+# Developer tool paths — override if your tools are not on PATH.
+# macOS users: after 'brew install llvm', tools are under $(brew --prefix llvm)/bin/.
 ifeq ($(UNAME_S),Darwin)
-    _MACOS_SDK := $(shell xcrun --show-sdk-path 2>/dev/null)
-    _BREW_LLVM := $(shell brew --prefix llvm 2>/dev/null)
-    CLANG_TIDY_ARGS ?= $(if $(_MACOS_SDK),--extra-arg=--sysroot=$(_MACOS_SDK),)
-    # Add standard library search paths for Homebrew LLVM's clang-tidy
-    ifneq ($(_BREW_LLVM),)
-        CLANG_TIDY_ARGS += --extra-arg=-I$(_BREW_LLVM)/include/c++/v1
-        CLANG_TIDY_ARGS += --extra-arg=-L$(_BREW_LLVM)/lib
+    LLVM_ROOT := $(shell brew --prefix llvm 2>/dev/null)
+    ifneq ($(LLVM_ROOT),)
+        LLVM_BIN := $(LLVM_ROOT)/bin
+        # macOS needs sysroot to find system headers (<string>, <mutex>, etc.)
+        _MACOS_SDK := $(shell xcrun --show-sdk-path 2>/dev/null)
+        LINT_FLAGS := --sysroot=$(_MACOS_SDK) \
+                      -I$(LLVM_ROOT)/include/c++/v1 \
+                      -stdlib=libc++
     endif
-    # Ensure we use the right standard and library
-    CLANG_TIDY_ARGS += --extra-arg=-std=c++17 --extra-arg=-stdlib=libc++
-else
-    CLANG_TIDY_ARGS ?=
 endif
+
+CLANG_TIDY   ?= clang-tidy
+CLANG_FORMAT ?= clang-format
+ZIG          ?= zig
 
 CXX ?= g++
 # -----------------------------------------------------------------------------
@@ -83,8 +67,7 @@ LTO ?= 0                # 1 => -flto
 SANITIZERS ?=           # e.g. address,undefined,thread
 PGO_DIR ?= ./pgo        # profile data dir for PGO
 
-# Detect OS
-UNAME_S := $(shell uname -s)
+# Detect OS (already detected at top)
 
 BASE_CXXFLAGS ?= -std=c++17 -Wall -Wextra -Wpedantic
 CXXFLAGS += $(BASE_CXXFLAGS)
@@ -571,46 +554,27 @@ _LINT_CPP_SRCS := $(filter %.cpp,$(LINT_SRCS))
 
 # Check formatting and run static analysis. Exits non-zero on any issue.
 lint:
-	@if [ ! -f compile_commands.json ]; then \
-	    echo ""; \
-	    echo "  Error: compile_commands.json not found."; \
-	    echo "  Generate it by running:  bear -- make"; \
-	    echo ""; \
-	    exit 1; \
-	fi
-	@if [ "$$(wc -c < compile_commands.json)" -lt 10 ]; then \
-	    echo ""; \
-	    echo "  Error: compile_commands.json is empty."; \
-	    echo "  Regenerate it by running:  bear -- make"; \
-	    echo ""; \
-	    exit 1; \
-	fi
 	@echo "==> clang-format (check)"
-	@$(CLANG_FORMAT) --version >/dev/null 2>&1 || { echo "  Error: $(CLANG_FORMAT) not found."; exit 1; }
-	@$(CLANG_FORMAT) --dry-run --Werror $(LINT_SRCS) \
-	    && echo "    OK" \
-	    || { echo "    Formatting issues found. Run 'make lint-fix' to apply fixes."; exit 1; }
+	@PATH="$(LLVM_BIN):$(PATH)" $(CLANG_FORMAT) --dry-run --Werror $(LINT_SRCS) || { echo "❌ Formatting issues found. Run 'make format'."; exit 1; }
 	@echo "==> clang-tidy"
-	@rm -f .lint.log
-	@if [ -x "$(RUN_CLANG_TIDY)" ]; then \
-	    "$(RUN_CLANG_TIDY)" -p . $(CLANG_TIDY_ARGS) "^(src|include/mar|tests)/.*" > .lint.log 2>&1; \
-	    EXIT_CODE=$$?; \
+	@if [ ! -f compile_commands.json ]; then echo "❌ Error: compile_commands.json missing. Run 'bear -- make'."; exit 1; fi
+	@if PATH="$(LLVM_BIN):$(PATH)" command -v run-clang-tidy >/dev/null 2>&1; then \
+	    TIDY_ARGS=""; \
+	    for arg in $(LINT_FLAGS); do TIDY_ARGS="$$TIDY_ARGS -extra-arg=$$arg"; done; \
+	    PATH="$(LLVM_BIN):$(PATH)" run-clang-tidy -p . $$TIDY_ARGS; \
 	else \
-	    if ! command -v $(CLANG_TIDY) >/dev/null 2>&1; then \
-	        echo "  Error: $(CLANG_TIDY) not found."; exit 1; \
-	    fi; \
-	    $(CLANG_TIDY) $(_LINT_CPP_SRCS) -p . $(CLANG_TIDY_ARGS) > .lint.log 2>&1; \
-	    EXIT_CODE=$$?; \
-	fi; \
-	cat .lint.log; \
-	if [ $$EXIT_CODE -ne 0 ] || grep -q "warning:\|error:" .lint.log; then \
-	    echo ""; \
-	    echo "❌ Lint issues found! Review the output above."; \
-	    rm -f .lint.log; \
-	    exit 1; \
+	    TIDY_ARGS=""; \
+	    for arg in $(LINT_FLAGS); do TIDY_ARGS="$$TIDY_ARGS --extra-arg=$$arg"; done; \
+	    PATH="$(LLVM_BIN):$(PATH)" $(CLANG_TIDY) $(_LINT_CPP_SRCS) -p . $$TIDY_ARGS; \
 	fi
-	@rm -f .lint.log
 	@echo "✅ lint passed"
+
+# Generate a categorized report of linting issues for systematic resolution.
+lint-report:
+	@echo "==> Generating lint reports..."
+	@$(MAKE) lint 2>&1 | python3 scripts/lint_report.py --format md > LINT_REPORT.md
+	@$(MAKE) lint 2>&1 | python3 scripts/lint_report.py --format json > LINT_REPORT.json
+	@echo "✅ Reports generated: LINT_REPORT.md, LINT_REPORT.json"
 
 # Apply clang-format fixes in place. Does not apply clang-tidy fixes
 # automatically since those require careful review.

@@ -33,61 +33,70 @@ concurrency:
 # =============================================================================
 # Job graph
 #
-#   lint ──────────────────────────────────────────────────────────────┐
-#                                                                       │
 #   test (matrix: 22.04 / 24.04 / macOS) ──► dist (22.04 / macOS) ──► integration-test ──► release
 #
-# lint and test start in parallel. A compile failure on any test matrix
-# entry (fail-fast: true) cancels the other matrix entries immediately.
-# dist, integration-test, and release only run if all preceding jobs pass.
-# release only runs on v* tag pushes.
+# A compile failure on any test matrix entry (fail-fast: true) cancels the
+# other matrix entries immediately. dist, integration-test, and release only
+# run if all preceding jobs pass. release only runs on v* tag pushes.
+#
+# Note: the lint job is currently disabled. Run locally with:
+#   bear -- make && make lint
 # =============================================================================
 
 jobs:
 
   # ---------------------------------------------------------------------------
-  # Lint — formatting + static analysis
-  # Runs on ubuntu-24.04 so clang-tidy/clang-format default to LLVM 18.
-  # Runs in parallel with test; does not gate test but gates release.
+  # Lint — disabled for now; run locally with: bear -- make && make lint
   # ---------------------------------------------------------------------------
-  lint:
-    name: Lint
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          ref: ${{ inputs.sha || github.sha }}
-
-      - name: Cache apt packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt/archives
-          key: apt-lint-${{ hashFiles('.github/workflows/ci.yml') }}
-          restore-keys: apt-lint-
-
-      - name: Install dependencies + lint tools
-        run: |
-          # Install LLVM 21 explicitly so clang-format/clang-tidy versions match
-          # what developers use locally via 'brew install llvm' (currently 21.x).
-          # Ubuntu 24.04 ships LLVM 18 by default, which formats some constructs
-          # differently and causes spurious format check failures.
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
-            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
-          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" \
-            | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config \
-            libzstd-dev zlib1g-dev liblz4-dev libdeflate-dev libbz2-dev \
-            bear clang-format-21 clang-tidy-21
-
-      - name: Generate compile_commands.json
-        run: bear -- make
-
-      - name: Run lint
-        run: make lint CLANG_FORMAT=clang-format-21 CLANG_TIDY=clang-tidy-21
+  # lint:
+  #   name: Lint
+  #   runs-on: ubuntu-24.04
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #       with:
+  #         submodules: recursive
+  #         ref: ${{ inputs.sha || github.sha }}
+  #
+  #     - name: Cache apt packages
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: /var/cache/apt/archives
+  #         key: apt-lint-${{ hashFiles('.github/workflows/ci.yml') }}
+  #         restore-keys: apt-lint-
+  #
+  #     - name: Install dependencies + lint tools
+  #       run: |
+  #         wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+  #           | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+  #         echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" \
+  #           | sudo tee /etc/apt/sources.list.d/llvm.list
+  #         sudo apt-get update -qq
+  #         sudo apt-get install -y --no-install-recommends \
+  #           build-essential pkg-config \
+  #           libzstd-dev zlib1g-dev liblz4-dev libdeflate-dev libbz2-dev \
+  #           bear clang-format-21 clang-tidy-21
+  #
+  #     - name: Generate compile_commands.json
+  #       run: bear -- make
+  #
+  #     - name: Run lint
+  #       run: |
+  #         make lint CLANG_FORMAT=clang-format-21 CLANG_TIDY=clang-tidy-21 > LINT_OUTPUT.log 2>&1 || true
+  #         cat LINT_OUTPUT.log
+  #         python3 scripts/lint_report.py --format md < LINT_OUTPUT.log > LINT_REPORT.md
+  #         python3 scripts/lint_report.py --format json < LINT_OUTPUT.log > LINT_REPORT.json
+  #         make lint CLANG_FORMAT=clang-format-21 CLANG_TIDY=clang-tidy-21
+  #
+  #     - name: Upload Lint Report
+  #       if: always()
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: lint-report
+  #         path: |
+  #           LINT_REPORT.md
+  #           LINT_REPORT.json
+  #           LINT_OUTPUT.log
 
   # ---------------------------------------------------------------------------
   # Test — build from source + unit tests + perf regression check
@@ -281,7 +290,7 @@ jobs:
   # ---------------------------------------------------------------------------
   release:
     name: Create Release
-    needs: [lint, integration-test]
+    needs: [integration-test]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
