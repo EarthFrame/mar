@@ -140,6 +140,7 @@ To update the baselines, simply edit the files in `benchmarks/baselines/` with t
 
 The workflow can also be triggered manually via the **Actions** tab on GitHub using the `workflow_dispatch` event. This is useful for testing the build process without creating a new tag or commit.
 
+
 ## Linting Report
 
 A detailed linting report is generated on every commit:
