@@ -35,15 +35,31 @@ ZIG_VERSION = 0.16.0
 # CI installs LLVM 21 from apt.llvm.org. Local dev should match:
 #   macOS: brew install llvm  (currently ships 21.x)
 #   Linux: apt-get install clang-format-21 clang-tidy-21
-CLANG_TIDY   ?= clang-tidy
-CLANG_FORMAT ?= clang-format
+ifeq ($(UNAME_S),Darwin)
+    _BREW_LLVM_BIN := $(shell brew --prefix llvm 2>/dev/null)/bin
+    CLANG_TIDY   ?= $(shell command -v clang-tidy 2>/dev/null || echo "$(_BREW_LLVM_BIN)/clang-tidy")
+    CLANG_FORMAT ?= $(shell command -v clang-format 2>/dev/null || echo "$(_BREW_LLVM_BIN)/clang-format")
+    RUN_CLANG_TIDY ?= $(shell command -v run-clang-tidy 2>/dev/null || echo "$(_BREW_LLVM_BIN)/run-clang-tidy")
+else
+    CLANG_TIDY   ?= clang-tidy
+    CLANG_FORMAT ?= clang-format
+    RUN_CLANG_TIDY ?= run-clang-tidy
+endif
 ZIG          ?= zig
 
 # On macOS, Homebrew's clang-tidy doesn't know where Apple's SDK headers live.
 # Pass --sysroot so it can find <string>, <mutex>, etc. without errors.
 ifeq ($(UNAME_S),Darwin)
     _MACOS_SDK := $(shell xcrun --show-sdk-path 2>/dev/null)
+    _BREW_LLVM := $(shell brew --prefix llvm 2>/dev/null)
     CLANG_TIDY_ARGS ?= $(if $(_MACOS_SDK),--extra-arg=--sysroot=$(_MACOS_SDK),)
+    # Add standard library search paths for Homebrew LLVM's clang-tidy
+    ifneq ($(_BREW_LLVM),)
+        CLANG_TIDY_ARGS += --extra-arg=-I$(_BREW_LLVM)/include/c++/v1
+        CLANG_TIDY_ARGS += --extra-arg=-L$(_BREW_LLVM)/lib
+    endif
+    # Ensure we use the right standard and library
+    CLANG_TIDY_ARGS += --extra-arg=-std=c++17 --extra-arg=-stdlib=libc++
 else
     CLANG_TIDY_ARGS ?=
 endif
@@ -570,12 +586,31 @@ lint:
 	    exit 1; \
 	fi
 	@echo "==> clang-format (check)"
+	@$(CLANG_FORMAT) --version >/dev/null 2>&1 || { echo "  Error: $(CLANG_FORMAT) not found."; exit 1; }
 	@$(CLANG_FORMAT) --dry-run --Werror $(LINT_SRCS) \
 	    && echo "    OK" \
 	    || { echo "    Formatting issues found. Run 'make lint-fix' to apply fixes."; exit 1; }
 	@echo "==> clang-tidy"
-	@$(CLANG_TIDY) $(_LINT_CPP_SRCS) -p . $(CLANG_TIDY_ARGS) 2>&1
-	@echo "==> lint passed"
+	@rm -f .lint.log
+	@if [ -x "$(RUN_CLANG_TIDY)" ]; then \
+	    "$(RUN_CLANG_TIDY)" -p . $(CLANG_TIDY_ARGS) "^(src|include/mar|tests)/.*" > .lint.log 2>&1; \
+	    EXIT_CODE=$$?; \
+	else \
+	    if ! command -v $(CLANG_TIDY) >/dev/null 2>&1; then \
+	        echo "  Error: $(CLANG_TIDY) not found."; exit 1; \
+	    fi; \
+	    $(CLANG_TIDY) $(_LINT_CPP_SRCS) -p . $(CLANG_TIDY_ARGS) > .lint.log 2>&1; \
+	    EXIT_CODE=$$?; \
+	fi; \
+	cat .lint.log; \
+	if [ $$EXIT_CODE -ne 0 ] || grep -q "warning:\|error:" .lint.log; then \
+	    echo ""; \
+	    echo "❌ Lint issues found! Review the output above."; \
+	    rm -f .lint.log; \
+	    exit 1; \
+	fi
+	@rm -f .lint.log
+	@echo "✅ lint passed"
 
 # Apply clang-format fixes in place. Does not apply clang-tidy fixes
 # automatically since those require careful review.
