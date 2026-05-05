@@ -178,30 +178,41 @@ jobs:
           # Alpine uses musl natively, so STATIC=1 produces a musl-linked
           # binary with no glibc dependency — no zig required.
           cat > alpine-build.sh << 'EOF'
-          set -e
-          apk add --no-cache build-base linux-headers pkgconf cmake \
+          set -ex
+          apk add --no-cache build-base linux-headers pkgconf cmake git \
             zstd-dev zstd-static \
             lz4-dev lz4-static \
             bzip2-dev bzip2-static \
             zlib-dev zlib-static \
             libdeflate-dev libdeflate-static \
             liburing-dev
+          # Ensure submodules are initialized (in case they weren't)
+          git submodule update --init --recursive
+          
           make clean && mkdir -p dist
           make STATIC=1 BUILD=release \
             ARCH_FLAGS="-march=x86-64 -mtune=generic" \
             TARGET_NAME=dist/mar-linux-x86_64-musl \
             all-internal
+          ls -lh dist/mar-linux-x86_64-musl || (echo "ERROR: First build failed"; exit 1)
+          
           make clean && mkdir -p dist
           make STATIC=1 BUILD=release \
             ARCH_FLAGS="-march=nehalem -mtune=generic" \
             TARGET_NAME=dist/mar-linux-x86_64-sse42-musl \
             all-internal
+          ls -lh dist/mar-linux-x86_64-sse42-musl || (echo "ERROR: Second build failed"; exit 1)
+          
+          echo "✅ All builds completed successfully"
           EOF
           docker run --rm \
             -v "$GITHUB_WORKSPACE:/work" \
             -w /work \
             alpine:3.20 \
             sh alpine-build.sh
+          
+          # Verify files exist on host
+          ls -lh dist/mar-* || (echo "ERROR: Dist files not found on host"; exit 1)
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -240,6 +251,15 @@ jobs:
 
       - name: Run integration tests
         run: |
+          # Verify the artifact exists before proceeding
+          if [ ! -f "dist/mar-linux-x86_64-musl" ]; then
+            echo "❌ ERROR: Distribution binary not found!"
+            echo "Contents of dist directory:"
+            ls -lh dist/ || echo "dist directory is empty"
+            exit 1
+          fi
+          
+          echo "✅ Found binary: $(ls -lh dist/mar-linux-x86_64-musl)"
           chmod +x dist/mar-linux-x86_64-musl
           MAR_BIN="${GITHUB_WORKSPACE}/dist/mar-linux-x86_64-musl" \
             ./tests/integration_test.sh
