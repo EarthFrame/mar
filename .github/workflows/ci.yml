@@ -30,6 +30,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ inputs.sha || github.ref }}
   cancel-in-progress: true
 
+# Use Node.js 24 for all GitHub Actions
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 # =============================================================================
 # Job graph
 #
@@ -53,13 +57,13 @@ jobs:
   #   runs-on: ubuntu-24.04
   #   steps:
   #     - name: Checkout
-  #       uses: actions/checkout@v4.2.0
+  #       uses: actions/checkout@v4
   #       with:
   #         submodules: recursive
   #         ref: ${{ inputs.sha || github.sha }}
   #
   #     - name: Cache apt packages
-  #       uses: actions/cache@v4.1.2
+  #       uses: actions/cache@v4
   #       with:
   #         path: /var/cache/apt/archives
   #         key: apt-lint-${{ hashFiles('.github/workflows/ci.yml') }}
@@ -90,7 +94,7 @@ jobs:
   #
   #     - name: Upload Lint Report
   #       if: always()
-  #       uses: actions/upload-artifact@v4.4.0
+  #       uses: actions/upload-artifact@v4
   #       with:
   #         name: lint-report
   #         path: |
@@ -111,14 +115,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.0
+        uses: actions/checkout@v4
         with:
           submodules: recursive
           ref: ${{ inputs.sha || github.sha }}
 
       - name: Cache apt packages
         if: runner.os == 'Linux'
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4
         with:
           path: /var/cache/apt/archives
           key: apt-${{ matrix.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
@@ -126,7 +130,7 @@ jobs:
 
       - name: Cache Homebrew downloads
         if: runner.os == 'macOS'
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@v4
         with:
           path: ~/Library/Caches/Homebrew
           key: brew-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
@@ -166,7 +170,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.0
+        uses: actions/checkout@v4
         with:
           submodules: recursive
           ref: ${{ inputs.sha || github.sha }}
@@ -219,7 +223,7 @@ jobs:
           ls -lh dist/mar-* || (echo "ERROR: Dist files not found on host"; exit 1)
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4.4.0
+        uses: actions/upload-artifact@v4
         with:
           name: mar-binaries-linux
           path: dist/mar-*
@@ -242,13 +246,13 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.0
+        uses: actions/checkout@v4
         with:
           submodules: recursive
           ref: ${{ inputs.sha || github.sha }}
 
       - name: Download distribution artifacts
-        uses: actions/download-artifact@v4.1.8
+        uses: actions/download-artifact@v4
         with:
           name: mar-binaries-linux
           path: dist/
@@ -281,7 +285,7 @@ jobs:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4.1.8
+        uses: actions/download-artifact@v4
         with:
           path: all-dist
           pattern: mar-binaries-*
@@ -298,7 +302,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout (for formula update)
-        uses: actions/checkout@v4.2.0
+        uses: actions/checkout@v4
 
       - name: Update Homebrew formula with SHA256
         run: |
