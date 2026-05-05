@@ -192,7 +192,12 @@ jobs:
           cat > alpine-build.sh << 'EOF'
           set -e
           apk add --no-cache build-base linux-headers pkgconf cmake \
-            zstd-dev lz4-dev bzip2-dev zlib-dev libdeflate-dev liburing-dev
+            zstd-dev zstd-static \
+            lz4-dev lz4-static \
+            bzip2-dev bzip2-static \
+            zlib-dev zlib-static \
+            libdeflate-dev libdeflate-static \
+            liburing-dev
           make clean && mkdir -p dist
           make STATIC=1 BUILD=release \
             ARCH_FLAGS="-march=x86-64 -mtune=generic" \
