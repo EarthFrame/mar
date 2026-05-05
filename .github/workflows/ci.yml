@@ -186,6 +186,8 @@ jobs:
             zlib-dev zlib-static \
             libdeflate-dev libdeflate-static \
             liburing-dev
+          # Work around Git's dubious ownership check for mounted Docker volumes
+          git config --global --add safe.directory /work
           # Ensure submodules are initialized (in case they weren't)
           git submodule update --init --recursive
           
