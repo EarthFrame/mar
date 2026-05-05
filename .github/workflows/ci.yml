@@ -191,7 +191,7 @@ jobs:
           # binary with no glibc dependency — no zig required.
           cat > alpine-build.sh << 'EOF'
           set -e
-          apk add --no-cache build-base pkgconf cmake \
+          apk add --no-cache build-base linux-headers pkgconf cmake \
             zstd-dev lz4-dev bzip2-dev zlib-dev libdeflate-dev liburing-dev
           make clean
           make STATIC=1 BUILD=release \
