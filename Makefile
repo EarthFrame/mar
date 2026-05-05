@@ -759,46 +759,8 @@ dist-linux-arm64-musl: zig-check
 	@file $(DIST_DIR)/mar-linux-arm64-musl
 	@ls -lh $(DIST_DIR)/mar-linux-arm64-musl
 
-# macOS ARM64 (Apple Silicon: M1, M2, M3, M4)
-dist-macos-arm64:
-	@mkdir -p $(DIST_DIR)
-	$(MAKE) clean
-	$(MAKE) BUILD=release \
-	        ARCH_FLAGS="-arch arm64" \
-	        TARGET_NAME=$(DIST_DIR)/mar-macos-arm64 \
-	        all-internal
-	@echo ""
-	@echo "Built: $(DIST_DIR)/mar-macos-arm64 (Apple Silicon)"
-	@file $(DIST_DIR)/mar-macos-arm64
-	@ls -lh $(DIST_DIR)/mar-macos-arm64
-
-# macOS x86_64 (Intel Macs)
-dist-macos-x86_64:
-	@mkdir -p $(DIST_DIR)
-	$(MAKE) clean
-	$(MAKE) BUILD=release \
-	        ARCH_FLAGS="-arch x86_64 -march=nehalem" \
-	        TARGET_NAME=$(DIST_DIR)/mar-macos-x86_64 \
-	        all-internal
-	@echo ""
-	@echo "Built: $(DIST_DIR)/mar-macos-x86_64 (Intel Macs, 2008+)"
-	@file $(DIST_DIR)/mar-macos-x86_64
-	@ls -lh $(DIST_DIR)/mar-macos-x86_64
-
-# macOS Universal Binary (ARM64 + x86_64)
-dist-macos-universal:
-	@mkdir -p $(DIST_DIR)
-	@echo "Building macOS Universal Binary (ARM64 + x86_64)..."
-	$(MAKE) dist-macos-arm64
-	@mv $(DIST_DIR)/mar-macos-arm64 $(DIST_DIR)/mar-arm64-temp
-	$(MAKE) dist-macos-x86_64
-	@mv $(DIST_DIR)/mar-macos-x86_64 $(DIST_DIR)/mar-x86_64-temp
-	lipo -create -output $(DIST_DIR)/mar-macos-universal $(DIST_DIR)/mar-arm64-temp $(DIST_DIR)/mar-x86_64-temp
-	@rm $(DIST_DIR)/mar-arm64-temp $(DIST_DIR)/mar-x86_64-temp
-	@echo ""
-	@echo "Built: $(DIST_DIR)/mar-macos-universal (ARM64 + x86_64)"
-	@lipo -info $(DIST_DIR)/mar-macos-universal
-	@ls -lh $(DIST_DIR)/mar-macos-universal
+# Note: macOS builds now use Homebrew for distribution.
+# See 'make brew-formula' and RELEASING.md for details.
 
 # Build all distribution binaries for the current platform.
 #
@@ -829,8 +791,7 @@ dist-all:
 	        fi \
 	    fi \
 	elif [ "$(UNAME_S)" = "Darwin" ]; then \
-	    echo "==> Building macOS Universal Binary..."; \
-	    $(MAKE) dist-macos-universal; \
+	    echo "Note: macOS distribution is handled via Homebrew. See 'make brew-formula'."; \
 	fi
 	@echo ""
 	@echo "Distribution builds complete!"
