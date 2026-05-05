@@ -30,9 +30,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ inputs.sha || github.ref }}
   cancel-in-progress: true
 
-env:
-  ZIG_VERSION: '0.16.0'
-
 # =============================================================================
 # Job graph
 #
@@ -147,8 +144,9 @@ jobs:
   # ---------------------------------------------------------------------------
   # Distribution build — produces the release artifacts
   #
-  # Linux (ubuntu-22.04): installs zig and runs make dist-all, which builds
-  #   musl static binaries (no glibc dependency) when zig is available.
+  # Linux (ubuntu-22.04): builds inside an Alpine 3.20 Docker container.
+  #   Alpine uses musl natively, so STATIC=1 produces a fully static musl
+  #   binary with no glibc dependency. No zig required.
   # macOS (macos-latest): builds a Universal Binary (ARM64 + x86_64).
   #
   # Only runs after all test matrix entries pass.
@@ -172,14 +170,6 @@ jobs:
           submodules: recursive
           ref: ${{ inputs.sha || github.sha }}
 
-      - name: Cache apt packages
-        if: runner.os == 'Linux'
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt/archives
-          key: apt-${{ matrix.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
-          restore-keys: apt-${{ matrix.os }}-
-
       - name: Cache Homebrew downloads
         if: runner.os == 'macOS'
         uses: actions/cache@v4
@@ -188,29 +178,41 @@ jobs:
           key: brew-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
           restore-keys: brew-${{ runner.os }}-
 
-      - name: Install dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config \
-            libzstd-dev zlib1g-dev liblz4-dev libdeflate-dev libbz2-dev
-
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install pkg-config zstd lz4 libdeflate bzip2 blake3 || true
 
-      - name: Install zig (Linux)
+      - name: Build distribution binaries (Linux, musl via Alpine)
         if: runner.os == 'Linux'
         run: |
-          ZIG_ARCH=$(uname -m)
-          ZIG_DIR="zig-linux-${ZIG_ARCH}-${{ env.ZIG_VERSION }}"
-          curl -fsSL "https://ziglang.org/download/${{ env.ZIG_VERSION }}/${ZIG_DIR}.tar.xz" \
-            | tar xJ -C /tmp
-          echo "/tmp/${ZIG_DIR}" >> "$GITHUB_PATH"
+          mkdir -p dist
+          # Write a build script to run inside the Alpine container.
+          # Alpine uses musl natively, so STATIC=1 produces a musl-linked
+          # binary with no glibc dependency — no zig required.
+          cat > alpine-build.sh << 'EOF'
+          set -e
+          apk add --no-cache build-base pkgconf cmake \
+            zstd-dev lz4-dev bzip2-dev zlib-dev libdeflate-dev liburing-dev
+          make clean
+          make STATIC=1 BUILD=release \
+            ARCH_FLAGS="-march=x86-64 -mtune=generic" \
+            TARGET_NAME=dist/mar-linux-x86_64-musl \
+            all-internal
+          make clean
+          make STATIC=1 BUILD=release \
+            ARCH_FLAGS="-march=nehalem -mtune=generic" \
+            TARGET_NAME=dist/mar-linux-x86_64-sse42-musl \
+            all-internal
+          EOF
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -w /work \
+            alpine:3.20 \
+            sh alpine-build.sh
 
-      - name: Build distribution binaries
-        run: make dist-all
+      - name: Build distribution binaries (macOS)
+        if: runner.os == 'macOS'
+        run: make dist-macos-universal
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
