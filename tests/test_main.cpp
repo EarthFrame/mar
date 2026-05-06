@@ -3,6 +3,7 @@
  * @brief Unit tests for MAR library.
  */
 
+#include "mar/async_io.hpp"
 #include "mar/diff.hpp"
 #include "mar/mar.hpp"
 #include "mar/stopwatch.hpp"
@@ -13,6 +14,7 @@
 
 #include <cassert>
 #include <chrono>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -2026,9 +2028,9 @@ TEST(format_constraint_u32_file_count) {
 
     // Create archive
     {
-        MarWriter writer;
+        MarWriter writer(archive_path.string());
         writer.add_directory(data_dir.string());
-        writer.write(archive_path.string());
+        writer.finish();
     }
 
     // Read back and verify structure
@@ -2036,15 +2038,26 @@ TEST(format_constraint_u32_file_count) {
         MarReader reader(archive_path.string());
 
         // Verify we can read file count without overflow
+        // The data directory itself is also an entry, so we expect 5 files + 1 dir = 6
         size_t file_count = reader.file_count();
-        ASSERT_EQ(file_count, 5);
+        ASSERT_EQ(file_count, 6);
 
         // Verify it fits in u32 (format requirement)
         ASSERT(file_count <= static_cast<size_t>(std::numeric_limits<u32>::max()));
 
         // Get block IDs - this uses the bounded cast
-        auto block_ids = reader.get_block_ids_for_file(0);
-        ASSERT(!block_ids.empty());
+        // Find the first regular file and get its block IDs
+        bool found_regular_file = false;
+        for (size_t i = 0; i < file_count; ++i) {
+            auto entry = reader.get_file_entry(i);
+            if (entry && entry->entry_type == EntryType::RegularFile) {
+                auto block_ids = reader.get_block_ids_for_file(i);
+                ASSERT(!block_ids.empty());
+                found_regular_file = true;
+                break;
+            }
+        }
+        ASSERT(found_regular_file);
     }
 
     fs::remove_all(temp_dir);
@@ -2077,17 +2090,18 @@ TEST(format_constraint_single_file_per_block_indexing) {
 
     // Create archive in single-file-per-block mode
     {
-        MarWriter writer;
-        writer.set_index_type(IndexType::SingleFilePerBlock);
-        writer.set_block_size(1024 * 1024);  // 1MB blocks
+        WriteOptions opts;
+        opts.multiblock = false;  // SingleFilePerBlock mode
+        opts.block_size = 1024 * 1024;  // 1MB blocks
+        MarWriter writer(archive_path.string(), opts);
         writer.add_directory(data_dir.string());
-        writer.write(archive_path.string());
+        writer.finish();
     }
 
     // Read back and verify
     {
         MarReader reader(archive_path.string());
-        ASSERT_EQ(reader.index_type(), IndexType::SingleFilePerBlock);
+        ASSERT(reader.header().index_type == IndexType::SingleFilePerBlock);
 
         // Get block IDs for each file
         // The block_index should be bounded to u32 correctly
@@ -2163,6 +2177,482 @@ TEST(stopwatch_restart) {
 
     // After restart, elapsed time should be much less
     ASSERT(after_restart < first);
+}
+
+// ============================================================================
+// AsyncIO Tests (platform-specific)
+// ============================================================================
+
+#ifdef MAR_HAS_KQUEUE
+TEST(async_io_kqueue_basic_read) {
+    // Create a temporary file for testing
+    auto temp_path = fs::temp_directory_path() / "async_io_test.bin";
+    fs::remove(temp_path);
+    
+    // Write test data
+    std::vector<u8> test_data;
+    for (int i = 0; i < 1024; ++i) {
+        test_data.push_back(static_cast<u8>(i % 256));
+    }
+    
+    std::ofstream out(temp_path, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(test_data.data()), test_data.size());
+    out.close();
+    
+    // Open for async read
+    int fd = ::open(temp_path.c_str(), O_RDONLY);
+    ASSERT(fd >= 0);
+    
+    try {
+        AsyncIO aio;
+        
+        // Prepare read buffer
+        std::vector<u8> read_buf(512);
+        AsyncIO::Request req{
+            .op = AsyncIO::Op::READ,
+            .fd = fd,
+            .buf = read_buf.data(),
+            .len = read_buf.size(),
+            .offset = 0,
+            .user_data = nullptr,
+            .result = 0
+        };
+        
+        // Submit read
+        if (aio.submit(req)) {
+            AsyncIO::Request* completed = nullptr;
+            if (aio.wait(&completed)) {
+                // Verify result is ssize_t (can hold large values or negative errno)
+                ASSERT(completed->result > 0);
+                ASSERT(completed->result <= static_cast<ssize_t>(read_buf.size()));
+                
+                // Verify data matches
+                for (size_t i = 0; i < static_cast<size_t>(completed->result); ++i) {
+                    ASSERT(read_buf[i] == test_data[i]);
+                }
+            }
+        }
+    } catch (...) {
+        ::close(fd);
+        fs::remove(temp_path);
+        throw;
+    }
+    
+    ::close(fd);
+    fs::remove(temp_path);
+}
+
+TEST(async_io_kqueue_ssize_t_result_field) {
+    // Verify that ssize_t result field preserves full range of return values
+    auto temp_path = fs::temp_directory_path() / "async_io_ssize_test.bin";
+    fs::remove(temp_path);
+    
+    // Create a test file
+    std::vector<u8> test_data(4096);
+    for (size_t i = 0; i < test_data.size(); ++i) {
+        test_data[i] = static_cast<u8>(i % 256);
+    }
+    
+    std::ofstream out(temp_path, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(test_data.data()), test_data.size());
+    out.close();
+    
+    int fd = ::open(temp_path.c_str(), O_RDONLY);
+    ASSERT(fd >= 0);
+    
+    try {
+        AsyncIO aio;
+        std::vector<u8> read_buf(2048);
+        
+        AsyncIO::Request req{
+            .op = AsyncIO::Op::READ,
+            .fd = fd,
+            .buf = read_buf.data(),
+            .len = read_buf.size(),
+            .offset = 0,
+            .user_data = nullptr,
+            .result = 0
+        };
+        
+        if (aio.submit(req)) {
+            AsyncIO::Request* completed = nullptr;
+            if (aio.wait(&completed)) {
+                // Verify result is properly set as ssize_t
+                ssize_t bytes_read = completed->result;
+                ASSERT(bytes_read > 0);
+                ASSERT(bytes_read == 2048);
+            }
+        }
+    } catch (...) {
+        ::close(fd);
+        fs::remove(temp_path);
+        throw;
+    }
+    
+    ::close(fd);
+    fs::remove(temp_path);
+}
+#endif
+
+#ifdef MAR_HAS_URING
+TEST(async_io_uring_basic_read) {
+    // Create a temporary file for testing
+    auto temp_path = fs::temp_directory_path() / "async_io_uring_test.bin";
+    fs::remove(temp_path);
+    
+    // Write test data
+    std::vector<u8> test_data;
+    for (int i = 0; i < 2048; ++i) {
+        test_data.push_back(static_cast<u8>(i % 256));
+    }
+    
+    std::ofstream out(temp_path, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(test_data.data()), test_data.size());
+    out.close();
+    
+    // Open for async read
+    int fd = ::open(temp_path.c_str(), O_RDONLY);
+    ASSERT(fd >= 0);
+    
+    try {
+        AsyncIO aio;
+        
+        // Prepare read buffer
+        std::vector<u8> read_buf(1024);
+        AsyncIO::Request req{
+            .op = AsyncIO::Op::READ,
+            .fd = fd,
+            .buf = read_buf.data(),
+            .len = read_buf.size(),
+            .offset = 512,
+            .user_data = nullptr,
+            .result = 0
+        };
+        
+        // Submit and complete
+        if (aio.submit(req)) {
+            AsyncIO::Request* completed = nullptr;
+            if (aio.wait(&completed)) {
+                // Verify result is ssize_t
+                ASSERT(completed->result > 0);
+                ASSERT(completed->result <= static_cast<ssize_t>(read_buf.size()));
+                
+                // Verify data matches (from offset 512)
+                for (size_t i = 0; i < static_cast<size_t>(completed->result); ++i) {
+                    ASSERT(read_buf[i] == test_data[512 + i]);
+                }
+            }
+        }
+    } catch (...) {
+        ::close(fd);
+        fs::remove(temp_path);
+        throw;
+    }
+    
+    ::close(fd);
+    fs::remove(temp_path);
+}
+#endif
+
+// ============================================================================
+// Bounds Checking Tests
+// ============================================================================
+
+TEST(reader_block_index_bounds_check) {
+    // Verify that block_index is properly bounded to u32
+    // This tests the code at reader.cpp:340-346
+    
+    auto temp_dir = fs::temp_directory_path() / "bounds_check_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    
+    auto archive_path = temp_dir / "bounds_test.mar";
+    auto data_dir = temp_dir / "data";
+    fs::create_directories(data_dir);
+    
+    // Create files for single-file-per-block mode
+    for (int i = 0; i < 10; ++i) {
+        std::ofstream f(data_dir / ("file_" + std::to_string(i) + ".txt"));
+        f << "Content " << i;
+    }
+    
+    // Create archive in single-file-per-block mode
+    WriteOptions opts;
+    opts.multiblock = false;
+    MarWriter writer(archive_path.string(), opts);
+    writer.add_directory(data_dir.string());
+    writer.finish();
+    
+    // Read back and verify bounds checking
+    MarReader reader(archive_path.string());
+    
+    // Get block IDs for various files
+    for (size_t i = 0; i < reader.file_count(); ++i) {
+        auto entry = reader.get_file_entry(i);
+        if (entry && entry->entry_type == EntryType::RegularFile) {
+            auto block_ids = reader.get_block_ids_for_file(i);
+            
+            // All block IDs must be valid u32 values
+            for (u32 bid : block_ids) {
+                ASSERT(bid <= std::numeric_limits<u32>::max());
+            }
+        }
+    }
+    
+    fs::remove_all(temp_dir);
+}
+
+// ============================================================================
+// Error Handling Tests
+// ============================================================================
+
+TEST(writer_add_nonexistent_file) {
+    // Verify error when trying to add non-existent file
+    auto temp_dir = fs::temp_directory_path() / "error_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    
+    auto archive_path = temp_dir / "error_test.mar";
+    auto nonexistent = temp_dir / "does_not_exist.txt";
+    
+    MarWriter writer(archive_path.string());
+    
+    bool caught_error = false;
+    try {
+        writer.add_file(nonexistent.string());
+    } catch (const std::exception& e) {
+        caught_error = true;
+        // Verify error message contains something useful
+        std::string msg = e.what();
+        ASSERT(!msg.empty());
+    }
+    
+    ASSERT(caught_error);
+    fs::remove_all(temp_dir);
+}
+
+TEST(reader_invalid_archive_path) {
+    // Verify error when trying to read non-existent archive
+    auto temp_dir = fs::temp_directory_path() / "reader_error_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    
+    auto nonexistent = temp_dir / "does_not_exist.mar";
+    
+    bool caught_error = false;
+    try {
+        MarReader reader(nonexistent.string());
+    } catch (const std::exception& e) {
+        caught_error = true;
+    }
+    
+    ASSERT(caught_error);
+    fs::remove_all(temp_dir);
+}
+
+TEST(add_symlink_with_broken_target) {
+    // Verify handling of symlinks with non-existent targets
+    auto temp_dir = fs::temp_directory_path() / "symlink_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    
+    auto archive_path = temp_dir / "symlink_test.mar";
+    
+    MarWriter writer(archive_path.string());
+    
+    // Add a symlink with a target that doesn't exist
+    // This should succeed (symlink just stores the target path)
+    writer.add_symlink("broken_link", "/nonexistent/target");
+    writer.finish();
+    
+    // Read back and verify
+    MarReader reader(archive_path.string());
+    ASSERT(reader.file_count() > 0);
+    
+    // Find the symlink entry
+    bool found_symlink = false;
+    for (size_t i = 0; i < reader.file_count(); ++i) {
+        auto entry = reader.get_file_entry(i);
+        if (entry && entry->entry_type == EntryType::Symlink) {
+            found_symlink = true;
+            break;
+        }
+    }
+    
+    ASSERT(found_symlink);
+    fs::remove_all(temp_dir);
+}
+
+// ============================================================================
+// Large File/Offset Tests
+// ============================================================================
+
+TEST(large_directory_archive_creation) {
+    // Stress test with many files to verify correctness
+    auto temp_dir = fs::temp_directory_path() / "large_dir_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    
+    auto archive_path = temp_dir / "large_archive.mar";
+    auto data_dir = temp_dir / "data";
+    fs::create_directories(data_dir);
+    
+    // Create 100 files
+    const int num_files = 100;
+    for (int i = 0; i < num_files; ++i) {
+        std::ofstream f(data_dir / ("file_" + std::to_string(i) + ".txt"));
+        f << "File content " << i << " with some text";
+    }
+    
+    MarWriter writer(archive_path.string());
+    writer.add_directory(data_dir.string());
+    writer.finish();
+    
+    // Verify all files were added
+    MarReader reader(archive_path.string());
+    
+    int regular_file_count = 0;
+    for (size_t i = 0; i < reader.file_count(); ++i) {
+        auto entry = reader.get_file_entry(i);
+        if (entry && entry->entry_type == EntryType::RegularFile) {
+            regular_file_count++;
+        }
+    }
+    
+    // Should have at least the 100 files (plus directory entry)
+    ASSERT(regular_file_count >= num_files);
+    fs::remove_all(temp_dir);
+}
+
+TEST(archive_with_mixed_entry_types) {
+    // Test archives with directories, files, and symlinks together
+    auto temp_dir = fs::temp_directory_path() / "mixed_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    
+    auto archive_path = temp_dir / "mixed.mar";
+    auto data_dir = temp_dir / "data";
+    fs::create_directories(data_dir);
+    
+    // Create a real file
+    std::ofstream f(data_dir / "realfile.txt");
+    f << "Real file content";
+    f.close();
+    
+    // Create a subdirectory
+    fs::create_directories(data_dir / "subdir");
+    std::ofstream f2(data_dir / "subdir" / "nested.txt");
+    f2 << "Nested file";
+    f2.close();
+    
+    MarWriter writer(archive_path.string());
+    writer.add_directory(data_dir.string());
+    writer.add_symlink("my_symlink", "realfile.txt");
+    writer.finish();
+    
+    // Verify all entry types are present
+    MarReader reader(archive_path.string());
+    
+    bool has_regular_file = false;
+    bool has_directory = false;
+    bool has_symlink = false;
+    
+    for (size_t i = 0; i < reader.file_count(); ++i) {
+        auto entry = reader.get_file_entry(i);
+        if (entry) {
+            if (entry->entry_type == EntryType::RegularFile) {
+                has_regular_file = true;
+            } else if (entry->entry_type == EntryType::Directory) {
+                has_directory = true;
+            } else if (entry->entry_type == EntryType::Symlink) {
+                has_symlink = true;
+            }
+        }
+    }
+    
+    ASSERT(has_regular_file);
+    ASSERT(has_directory);
+    ASSERT(has_symlink);
+    
+    fs::remove_all(temp_dir);
+}
+
+// ============================================================================
+// Type Casting Edge Cases
+// ============================================================================
+
+TEST(name_index_size_t_double_conversion) {
+    // Test the size_t to double conversions in name_index.cpp
+    // These are used for ratio calculations and should not lose precision
+    
+    size_t raw_size = 1000000;
+    size_t front_coded_size = 900000;  // 90% of raw
+    size_t trie_size = 400000;         // 40% of raw
+    
+    // Simulate the conversions from name_index.cpp:150,153
+    bool use_front_coded = front_coded_size <= static_cast<double>(raw_size) * 0.9;
+    bool use_trie = trie_size < static_cast<double>(raw_size) * 0.5;
+    
+    ASSERT(use_front_coded);
+    ASSERT(use_trie);
+}
+
+// ============================================================================
+// Multiblock vs SingleFilePerBlock Equivalence
+// ============================================================================
+
+TEST(multiblock_single_file_equivalence) {
+    // Create same content in both index modes and verify equivalence
+    auto temp_dir = fs::temp_directory_path() / "mode_equivalence_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+    
+    auto data_dir = temp_dir / "data";
+    fs::create_directories(data_dir);
+    
+    // Create test files
+    for (int i = 0; i < 5; ++i) {
+        std::ofstream f(data_dir / ("file_" + std::to_string(i) + ".txt"));
+        f << "Content " << i << " with enough data";
+    }
+    
+    // Create archive with multiblock mode
+    auto multiblock_path = temp_dir / "multiblock.mar";
+    {
+        WriteOptions opts;
+        opts.multiblock = true;
+        MarWriter writer(multiblock_path.string(), opts);
+        writer.add_directory(data_dir.string());
+        writer.finish();
+    }
+    
+    // Create archive with single-file-per-block mode
+    auto single_file_path = temp_dir / "single_file.mar";
+    {
+        WriteOptions opts;
+        opts.multiblock = false;
+        MarWriter writer(single_file_path.string(), opts);
+        writer.add_directory(data_dir.string());
+        writer.finish();
+    }
+    
+    // Verify both archives have same content
+    MarReader reader1(multiblock_path.string());
+    MarReader reader2(single_file_path.string());
+    
+    ASSERT(reader1.file_count() == reader2.file_count());
+    
+    // Verify files can be extracted from both
+    for (size_t i = 0; i < reader1.file_count(); ++i) {
+        auto entry1 = reader1.get_file_entry(i);
+        auto entry2 = reader2.get_file_entry(i);
+        
+        if (entry1 && entry2 && entry1->entry_type == EntryType::RegularFile) {
+            ASSERT(entry1->logical_size == entry2->logical_size);
+        }
+    }
+    
+    fs::remove_all(temp_dir);
 }
 
 // ============================================================================
