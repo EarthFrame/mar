@@ -1,0 +1,17 @@
+Source: mar
+Section: utils
+Priority: optional
+Maintainer: EarthFrame <support@earthframe.com>
+Build-Depends: debhelper-compat (= 13), pkg-config, libzstd-dev, zlib1g-dev, liblz4-dev, libbz2-dev, libdeflate-dev
+Standards-Version: 4.5.1
+Homepage: https://github.com/earthframe/mar
+Vcs-Browser: https://github.com/earthframe/mar
+Vcs-Git: https://github.com/earthframe/mar.git
+
+Package: mar
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: MAR Archive Tool
+ MAR is a high-performance archive format designed for efficient storage
+ and retrieval of large datasets, with support for various compression
+ algorithms and indexing.
