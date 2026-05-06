@@ -1,19 +1,16 @@
 #pragma once
 
-#include "mar/types.hpp"
 #include "mar/reader.hpp"
+#include "mar/types.hpp"
+
+#include <array>
+#include <ostream>
 #include <string>
 #include <vector>
-#include <ostream>
-#include <array>
 
 namespace mar {
 
-enum class DeltaInstructionType : u8 {
-    KEEP = 0,
-    REPLACE = 1,
-    ADD = 2
-};
+enum class DeltaInstructionType : u8 { KEEP = 0, REPLACE = 1, ADD = 2 };
 
 struct DeltaInstruction {
     DeltaInstructionType type;
@@ -23,7 +20,7 @@ struct DeltaInstruction {
 };
 
 struct DeltaPatch {
-    u32 magic = 0x50415443; // "PATC"
+    u32 magic = 0x50415443;  // "PATC"
     u32 version = 1;
     std::array<u8, 32> source_hash;
     std::array<u8, 32> target_hash;
@@ -42,4 +39,4 @@ public:
     static std::array<u8, 32> compute_archive_hash(const std::string& path);
 };
 
-} // namespace mar
+}  // namespace mar

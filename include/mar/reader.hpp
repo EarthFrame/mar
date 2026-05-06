@@ -1,18 +1,18 @@
 #pragma once
 
-#include "mar/types.hpp"
+#include "mar/compression.hpp"
 #include "mar/enums.hpp"
+#include "mar/file_handle.hpp"
 #include "mar/format.hpp"
 #include "mar/sections.hpp"
-#include "mar/file_handle.hpp"
-#include "mar/compression.hpp"
+#include "mar/types.hpp"
 
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
-#include <vector>
 #include <unordered_map>
-#include <mutex>
+#include <vector>
 
 namespace mar {
 
@@ -147,17 +147,20 @@ public:
     void extract_all_parallel(const std::string& output_dir, size_t num_threads = 0, size_t strip_components = 0);
 
     // Extract specific files in parallel
-    void extract_files_parallel(const std::vector<std::string>& names, const std::string& output_dir, size_t num_threads = 0, size_t strip_components = 0);
+    void extract_files_parallel(const std::vector<std::string>& names, const std::string& output_dir,
+                                size_t num_threads = 0, size_t strip_components = 0);
 
     // Validate archive in parallel
     bool validate_parallel(size_t num_threads = 0, bool verbose = false);
 
     // Concatenate files in parallel to a single output file
-    bool cat_files_parallel(const std::vector<std::string>& names, const std::string& output_file, size_t num_threads = 0);
+    bool cat_files_parallel(const std::vector<std::string>& names, const std::string& output_file,
+                            size_t num_threads = 0);
 
 private:
     // Internal parallel extraction by index
-    void extract_indices_parallel(const std::vector<size_t>& indices, const std::string& output_dir, size_t num_threads, size_t strip_components);
+    void extract_indices_parallel(const std::vector<size_t>& indices, const std::string& output_dir, size_t num_threads,
+                                  size_t strip_components);
 
 private:
     // Parsed archive data
@@ -194,4 +197,4 @@ private:
     std::vector<u8> read_block_at(u64 offset);
 };
 
-} // namespace mar
+}  // namespace mar

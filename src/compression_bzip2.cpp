@@ -1,10 +1,11 @@
 #include "mar/compression_bzip2.hpp"
+
 #include "mar/compression.hpp"
 #include "mar/compression_config.hpp"
 #include "mar/errors.hpp"
 
 #if HAVE_BZIP2
-    #include <bzlib.h>
+#include <bzlib.h>
 #endif
 
 namespace mar {
@@ -19,19 +20,17 @@ struct Bzip2StreamCompressor::Impl {
 };
 
 std::vector<u8> compress_bzip2(const u8* data, size_t len, int level) {
-    if (level < 1) level = 9; // Default to max compression
+    if (level < 1)
+        level = 9;  // Default to max compression
 
     unsigned int dest_len = static_cast<unsigned int>(len + len / 100 + 600);
     std::vector<u8> output(dest_len);
 
-    int result = BZ2_bzBuffToBuffCompress(
-        reinterpret_cast<char*>(output.data()),
-        &dest_len,
-        const_cast<char*>(reinterpret_cast<const char*>(data)),
-        static_cast<unsigned int>(len),
-        level,
-        0, // verbosity
-        30 // workFactor
+    int result = BZ2_bzBuffToBuffCompress(reinterpret_cast<char*>(output.data()), &dest_len,
+                                          const_cast<char*>(reinterpret_cast<const char*>(data)),
+                                          static_cast<unsigned int>(len), level,
+                                          0,  // verbosity
+                                          30  // workFactor
     );
 
     if (result != BZ_OK) {
@@ -43,17 +42,14 @@ std::vector<u8> compress_bzip2(const u8* data, size_t len, int level) {
 }
 
 std::vector<u8> decompress_bzip2(const u8* data, size_t len, u64 raw_size) {
-    unsigned int dest_len = raw_size > 0 ? static_cast<unsigned int>(raw_size) :
-                            static_cast<unsigned int>(len * 10);
+    unsigned int dest_len = raw_size > 0 ? static_cast<unsigned int>(raw_size) : static_cast<unsigned int>(len * 10);
     std::vector<u8> output(dest_len);
 
-    int result = BZ2_bzBuffToBuffDecompress(
-        reinterpret_cast<char*>(output.data()),
-        &dest_len,
-        const_cast<char*>(reinterpret_cast<const char*>(data)),
-        static_cast<unsigned int>(len),
-        0, // small
-        0  // verbosity
+    int result = BZ2_bzBuffToBuffDecompress(reinterpret_cast<char*>(output.data()), &dest_len,
+                                            const_cast<char*>(reinterpret_cast<const char*>(data)),
+                                            static_cast<unsigned int>(len),
+                                            0,  // small
+                                            0   // verbosity
     );
 
     if (result != BZ_OK) {
@@ -89,7 +85,8 @@ Bzip2StreamCompressor::~Bzip2StreamCompressor() {
 }
 
 size_t Bzip2StreamCompressor::write(const u8* data, size_t len, CompressionSink& sink) {
-    if (len == 0) return 0;
+    if (len == 0)
+        return 0;
     size_t total_out = 0;
     impl_->stream.next_in = reinterpret_cast<char*>(const_cast<u8*>(data));
     impl_->stream.avail_in = static_cast<unsigned int>(len);
@@ -153,6 +150,6 @@ size_t Bzip2StreamCompressor::finish(CompressionSink&) {
     throw UnsupportedError("BZIP2 compression not available");
 }
 
-#endif // HAVE_BZIP2
+#endif  // HAVE_BZIP2
 
-} // namespace mar
+}  // namespace mar

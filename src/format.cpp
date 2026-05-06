@@ -1,4 +1,5 @@
 #include "mar/format.hpp"
+
 #include "mar/endian.hpp"
 #include "mar/errors.hpp"
 
@@ -30,7 +31,7 @@ FixedHeader FixedHeader::read(std::istream& in) {
     if (meta_comp > 1) {
         throw InvalidArchiveError("Unknown meta compression algorithm: " + std::to_string(meta_comp));
     }
-    h.meta_comp_algo = static_cast<CompressionAlgo>(meta_comp == 1 ? 2 : 0); // 1 = ZSTD per spec
+    h.meta_comp_algo = static_cast<CompressionAlgo>(meta_comp == 1 ? 2 : 0);  // 1 = ZSTD per spec
 
     u8 idx_type = read_le<u8>(in);
     if (idx_type > 1) {
@@ -319,10 +320,12 @@ void BlockDesc::write(u8* buf) const {
 // ============================================================================
 
 std::vector<Span> FileSpans::get_file_spans(u32 file_id) const {
-    if (file_id >= file_count) return {};
+    if (file_id >= file_count)
+        return {};
     u32 start = span_starts[file_id];
     u32 count = span_counts[file_id];
-    if (start + count > spans.size()) return {};
+    if (start + count > spans.size())
+        return {};
     return std::vector<Span>(spans.begin() + start, spans.begin() + start + count);
 }
 
@@ -334,21 +337,31 @@ std::optional<CompressionAlgo> compression_from_string(const std::string& s) {
     std::string lower = s;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
 
-    if (lower == "none") return CompressionAlgo::None;
-    if (lower == "gzip") return CompressionAlgo::Gzip;
-    if (lower == "zstd") return CompressionAlgo::Zstd;
-    if (lower == "lz4") return CompressionAlgo::Lz4;
-    if (lower == "bzip2") return CompressionAlgo::Bzip2;
+    if (lower == "none")
+        return CompressionAlgo::None;
+    if (lower == "gzip")
+        return CompressionAlgo::Gzip;
+    if (lower == "zstd")
+        return CompressionAlgo::Zstd;
+    if (lower == "lz4")
+        return CompressionAlgo::Lz4;
+    if (lower == "bzip2")
+        return CompressionAlgo::Bzip2;
     return std::nullopt;
 }
 
 const char* compression_to_string(CompressionAlgo algo) {
     switch (algo) {
-        case CompressionAlgo::None: return "none";
-        case CompressionAlgo::Gzip: return "gzip";
-        case CompressionAlgo::Zstd: return "zstd";
-        case CompressionAlgo::Lz4: return "lz4";
-        case CompressionAlgo::Bzip2: return "bzip2";
+        case CompressionAlgo::None:
+            return "none";
+        case CompressionAlgo::Gzip:
+            return "gzip";
+        case CompressionAlgo::Zstd:
+            return "zstd";
+        case CompressionAlgo::Lz4:
+            return "lz4";
+        case CompressionAlgo::Bzip2:
+            return "bzip2";
     }
     return "unknown";
 }
@@ -356,14 +369,30 @@ const char* compression_to_string(CompressionAlgo algo) {
 std::string format_mode(u32 mode) {
     char file_type;
     switch ((mode >> 12) & 0xF) {
-        case 014: file_type = 's'; break; // socket
-        case 012: file_type = 'l'; break; // symlink
-        case 010: file_type = '-'; break; // regular file
-        case 006: file_type = 'b'; break; // block device
-        case 004: file_type = 'd'; break; // directory
-        case 002: file_type = 'c'; break; // character device
-        case 001: file_type = 'p'; break; // FIFO
-        default:  file_type = '?'; break;
+        case 014:
+            file_type = 's';
+            break;  // socket
+        case 012:
+            file_type = 'l';
+            break;  // symlink
+        case 010:
+            file_type = '-';
+            break;  // regular file
+        case 006:
+            file_type = 'b';
+            break;  // block device
+        case 004:
+            file_type = 'd';
+            break;  // directory
+        case 002:
+            file_type = 'c';
+            break;  // character device
+        case 001:
+            file_type = 'p';
+            break;  // FIFO
+        default:
+            file_type = '?';
+            break;
     }
 
     std::string result;
@@ -382,28 +411,44 @@ std::string format_mode(u32 mode) {
 
 u32 default_mode_for_type(EntryType type) {
     switch (type) {
-        case EntryType::Directory: return 0040755;
-        case EntryType::Symlink: return 0120777;
-        case EntryType::RegularFile: return 0100644;
-        case EntryType::CharDevice: return 0020644;
-        case EntryType::BlockDevice: return 0060644;
-        case EntryType::Fifo: return 0010644;
-        case EntryType::Socket: return 0140755;
-        default: return 0100644;
+        case EntryType::Directory:
+            return 0040755;
+        case EntryType::Symlink:
+            return 0120777;
+        case EntryType::RegularFile:
+            return 0100644;
+        case EntryType::CharDevice:
+            return 0020644;
+        case EntryType::BlockDevice:
+            return 0060644;
+        case EntryType::Fifo:
+            return 0010644;
+        case EntryType::Socket:
+            return 0140755;
+        default:
+            return 0100644;
     }
 }
 
 EntryType entry_type_from_mode(u32 mode) {
     switch ((mode >> 12) & 0xF) {
-        case 014: return EntryType::Socket;
-        case 012: return EntryType::Symlink;
-        case 010: return EntryType::RegularFile;
-        case 006: return EntryType::BlockDevice;
-        case 004: return EntryType::Directory;
-        case 002: return EntryType::CharDevice;
-        case 001: return EntryType::Fifo;
-        default: return EntryType::Unknown;
+        case 014:
+            return EntryType::Socket;
+        case 012:
+            return EntryType::Symlink;
+        case 010:
+            return EntryType::RegularFile;
+        case 006:
+            return EntryType::BlockDevice;
+        case 004:
+            return EntryType::Directory;
+        case 002:
+            return EntryType::CharDevice;
+        case 001:
+            return EntryType::Fifo;
+        default:
+            return EntryType::Unknown;
     }
 }
 
-} // namespace mar
+}  // namespace mar

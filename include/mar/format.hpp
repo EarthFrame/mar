@@ -1,12 +1,12 @@
 #pragma once
 
-#include "mar/types.hpp"
 #include "mar/constants.hpp"
 #include "mar/enums.hpp"
+#include "mar/types.hpp"
 
 #include <istream>
-#include <ostream>
 #include <optional>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -47,9 +47,7 @@ struct FixedHeader {
     [[nodiscard]] u32 compute_crc32c() const;
 
     // Get block alignment in bytes
-    [[nodiscard]] u64 block_alignment() const noexcept {
-        return 1ULL << header_align_log2;
-    }
+    [[nodiscard]] u64 block_alignment() const noexcept { return 1ULL << header_align_log2; }
 };
 
 // ============================================================================
@@ -67,9 +65,7 @@ struct SectionEntry {
     void write(std::ostream& out) const;
     void write(u8* buf) const;
 
-    [[nodiscard]] bool is_compressed() const noexcept {
-        return (flags & section_flags::COMPRESSED) != 0;
-    }
+    [[nodiscard]] bool is_compressed() const noexcept { return (flags & section_flags::COMPRESSED) != 0; }
 };
 
 // ============================================================================
@@ -106,13 +102,9 @@ struct FileEntry {
     void write(std::ostream& out) const;
     void write(u8* buf) const;
 
-    [[nodiscard]] bool is_redacted() const noexcept {
-        return (entry_flags & entry_flags::REDACTED) != 0;
-    }
+    [[nodiscard]] bool is_redacted() const noexcept { return (entry_flags & entry_flags::REDACTED) != 0; }
 
-    [[nodiscard]] bool has_strong_hash() const noexcept {
-        return (entry_flags & entry_flags::HAS_STRONG_HASH) != 0;
-    }
+    [[nodiscard]] bool has_strong_hash() const noexcept { return (entry_flags & entry_flags::HAS_STRONG_HASH) != 0; }
 };
 
 // ============================================================================
@@ -192,4 +184,4 @@ struct FileSpans {
 // Convert filesystem type to EntryType
 [[nodiscard]] EntryType entry_type_from_mode(u32 mode);
 
-} // namespace mar
+}  // namespace mar
