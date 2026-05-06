@@ -99,7 +99,7 @@ public:
 private:
     // Internal version of add_file that uses already-fetched metadata
     void add_file_internal(const std::string& path, const std::string& archive_name,
-                           std::filesystem::file_status status, u64 size, i64 mtime);
+                           const std::filesystem::file_status& status, u64 size, i64 mtime);
 
 public:
     // ========================================================================

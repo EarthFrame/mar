@@ -561,20 +561,38 @@ lint:
 	@if PATH="$(LLVM_BIN):$(PATH)" command -v run-clang-tidy >/dev/null 2>&1; then \
 	    TIDY_ARGS=""; \
 	    for arg in $(LINT_FLAGS); do TIDY_ARGS="$$TIDY_ARGS -extra-arg=$$arg"; done; \
-	    PATH="$(LLVM_BIN):$(PATH)" run-clang-tidy -p . $$TIDY_ARGS; \
+	    OUTPUT=$$(PATH="$(LLVM_BIN):$(PATH)" run-clang-tidy -p . $$TIDY_ARGS 2>&1); \
+	    echo "$$OUTPUT" | python3 scripts/lint_filter.py; \
+	    FILTER_EXIT=$$?; \
+	    if [ $$FILTER_EXIT -ne 0 ]; then exit $$FILTER_EXIT; fi; \
 	else \
 	    TIDY_ARGS=""; \
 	    for arg in $(LINT_FLAGS); do TIDY_ARGS="$$TIDY_ARGS --extra-arg=$$arg"; done; \
-	    PATH="$(LLVM_BIN):$(PATH)" $(CLANG_TIDY) $(_LINT_CPP_SRCS) -p . $$TIDY_ARGS; \
+	    OUTPUT=$$(PATH="$(LLVM_BIN):$(PATH)" $(CLANG_TIDY) $(_LINT_CPP_SRCS) -p . $$TIDY_ARGS 2>&1); \
+	    echo "$$OUTPUT" | python3 scripts/lint_filter.py; \
+	    FILTER_EXIT=$$?; \
+	    if [ $$FILTER_EXIT -ne 0 ]; then exit $$FILTER_EXIT; fi; \
 	fi
 	@echo "✅ lint passed"
 
-# Generate a categorized report of linting issues for systematic resolution.
+# Generate a structured report of linting issues for systematic resolution.
+# Filters out system header errors and organizes issues by package.
 lint-report:
 	@echo "==> Generating lint reports..."
-	@$(MAKE) lint 2>&1 | python3 scripts/lint_report.py --format md > LINT_REPORT.md
-	@$(MAKE) lint 2>&1 | python3 scripts/lint_report.py --format json > LINT_REPORT.json
-	@echo "✅ Reports generated: LINT_REPORT.md, LINT_REPORT.json"
+	@if PATH="$(LLVM_BIN):$(PATH)" command -v run-clang-tidy >/dev/null 2>&1; then \
+	    TIDY_ARGS=""; \
+	    for arg in $(LINT_FLAGS); do TIDY_ARGS="$$TIDY_ARGS -extra-arg=$$arg"; done; \
+	    PATH="$(LLVM_BIN):$(PATH)" run-clang-tidy -p . $$TIDY_ARGS 2>&1 | python3 scripts/lint_filter.py --format md > LINT_REPORT.md || true; \
+	    PATH="$(LLVM_BIN):$(PATH)" run-clang-tidy -p . $$TIDY_ARGS 2>&1 | python3 scripts/lint_filter.py --format json > LINT_REPORT.json || true; \
+	else \
+	    TIDY_ARGS=""; \
+	    for arg in $(LINT_FLAGS); do TIDY_ARGS="$$TIDY_ARGS --extra-arg=$$arg"; done; \
+	    PATH="$(LLVM_BIN):$(PATH)" $(CLANG_TIDY) $(_LINT_CPP_SRCS) -p . $$TIDY_ARGS 2>&1 | python3 scripts/lint_filter.py --format md > LINT_REPORT.md || true; \
+	    PATH="$(LLVM_BIN):$(PATH)" $(CLANG_TIDY) $(_LINT_CPP_SRCS) -p . $$TIDY_ARGS 2>&1 | python3 scripts/lint_filter.py --format json > LINT_REPORT.json || true; \
+	fi
+	@echo "✅ Reports generated:"
+	@echo "   - LINT_REPORT.md (Markdown, organized by package)"
+	@echo "   - LINT_REPORT.json (JSON, machine-readable)"
 
 # Apply clang-format fixes in place. Does not apply clang-tidy fixes
 # automatically since those require careful review.

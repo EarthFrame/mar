@@ -66,7 +66,7 @@ public:
         size_t len;       ///< Transfer length
         off_t offset;     ///< File offset
         void* user_data;  ///< Opaque user data (preserved across submission/completion)
-        int result;       ///< Result: bytes transferred or -errno (filled on completion)
+        ssize_t result;   ///< Result: bytes transferred or -errno (filled on completion)
 
         // Internal: platform-specific state
         union {

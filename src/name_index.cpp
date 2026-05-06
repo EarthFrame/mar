@@ -147,10 +147,11 @@ NameTableFormat NameIndex::recommend_format(const std::vector<std::string>& name
     size_t trie_size = unique_segments * 8;  // overhead per unique segment
 
     // Choose best format with a performance bias toward simpler layouts.
-    if (sorted && front_coded_size <= raw_size * 0.9) {
+    if (sorted && static_cast<double>(front_coded_size) <= static_cast<double>(raw_size) * 0.9) {
         return NameTableFormat::FrontCoded;
     }
-    if (names.size() >= 5000 && trie_size < raw_size * 0.5 && front_coded_size > raw_size * 0.85) {
+    if (names.size() >= 5000 && static_cast<double>(trie_size) < static_cast<double>(raw_size) * 0.5 &&
+        static_cast<double>(front_coded_size) > static_cast<double>(raw_size) * 0.85) {
         return NameTableFormat::CompactTrie;
     }
     return NameTableFormat::RawArray;

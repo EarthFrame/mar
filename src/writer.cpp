@@ -244,8 +244,8 @@ MarWriter::~MarWriter() {
 }
 
 // Internal version of add_file that uses already-fetched metadata
-void MarWriter::add_file_internal(const std::string& path, const std::string& archive_name, fs::file_status status,
-                                  u64 size, i64 mtime) {
+void MarWriter::add_file_internal(const std::string& path, const std::string& archive_name,
+                                  const fs::file_status& status, u64 size, i64 mtime) {
     auto type = status.type();
 
     if (type == fs::file_type::regular) {
@@ -333,7 +333,7 @@ void MarWriter::add_directory(const std::string& path, const std::string& prefix
         throw IOError("Not a directory: " + path);
     }
 
-    fs::path dir = dir_entry.path();
+    const fs::path& dir = dir_entry.path();
     std::string base_name = prefix;
     if (base_name.empty()) {
         base_name = dir.filename().string();
@@ -801,7 +801,9 @@ void MarWriter::finish() {
                 u64 total_read = 0;
                 while (total_read < fd_ref.entry.logical_size) {
                     size_t to_read = std::min((size_t)(fd_ref.entry.logical_size - total_read), buf_size);
-                    ssize_t n = ::pread(fd, buf_ptr, to_read, total_read);
+                    // NOLINT(bugprone-narrowing-conversions) - offset is always non-negative and within valid archive
+                    // bounds
+                    ssize_t n = ::pread(fd, buf_ptr, to_read, static_cast<off_t>(total_read));
                     if (n <= 0)
                         break;
                     hasher.update(buf_ptr, (size_t)n);
@@ -994,9 +996,13 @@ void MarWriter::finish() {
                     u8 hdr_buf[BLOCK_HEADER_SIZE];
                     bh.write(hdr_buf);
 
-                    if (archive.pwriteFull(hdr_buf, BLOCK_HEADER_SIZE, block_start) != (ssize_t)BLOCK_HEADER_SIZE)
+                    // NOLINT(bugprone-narrowing-conversions) - block_start is archive offset, always non-negative
+                    if (archive.pwriteFull(hdr_buf, BLOCK_HEADER_SIZE, static_cast<off_t>(block_start)) !=
+                        (ssize_t)BLOCK_HEADER_SIZE)
                         throw IOError("Write failed: block header");
-                    if (archive.pwriteFull(compressed_ptr, compressed_size, block_start + BLOCK_HEADER_SIZE) !=
+                    // NOLINT(bugprone-narrowing-conversions) - block position is archive offset, always non-negative
+                    if (archive.pwriteFull(compressed_ptr, compressed_size,
+                                           static_cast<off_t>(block_start + BLOCK_HEADER_SIZE)) !=
                         (ssize_t)compressed_size)
                         throw IOError("Write failed: block data");
 

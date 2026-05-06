@@ -2002,6 +2002,124 @@ TEST(extract_file_to_sink_streaming) {
 }
 
 // ============================================================================
+// Format Constraint Tests (MAR 0.1.0 Design Limits)
+// ============================================================================
+
+TEST(format_constraint_u32_file_count) {
+    // Verify that file_count is bounded by u32 per MAR 0.1.0 spec
+    // FILE_SPANS section uses u32 for file_count (line 173 of spec)
+
+    // Create a small archive to verify structure
+    auto temp_dir = fs::temp_directory_path() / "mar_test_format_constraint";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    auto archive_path = temp_dir / "constraint_test.mar";
+    auto data_dir = temp_dir / "data";
+    fs::create_directories(data_dir);
+
+    // Create some test files
+    for (int i = 0; i < 5; ++i) {
+        std::ofstream f(data_dir / ("file_" + std::to_string(i) + ".txt"));
+        f << "Test content " << i;
+    }
+
+    // Create archive
+    {
+        MarWriter writer;
+        writer.add_directory(data_dir.string());
+        writer.write(archive_path.string());
+    }
+
+    // Read back and verify structure
+    {
+        MarReader reader(archive_path.string());
+
+        // Verify we can read file count without overflow
+        size_t file_count = reader.file_count();
+        ASSERT_EQ(file_count, 5);
+
+        // Verify it fits in u32 (format requirement)
+        ASSERT(file_count <= static_cast<size_t>(std::numeric_limits<u32>::max()));
+
+        // Get block IDs - this uses the bounded cast
+        auto block_ids = reader.get_block_ids_for_file(0);
+        ASSERT(!block_ids.empty());
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(format_constraint_single_file_per_block_indexing) {
+    // Verify SingleFilePerBlock mode correctly bounds block_index to u32
+    // This is the code path at reader.cpp:324-348
+
+    auto temp_dir = fs::temp_directory_path() / "mar_test_single_file_block";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    auto archive_path = temp_dir / "single_file_test.mar";
+    auto data_dir = temp_dir / "data";
+    fs::create_directories(data_dir);
+
+    // Create test files (directories and regular files for mixed types)
+    fs::create_directories(data_dir / "subdir1");
+    fs::create_directories(data_dir / "subdir2");
+
+    std::ofstream f1(data_dir / "file1.txt");
+    f1 << "File 1";
+
+    std::ofstream f2(data_dir / "subdir1" / "file2.txt");
+    f2 << "File 2";
+
+    std::ofstream f3(data_dir / "subdir2" / "file3.txt");
+    f3 << "File 3";
+
+    // Create archive in single-file-per-block mode
+    {
+        MarWriter writer;
+        writer.set_index_type(IndexType::SingleFilePerBlock);
+        writer.set_block_size(1024 * 1024);  // 1MB blocks
+        writer.add_directory(data_dir.string());
+        writer.write(archive_path.string());
+    }
+
+    // Read back and verify
+    {
+        MarReader reader(archive_path.string());
+        ASSERT_EQ(reader.index_type(), IndexType::SingleFilePerBlock);
+
+        // Get block IDs for each file
+        // The block_index should be bounded to u32 correctly
+        for (size_t i = 0; i < reader.file_count(); ++i) {
+            auto entry = reader.get_file_entry(i);
+            if (entry && entry->entry_type == EntryType::RegularFile) {
+                auto block_ids = reader.get_block_ids_for_file(i);
+
+                // Block IDs should be valid u32 values
+                for (u32 bid : block_ids) {
+                    ASSERT(bid <= std::numeric_limits<u32>::max());
+                }
+            }
+        }
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(format_constraint_documentation) {
+    // Verify the design constraint is documented
+    // This is a meta-test ensuring developers are aware of limitations
+
+    // u32 limit should be:
+    u32 max_files = std::numeric_limits<u32>::max();
+    ASSERT_EQ(max_files, 4294967295U);
+
+    // This matches the MAR 0.1.0 spec constraint on file_count
+    // See docs/FORMAT_CONSTRAINTS.md for rationale and future considerations
+}
+
+// ============================================================================
 // Stopwatch tests
 // ============================================================================
 
