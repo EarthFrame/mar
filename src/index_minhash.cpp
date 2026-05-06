@@ -27,7 +27,8 @@ public:
         if (total_ == 0)
             return;
         float progress = static_cast<float>(current) / static_cast<float>(total_);
-        int pos = static_cast<int>(width_ * progress);
+        // NOLINT(bugprone-narrowing-conversions) - width_ * progress gives position as float; cast to int for bar index
+        int pos = static_cast<int>(static_cast<float>(width_) * progress);
 
         std::lock_guard<std::mutex> lock(mutex_);
         std::cerr << "\r" << prefix_ << " [";
