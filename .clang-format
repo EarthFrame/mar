@@ -1,0 +1,66 @@
+---
+Language: Cpp
+BasedOnStyle: Google
+
+# Indent: the codebase uses 4 spaces, not Google's 2
+IndentWidth: 4
+ContinuationIndentWidth: 4
+ConstructorInitializerIndentWidth: 4
+# Access modifiers (public:, private:) sit flush with the class body,
+# not indented by 1 as Google defaults to.
+AccessModifierOffset: -4
+
+# Column limit: existing code has lines up to ~155 chars in function
+# signatures. 120 enforces a limit while keeping reformatting minimal.
+ColumnLimit: 120
+
+# Pointer/reference attached to the type, not the name.
+# Matches existing style: "const std::string& path", "u8* ptr"
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# Brace placement: same line (Google default, matches existing style)
+BreakBeforeBraces: Attach
+
+# Switch case labels are indented inside the switch body.
+# Matches existing style: "switch (x) {\n    case A: ..."
+IndentCaseLabels: true
+
+# Allow short inline functions to stay on one line
+# (e.g. "[[nodiscard]] size_t file_count() const noexcept { return files_.size(); }")
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortLambdasOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: Never
+
+# Namespace body: no extra indentation
+NamespaceIndentation: None
+# Adds "// namespace mar" after closing braces for named namespaces
+FixNamespaceComments: true
+
+# Include sorting: regroup into three blocks separated by blank lines.
+#   1. Local project headers:  "mar/foo.hpp", "mar/bar.h"
+#   2. Third-party headers:    "hnswlib/hnswlib.h", "nlohmann/json.hpp"
+#   3. System headers:         <vector>, <string>, <sys/stat.h>
+#
+# Within each block, sort case-sensitively (uppercase before lowercase,
+# matching the existing convention in most files).
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex:    '^"mar/'
+    Priority: 1
+  - Regex:    '^"'
+    Priority: 2
+  - Regex:    '^<'
+    Priority: 3
+
+# Two spaces before trailing line comments: "x = 1;  // reason"
+SpacesBeforeTrailingComments: 2
+
+# Don't collapse multiple blank lines into one beyond this limit
+MaxEmptyLinesToKeep: 2
+
+# Penalty tuning: prefer breaking after return type rather than inside
+# argument lists when a function declaration doesn't fit on one line
+PenaltyReturnTypeOnItsOwnLine: 200
+PenaltyBreakBeforeFirstCallParameter: 100

@@ -1,0 +1,341 @@
+name: CI/CD
+
+# Triggers:
+#   - push to main and version tags (always run)
+#   - pull_request to main (always run)
+#   - workflow_dispatch (manual, with optional SHA for testing a specific commit)
+#   - workflow_call (called by trigger.yml for PR comment gating — Phase 3)
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Commit SHA to build (leave empty to use the current ref)'
+        required: false
+        default: ''
+  workflow_call:
+    inputs:
+      sha:
+        description: 'Commit SHA to build'
+        required: false
+        default: ''
+        type: string
+
+# Cancel any in-progress run for the same ref or SHA when a new one starts.
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.sha || github.ref }}
+  cancel-in-progress: true
+
+# Use Node.js 24 for all GitHub Actions
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# =============================================================================
+# Job graph
+#
+#   test (matrix: 22.04 / 24.04 / macOS) ──► dist (22.04 / macOS) ──► integration-test ──► release
+#
+# A compile failure on any test matrix entry (fail-fast: true) cancels the
+# other matrix entries immediately. dist, integration-test, and release only
+# run if all preceding jobs pass. release only runs on v* tag pushes.
+#
+# Note: the lint job is currently disabled. Run locally with:
+#   bear -- make && make lint
+# =============================================================================
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # Lint — disabled for now; run locally with: bear -- make && make lint
+  # ---------------------------------------------------------------------------
+  # lint:
+  #   name: Lint
+  #   runs-on: ubuntu-24.04
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #       with:
+  #         submodules: recursive
+  #         ref: ${{ inputs.sha || github.sha }}
+  #
+  #     - name: Cache apt packages
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: /var/cache/apt/archives
+  #         key: apt-lint-${{ hashFiles('.github/workflows/ci.yml') }}
+  #         restore-keys: apt-lint-
+  #
+  #     - name: Install dependencies + lint tools
+  #       run: |
+  #         wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+  #           | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+  #         echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" \
+  #           | sudo tee /etc/apt/sources.list.d/llvm.list
+  #         sudo apt-get update -qq
+  #         sudo apt-get install -y --no-install-recommends \
+  #           build-essential pkg-config \
+  #           libzstd-dev zlib1g-dev liblz4-dev libdeflate-dev libbz2-dev \
+  #           bear clang-format-21 clang-tidy-21
+  #
+  #     - name: Generate compile_commands.json
+  #       run: bear -- make
+  #
+  #     - name: Run lint
+  #       run: |
+  #         make lint CLANG_FORMAT=clang-format-21 CLANG_TIDY=clang-tidy-21 > LINT_OUTPUT.log 2>&1 || true
+  #         cat LINT_OUTPUT.log
+  #         python3 scripts/lint_report.py --format md < LINT_OUTPUT.log > LINT_REPORT.md
+  #         python3 scripts/lint_report.py --format json < LINT_OUTPUT.log > LINT_REPORT.json
+  #         make lint CLANG_FORMAT=clang-format-21 CLANG_TIDY=clang-tidy-21
+  #
+  #     - name: Upload Lint Report
+  #       if: always()
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: lint-report
+  #         path: |
+  #           LINT_REPORT.md
+  #           LINT_REPORT.json
+  #           LINT_OUTPUT.log
+
+  # ---------------------------------------------------------------------------
+  # Test — build from source + unit tests + perf regression check
+  # All three OS versions must pass (fail-fast: true cancels on first failure).
+  # ---------------------------------------------------------------------------
+  test:
+    name: Build & Test (${{ matrix.os }})
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ inputs.sha || github.sha }}
+
+      - name: Cache apt packages
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ matrix.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-${{ matrix.os }}-
+
+      - name: Cache Homebrew downloads
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: brew-${{ runner.os }}-
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libzstd-dev zlib1g-dev liblz4-dev libdeflate-dev libbz2-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install pkg-config zstd lz4 libdeflate bzip2 blake3 || true
+
+      - name: Build
+        run: make -j
+
+      - name: Unit tests
+        run: make test
+
+  # ---------------------------------------------------------------------------
+  # Distribution build — produces the release artifacts
+  #
+  # Linux (ubuntu-22.04): builds inside an Alpine 3.20 Docker container.
+  #   Alpine uses musl natively, so STATIC=1 produces a fully static musl
+  #   binary with no glibc dependency. No zig required.
+  # macOS: removed in favor of Homebrew distribution.
+  #
+  # Only runs after all test matrix entries pass.
+  # ---------------------------------------------------------------------------
+  dist:
+    name: Distribution Build (Linux)
+    needs: test
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ inputs.sha || github.sha }}
+
+      - name: Build distribution binaries (Linux, musl via Alpine)
+        run: |
+          mkdir -p dist
+          # Write a build script to run inside the Alpine container.
+          # Alpine uses musl natively, so STATIC=1 produces a musl-linked
+          # binary with no glibc dependency — no zig required.
+          cat > alpine-build.sh << 'EOF'
+          set -ex
+          apk add --no-cache build-base linux-headers pkgconf cmake git \
+            zstd-dev zstd-static \
+            lz4-dev lz4-static \
+            bzip2-dev bzip2-static \
+            zlib-dev zlib-static \
+            libdeflate-dev libdeflate-static \
+            liburing-dev
+          # Work around Git's dubious ownership check for mounted Docker volumes
+          git config --global --add safe.directory /work
+          # Ensure submodules are initialized (in case they weren't)
+          git submodule update --init --recursive
+          
+          # Build the base x86-64 binary
+          make clean && mkdir -p dist
+          make STATIC=1 BUILD=release \
+            ARCH_FLAGS="-march=x86-64 -mtune=generic" \
+            TARGET_NAME=dist/mar-linux-x86_64-musl \
+            all-internal
+          
+          # Build the SSE4.2 optimized binary (don't clean — we need both!)
+          make STATIC=1 BUILD=release \
+            ARCH_FLAGS="-march=nehalem -mtune=generic" \
+            TARGET_NAME=dist/mar-linux-x86_64-sse42-musl \
+            all-internal
+          
+          # Verify both binaries exist
+          ls -lh dist/mar-linux-x86_64-musl || (echo "ERROR: Base x86-64 build failed"; exit 1)
+          ls -lh dist/mar-linux-x86_64-sse42-musl || (echo "ERROR: SSE4.2 build failed"; exit 1)
+          echo "✅ All builds completed successfully"
+          EOF
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -w /work \
+            alpine:3.20 \
+            sh alpine-build.sh
+          
+          # Verify files exist on host
+          ls -lh dist/mar-* || (echo "ERROR: Dist files not found on host"; exit 1)
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mar-binaries-linux
+          path: dist/mar-*
+          # 30 days for release tags, 1 day for everything else
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 30 || 1 }}
+
+  # ---------------------------------------------------------------------------
+  # Integration tests — run against the dist binary (Linux only)
+  # macOS testing uses the non-static build from the test matrix.
+  #
+  # This is the key bootstrapping step: the binary under test is the exact
+  # artifact that would be shipped to users. MAR_BIN overrides the default
+  # ./mar path in integration_test.sh.
+  #
+  # Linux: the musl binary is fully static — no extra deps needed.
+  # ---------------------------------------------------------------------------
+  integration-test:
+    name: Integration Tests (Linux)
+    needs: dist
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ inputs.sha || github.sha }}
+
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mar-binaries-linux
+          path: dist/
+
+      - name: Run integration tests
+        run: |
+          # Verify the artifact exists before proceeding
+          if [ ! -f "dist/mar-linux-x86_64-musl" ]; then
+            echo "❌ ERROR: Distribution binary not found!"
+            echo "Contents of dist directory:"
+            ls -lh dist/ || echo "dist directory is empty"
+            exit 1
+          fi
+          
+          echo "✅ Found binary: $(ls -lh dist/mar-linux-x86_64-musl)"
+          chmod +x dist/mar-linux-x86_64-musl
+          MAR_BIN="${GITHUB_WORKSPACE}/dist/mar-linux-x86_64-musl" \
+            ./tests/integration_test.sh
+
+  # ---------------------------------------------------------------------------
+  # Release — creates a GitHub Release and attaches distribution binaries
+  # Only runs on v* tag pushes. Both lint and integration-test must pass.
+  # ---------------------------------------------------------------------------
+  release:
+    name: Create Release
+    needs: [integration-test]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-dist
+          pattern: mar-binaries-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: all-dist/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout (for formula update)
+        uses: actions/checkout@v4
+
+      - name: Update Homebrew formula with SHA256
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          TARBALL_URL="https://github.com/earthframe/mar/archive/refs/tags/v${VERSION}.tar.gz"
+          
+          # Download and compute SHA256 from the public GitHub release tarball
+          SHA256=$(curl -sL "$TARBALL_URL" | sha256sum | cut -d' ' -f1)
+          
+          # Validate SHA256 format (should be 64 hex characters)
+          if ! [[ "$SHA256" =~ ^[a-f0-9]{64}$ ]]; then
+            echo "ERROR: Invalid SHA256 hash computed: $SHA256"
+            exit 1
+          fi
+          
+          # Update the formula file with version-specific values
+          sed -i.bak "s|url \".*\"|url \"$TARBALL_URL\"|" .homebrew/mar.rb
+          sed -i.bak "s/sha256 \".*\"/sha256 \"$SHA256\"/" .homebrew/mar.rb
+          rm .homebrew/mar.rb.bak
+          
+          # Verify the file was updated correctly
+          if ! grep -q "$SHA256" .homebrew/mar.rb; then
+            echo "ERROR: Failed to update formula with SHA256"
+            exit 1
+          fi
+          
+          # Create a commit with the updated formula
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .homebrew/mar.rb
+          git commit -m "Update Homebrew formula for v${VERSION}" -m "Auto-generated by CI/CD. SHA256 computed from public source tarball."
+          git push
+        env:
+          # GitHub automatically provides a scoped token for this repository
+          # It only has access to this repo and expires after the workflow completes
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

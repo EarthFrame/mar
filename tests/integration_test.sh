@@ -12,7 +12,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-MAR_BIN="${PROJECT_ROOT}/mar"
+MAR_BIN="${MAR_BIN:-${PROJECT_ROOT}/mar}"
 GENERATE_DATA="${PROJECT_ROOT}/scripts/generate_test_data.sh"
 TEST_DIR=""
 VERBOSE=false

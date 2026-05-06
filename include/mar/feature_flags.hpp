@@ -24,11 +24,13 @@ inline size_t FeatureIndex(FeatureFlag flag) {
 }
 
 inline bool equals_ignore_case(const char* a, const char* b) {
-    if (!a || !b) return false;
+    if (!a || !b)
+        return false;
     while (*a && *b) {
         char lower_a = static_cast<char>(std::tolower(static_cast<unsigned char>(*a)));
         char lower_b = static_cast<char>(std::tolower(static_cast<unsigned char>(*b)));
-        if (lower_a != lower_b) return false;
+        if (lower_a != lower_b)
+            return false;
         ++a;
         ++b;
     }
@@ -37,8 +39,10 @@ inline bool equals_ignore_case(const char* a, const char* b) {
 
 inline bool parse_env_flag(const char* name, bool default_value) {
     const char* env = std::getenv(name);
-    if (!env) return default_value;
-    if (env[0] == '\0') return default_value;
+    if (!env)
+        return default_value;
+    if (env[0] == '\0')
+        return default_value;
     if (std::strcmp(env, "0") == 0 || equals_ignore_case(env, "false")) {
         return false;
     }

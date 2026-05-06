@@ -1,11 +1,12 @@
 #include "mar/compression_lz4.hpp"
+
 #include "mar/compression.hpp"
 #include "mar/compression_config.hpp"
 #include "mar/errors.hpp"
 
 #if HAVE_LZ4
-    #include <lz4.h>
-    #include <lz4frame.h>
+#include <lz4.h>
+#include <lz4frame.h>
 #endif
 
 namespace mar {
@@ -32,12 +33,8 @@ std::vector<u8> compress_lz4(const u8* data, size_t len, int) {
     output[2] = static_cast<u8>(len >> 16);
     output[3] = static_cast<u8>(len >> 24);
 
-    int result = LZ4_compress_default(
-        reinterpret_cast<const char*>(data),
-        reinterpret_cast<char*>(output.data() + 4),
-        static_cast<int>(len),
-        bound
-    );
+    int result = LZ4_compress_default(reinterpret_cast<const char*>(data), reinterpret_cast<char*>(output.data() + 4),
+                                      static_cast<int>(len), bound);
 
     if (result <= 0) {
         throw CompressionError("LZ4 compression failed");
@@ -54,19 +51,13 @@ std::vector<u8> decompress_lz4(const u8* data, size_t len, u64 raw_size) {
 
     // Read original size from header if raw_size not provided
     if (raw_size == 0) {
-        raw_size = static_cast<u32>(data[0]) |
-                   (static_cast<u32>(data[1]) << 8) |
-                   (static_cast<u32>(data[2]) << 16) |
+        raw_size = static_cast<u32>(data[0]) | (static_cast<u32>(data[1]) << 8) | (static_cast<u32>(data[2]) << 16) |
                    (static_cast<u32>(data[3]) << 24);
     }
 
     std::vector<u8> output(raw_size);
-    int result = LZ4_decompress_safe(
-        reinterpret_cast<const char*>(data + 4),
-        reinterpret_cast<char*>(output.data()),
-        static_cast<int>(len - 4),
-        static_cast<int>(raw_size)
-    );
+    int result = LZ4_decompress_safe(reinterpret_cast<const char*>(data + 4), reinterpret_cast<char*>(output.data()),
+                                     static_cast<int>(len - 4), static_cast<int>(raw_size));
 
     if (result < 0) {
         throw CompressionError("LZ4 decompression failed");
@@ -107,7 +98,8 @@ Lz4StreamCompressor::~Lz4StreamCompressor() {
 }
 
 size_t Lz4StreamCompressor::write(const u8* data, size_t len, CompressionSink& sink) {
-    if (len == 0) return 0;
+    if (len == 0)
+        return 0;
     size_t total_out = 0;
     if (!impl_->header_written) {
         if (!sink.write(impl_->out_buf_ptr, impl_->header_size)) {
@@ -169,6 +161,6 @@ size_t Lz4StreamCompressor::finish(CompressionSink&) {
     throw UnsupportedError("LZ4 compression not available");
 }
 
-#endif // HAVE_LZ4
+#endif  // HAVE_LZ4
 
-} // namespace mar
+}  // namespace mar

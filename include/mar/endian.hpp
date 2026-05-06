@@ -1,23 +1,23 @@
 #pragma once
 
-#include "mar/types.hpp"
 #include "mar/errors.hpp"
+#include "mar/types.hpp"
 
+#include <cstring>
 #include <istream>
 #include <ostream>
-#include <vector>
-#include <cstring>
 #include <type_traits>
+#include <vector>
 
 // Branch prediction hints
 #if defined(__GNUC__) || defined(__clang__)
-    #define MAR_LIKELY(x)   __builtin_expect(!!(x), 1)
-    #define MAR_UNLIKELY(x) __builtin_expect(!!(x), 0)
-    #define MAR_ALWAYS_INLINE __attribute__((always_inline)) inline
+#define MAR_LIKELY(x) __builtin_expect(!!(x), 1)
+#define MAR_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#define MAR_ALWAYS_INLINE __attribute__((always_inline)) inline
 #else
-    #define MAR_LIKELY(x)   (x)
-    #define MAR_UNLIKELY(x) (x)
-    #define MAR_ALWAYS_INLINE inline
+#define MAR_LIKELY(x) (x)
+#define MAR_UNLIKELY(x) (x)
+#define MAR_ALWAYS_INLINE inline
 #endif
 
 namespace mar {
@@ -36,13 +36,13 @@ inline bool is_host_little_endian() {
     return cached;
 }
 
-} // namespace detail
+}  // namespace detail
 
 /// Encode a host-endian integral value into a little-endian buffer.
 template <typename T>
 MAR_ALWAYS_INLINE void encode_le(u8* buf, T value) {
     static_assert(std::is_integral_v<T>, "T must be an integral type");
-    
+
     if (MAR_LIKELY(detail::is_host_little_endian())) {
         std::memcpy(buf, &value, sizeof(T));
     } else {
@@ -56,7 +56,7 @@ MAR_ALWAYS_INLINE void encode_le(u8* buf, T value) {
 template <typename T>
 MAR_ALWAYS_INLINE T decode_le(const u8* buf) {
     static_assert(std::is_integral_v<T>, "T must be an integral type");
-    
+
     if (MAR_LIKELY(detail::is_host_little_endian())) {
         T value;
         std::memcpy(&value, buf, sizeof(T));
@@ -141,7 +141,8 @@ inline std::vector<T> read_le_array(const u8*& p, u32 count) {
 template <typename T>
 inline void write_le_array(std::vector<u8>& out, const std::vector<T>& values) {
     static_assert(std::is_integral_v<T>, "T must be an integral type");
-    if (values.empty()) return;
+    if (values.empty())
+        return;
     const size_t old_size = out.size();
     const size_t add_size = values.size() * sizeof(T);
     if (detail::is_host_little_endian()) {
@@ -157,4 +158,4 @@ inline void write_le_array(std::vector<u8>& out, const std::vector<T>& values) {
     }
 }
 
-} // namespace mar
+}  // namespace mar

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "mar/types.hpp"
 #include "mar/enums.hpp"
+#include "mar/types.hpp"
 
 #include <memory>
 #include <optional>
@@ -100,7 +100,7 @@ private:
 
     void build_trie(const std::vector<std::string>& names);
     void collect_names(const TrieNode* node, const std::string& prefix, std::vector<std::string>& out) const;
-    
+
     // Serialization helpers
     void serialize_node(const TrieNode* node, std::vector<u8>& out) const;
     std::unique_ptr<TrieNode> deserialize_node(const u8*& p, const u8* end);
@@ -110,4 +110,4 @@ private:
     static u32 read_varint(const u8*& p, const u8* end);
 };
 
-} // namespace mar
+}  // namespace mar

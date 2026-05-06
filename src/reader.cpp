@@ -1,24 +1,25 @@
 #include "mar/reader.hpp"
-#include "mar/compression.hpp"
+
+#include "mar/async_io.hpp"
 #include "mar/checksum.hpp"
+#include "mar/compression.hpp"
 #include "mar/endian.hpp"
 #include "mar/errors.hpp"
-#include "mar/thread_pool.hpp"
 #include "mar/file_handle.hpp"
-#include "mar/async_io.hpp"
+#include "mar/thread_pool.hpp"
 
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <future>
 #include <iostream>
 #include <sstream>
+#include <sys/mman.h>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
-#include <fstream>
-#include <cstring>
-#include <sys/mman.h>
 
 namespace fs = std::filesystem;
 
@@ -49,10 +50,14 @@ BlockHeader decode_block_header(const u8* hdr_ptr) {
 
 NameTableFormat get_name_table_format(u32 flags) {
     switch (flags & 0xF) {
-        case name_table_format::RAW_ARRAY: return NameTableFormat::RawArray;
-        case name_table_format::FRONT_CODED: return NameTableFormat::FrontCoded;
-        case name_table_format::COMPACT_TRIE: return NameTableFormat::CompactTrie;
-        default: throw InvalidArchiveError("Unknown NAME_TABLE format");
+        case name_table_format::RAW_ARRAY:
+            return NameTableFormat::RawArray;
+        case name_table_format::FRONT_CODED:
+            return NameTableFormat::FrontCoded;
+        case name_table_format::COMPACT_TRIE:
+            return NameTableFormat::CompactTrie;
+        default:
+            throw InvalidArchiveError("Unknown NAME_TABLE format");
     }
 }
 
@@ -64,7 +69,7 @@ OpenHints hints_for_extraction(u64 file_size) {
     OpenHints hints;
     hints.pattern = AccessPattern::SEQUENTIAL;
     hints.will_read_once = false;  // Extracted files may be read after extraction
-    
+
     // Map logical size to FileSize category
     if (file_size < 64 * 1024) {
         hints.expected_size = FileSize::TINY;
@@ -77,9 +82,9 @@ OpenHints hints_for_extraction(u64 file_size) {
     } else {
         hints.expected_size = FileSize::VERY_LARGE;
     }
-    
+
     // Platform-specific I/O mode selection
-    // 
+    //
     // Linux: Use AUTO mode - io_uring + page cache work well together
     // macOS: Use BUFFERED mode - F_NOCACHE kills performance on multiblock archives
     //        because blocks are re-read many times, and F_NOCACHE bypasses OS caching
@@ -87,9 +92,9 @@ OpenHints hints_for_extraction(u64 file_size) {
 #ifdef __APPLE__
     hints.mode = IOMode::BUFFERED;  // Critical: let OS cache work on macOS
 #else
-    hints.mode = IOMode::AUTO;      // Linux io_uring + page cache are fast
+    hints.mode = IOMode::AUTO;  // Linux io_uring + page cache are fast
 #endif
-    
+
     return hints;
 }
 
@@ -108,10 +113,8 @@ std::vector<u8> get_section_data(const std::vector<u8>& meta_data, const Section
         throw InvalidArchiveError("Section data exceeds meta container");
     }
 
-    std::vector<u8> stored_data(
-        meta_data.begin() + section.payload_offset,
-        meta_data.begin() + section.payload_offset + section.stored_size
-    );
+    std::vector<u8> stored_data(meta_data.begin() + section.payload_offset,
+                                meta_data.begin() + section.payload_offset + section.stored_size);
 
     // Note: Individual section compression is indicated by raw_size > 0
     // rather than flags bit 0, because flags bits 0-3 are used for
@@ -122,7 +125,7 @@ std::vector<u8> get_section_data(const std::vector<u8>& meta_data, const Section
     return stored_data;
 }
 
-} // anonymous namespace
+}  // anonymous namespace
 
 MarReader::MarReader(const std::string& path) {
     cache_token_ = g_cache_token_seed.fetch_add(1, std::memory_order_relaxed);
@@ -135,12 +138,12 @@ MarReader::MarReader(const std::string& path) {
     if (archive_map_.size() < FIXED_HEADER_SIZE) {
         throw InvalidArchiveError("Archive too short for header");
     }
-    
+
     // For now, let's use a stringstream to keep using FixedHeader::read
     std::string header_bytes(static_cast<const char*>(archive_map_.data()), FIXED_HEADER_SIZE);
     std::istringstream header_stream(header_bytes);
     header_ = FixedHeader::read(header_stream);
-    
+
     header_.validate();
 
     // Verify CRC if present
@@ -157,7 +160,7 @@ MarReader::MarReader(const std::string& path) {
     }
 
     const u8* meta_ptr = static_cast<const u8*>(archive_map_.data(header_.meta_offset));
-    
+
     // Decompress meta if needed
     std::vector<u8> meta_data;
     if (header_.meta_comp_algo == CompressionAlgo::None) {
@@ -179,10 +182,8 @@ MarReader::MarReader(const std::string& path) {
     }
 
     std::vector<SectionEntry> sections;
-    std::istringstream section_stream(std::string(
-        reinterpret_cast<const char*>(meta_data.data() + 8),
-        section_count * SECTION_ENTRY_SIZE
-    ));
+    std::istringstream section_stream(
+        std::string(reinterpret_cast<const char*>(meta_data.data() + 8), section_count * SECTION_ENTRY_SIZE));
     for (u32 i = 0; i < section_count; ++i) {
         sections.push_back(SectionEntry::read(section_stream));
     }
@@ -280,7 +281,7 @@ MarReader::MarReader(const std::string& path) {
             std::string hdr_bytes(reinterpret_cast<const char*>(hdr_ptr), BLOCK_HEADER_SIZE);
             std::istringstream hdr_stream(hdr_bytes);
             auto block_header = BlockHeader::read(hdr_stream);
-            
+
             offset += BLOCK_HEADER_SIZE + block_header.stored_size;
             offset = align_up(offset, alignment);
         }
@@ -290,7 +291,8 @@ MarReader::MarReader(const std::string& path) {
 void MarReader::apply_archive_read_hints(bool will_read_once) const {
     const void* data = archive_map_.data();
     size_t size = archive_map_.size();
-    if (!data || size == 0) return;
+    if (!data || size == 0)
+        return;
 
 #ifdef MADV_SEQUENTIAL
     madvise(const_cast<void*>(data), size, MADV_SEQUENTIAL);
@@ -310,16 +312,21 @@ MarReader& MarReader::operator=(MarReader&&) noexcept = default;
 MarReader::~MarReader() = default;
 
 std::vector<Span> MarReader::get_file_spans(size_t index) const {
-    if (index >= files_.size()) return {};
-    if (header_.index_type != IndexType::Multiblock) return {};
-    if (!file_spans_) return {};
+    if (index >= files_.size())
+        return {};
+    if (header_.index_type != IndexType::Multiblock)
+        return {};
+    if (!file_spans_)
+        return {};
     return file_spans_->get_file_spans(static_cast<u32>(index));
 }
 
 std::vector<u32> MarReader::get_block_ids_for_file(size_t index) const {
     auto entry = get_file_entry(index);
-    if (!entry || entry->entry_type != EntryType::RegularFile) return {};
-    if (entry->logical_size == 0) return {};
+    if (!entry || entry->entry_type != EntryType::RegularFile)
+        return {};
+    if (entry->logical_size == 0)
+        return {};
 
     if (header_.index_type == IndexType::SingleFilePerBlock) {
         size_t block_index = 0;
@@ -329,7 +336,14 @@ std::vector<u32> MarReader::get_block_ids_for_file(size_t index) const {
                 block_index++;
             }
         }
-        return { static_cast<u32>(block_index) };
+
+        // Bounds check to ensure no overflow when casting to u32 (format constraint)
+        if (block_index > static_cast<size_t>(std::numeric_limits<u32>::max())) {
+            throw IOError("Block index exceeds maximum u32 value (format constraint)");
+        }
+
+        // NOLINT(bugprone-narrowing-conversions) - block_index is bounded by u32 (format constraint)
+        return {static_cast<u32>(block_index)};  // NOLINT(bugprone-narrowing-conversions)
     }
 
     std::vector<u32> ids;
@@ -342,14 +356,17 @@ std::vector<u32> MarReader::get_block_ids_for_file(size_t index) const {
 }
 
 std::optional<std::string> MarReader::get_name(size_t index) const {
-    if (index >= files_.size()) return std::nullopt;
+    if (index >= files_.size())
+        return std::nullopt;
     u32 name_id = files_[index].name_id;
-    if (name_id >= names_.size()) return std::nullopt;
+    if (name_id >= names_.size())
+        return std::nullopt;
     return names_[name_id];
 }
 
 std::optional<FileEntry> MarReader::get_file_entry(size_t index) const {
-    if (index >= files_.size()) return std::nullopt;
+    if (index >= files_.size())
+        return std::nullopt;
     return files_[index];
 }
 
@@ -363,18 +380,22 @@ std::optional<std::pair<size_t, FileEntry>> MarReader::find_file(const std::stri
 }
 
 std::optional<PosixEntry> MarReader::get_posix_meta(size_t index) const {
-    if (!posix_meta_ || index >= posix_meta_->size()) return std::nullopt;
+    if (!posix_meta_ || index >= posix_meta_->size())
+        return std::nullopt;
     return (*posix_meta_)[index];
 }
 
 std::optional<std::string> MarReader::get_symlink_target(size_t index) const {
-    if (!symlink_targets_ || index >= symlink_targets_->size()) return std::nullopt;
+    if (!symlink_targets_ || index >= symlink_targets_->size())
+        return std::nullopt;
     return (*symlink_targets_)[index];
 }
 
 std::optional<std::array<u8, 32>> MarReader::get_hash(size_t index) const {
-    if (!hashes_ || index >= hashes_->size()) return std::nullopt;
-    if (!(*hashes_)[index].has_hash) return std::nullopt;
+    if (!hashes_ || index >= hashes_->size())
+        return std::nullopt;
+    if (!(*hashes_)[index].has_hash)
+        return std::nullopt;
     return (*hashes_)[index].digest;
 }
 
@@ -411,14 +432,16 @@ BlockHeader MarReader::parse_block_header_at(u64 offset) const {
 
     // Verify checksum if present
     if (block_header.fast_checksum_type != ChecksumType::None) {
-        if (!verify_fast_checksum(payload_ptr, block_header.stored_size, block_header.fast_checksum_type, block_header.fast_checksum)) {
+        if (!verify_fast_checksum(payload_ptr, block_header.stored_size, block_header.fast_checksum_type,
+                                  block_header.fast_checksum)) {
             throw ChecksumError("Block checksum mismatch");
         }
     }
 
     // Decompress and cache
-    auto decompressed = decompress(payload_ptr, block_header.stored_size, block_header.comp_algo, block_header.raw_size);
-    
+    auto decompressed =
+        decompress(payload_ptr, block_header.stored_size, block_header.comp_algo, block_header.raw_size);
+
     cache.token = cache_token_;
     cache.offset = offset;
     cache.data = std::move(decompressed);
@@ -471,14 +494,14 @@ std::vector<u8> MarReader::read_file(size_t index) {
         return {};
     }
 
-    // Spans should already be in sequence order, but verify in debug
-    #ifndef NDEBUG
+// Spans should already be in sequence order, but verify in debug
+#ifndef NDEBUG
     for (size_t i = 1; i < spans.size(); ++i) {
-        if (spans[i].sequence_order < spans[i-1].sequence_order) {
+        if (spans[i].sequence_order < spans[i - 1].sequence_order) {
             throw InvalidArchiveError("File spans not in sequence order");
         }
     }
-    #endif
+#endif
 
     std::vector<u8> result;
     result.reserve(entry.logical_size);
@@ -488,15 +511,13 @@ std::vector<u8> MarReader::read_file(size_t index) {
         const auto& block_data = get_block_data(block_offsets_[span.block_id]);
 
         if (span.offset_in_block + span.length > block_data.size()) {
-            std::cerr << "mar: error: Span exceeds block data in read_file: span.block_id=" << span.block_id 
-                      << ", span.offset=" << span.offset_in_block 
-                      << ", span.length=" << span.length 
+            std::cerr << "mar: error: Span exceeds block data in read_file: span.block_id=" << span.block_id
+                      << ", span.offset=" << span.offset_in_block << ", span.length=" << span.length
                       << ", block.size=" << block_data.size() << std::endl;
             throw InvalidArchiveError("Span exceeds block data");
         }
 
-        result.insert(result.end(),
-                      block_data.begin() + span.offset_in_block,
+        result.insert(result.end(), block_data.begin() + span.offset_in_block,
                       block_data.begin() + span.offset_in_block + span.length);
     }
 
@@ -512,31 +533,38 @@ std::vector<u8> MarReader::read_file(const std::string& name) {
 }
 
 bool MarReader::extract_file_to_sink(size_t index, CompressionSink& sink) {
-    if (index >= files_.size()) return false;
+    if (index >= files_.size())
+        return false;
     const auto& entry = files_[index];
-    if (entry.entry_type != EntryType::RegularFile) return false;
-    if (entry.is_redacted()) return true;
-    
+    if (entry.entry_type != EntryType::RegularFile)
+        return false;
+    if (entry.is_redacted())
+        return true;
+
     // If file is empty, just return success
-    if (entry.logical_size == 0) return true;
+    if (entry.logical_size == 0)
+        return true;
 
     if (header_.index_type == IndexType::SingleFilePerBlock) {
         size_t block_index = 0;
         for (size_t i = 0; i < index; ++i) {
-            if (files_[i].entry_type == EntryType::RegularFile) block_index++;
+            if (files_[i].entry_type == EntryType::RegularFile)
+                block_index++;
         }
-        
-        if (block_index >= block_offsets_.size()) return false;
-        
+
+        if (block_index >= block_offsets_.size())
+            return false;
+
         u64 offset = block_offsets_[block_index];
         const u8* hdr_ptr = static_cast<const u8*>(archive_map_.data(offset));
-        
+
         // Parse block header directly from memory
         BlockHeader block_header = parse_block_header_at(offset);
 
         const u8* payload_ptr = hdr_ptr + BLOCK_HEADER_SIZE;
 
-        return decompress_to_sink(payload_ptr, block_header.stored_size, block_header.comp_algo, sink, block_header.raw_size);
+        return decompress_to_sink(payload_ptr, block_header.stored_size, block_header.comp_algo, sink,
+                                  block_header.raw_size);
     }
 
     // Multiblock mode: process file spans
@@ -546,17 +574,18 @@ bool MarReader::extract_file_to_sink(size_t index, CompressionSink& sink) {
         // In this case, we can't safely extract from multiblock archives
         return false;
     }
-    
+
     auto spans = file_spans_->get_file_spans(static_cast<u32>(index));
     if (spans.empty()) {
         // No spans for this file - shouldn't happen for regular files
         return false;
     }
-    
+
     // Spans should already be in sequence order from the archive
     for (const auto& span : spans) {
-        if (span.block_id >= block_offsets_.size()) return false;
-        
+        if (span.block_id >= block_offsets_.size())
+            return false;
+
         u64 offset = block_offsets_[span.block_id];
         BlockHeader block_header = parse_block_header_at(offset);
         const u8* payload_ptr = static_cast<const u8*>(archive_map_.data(offset)) + BLOCK_HEADER_SIZE;
@@ -564,15 +593,15 @@ bool MarReader::extract_file_to_sink(size_t index, CompressionSink& sink) {
         // Extract the span data
         if (block_header.comp_algo == CompressionAlgo::None) {
             if (span.offset_in_block + span.length > block_header.stored_size) {
-                std::cerr << "mar: error: Span exceeds block data: span.block_id=" << span.block_id 
-                          << ", span.offset=" << span.offset_in_block 
-                          << ", span.length=" << span.length 
+                std::cerr << "mar: error: Span exceeds block data: span.block_id=" << span.block_id
+                          << ", span.offset=" << span.offset_in_block << ", span.length=" << span.length
                           << ", block.size=" << block_header.stored_size << std::endl;
                 return false;
             }
 
             if (block_header.fast_checksum_type != ChecksumType::None) {
-                if (!verify_fast_checksum(payload_ptr, block_header.stored_size, block_header.fast_checksum_type, block_header.fast_checksum)) {
+                if (!verify_fast_checksum(payload_ptr, block_header.stored_size, block_header.fast_checksum_type,
+                                          block_header.fast_checksum)) {
                     throw ChecksumError("Block checksum mismatch");
                 }
             }
@@ -585,13 +614,12 @@ bool MarReader::extract_file_to_sink(size_t index, CompressionSink& sink) {
 
         const auto& block_data = get_block_data(offset);
         if (span.offset_in_block + span.length > block_data.size()) {
-            std::cerr << "mar: error: Span exceeds block data: span.block_id=" << span.block_id 
-                      << ", span.offset=" << span.offset_in_block 
-                      << ", span.length=" << span.length 
+            std::cerr << "mar: error: Span exceeds block data: span.block_id=" << span.block_id
+                      << ", span.offset=" << span.offset_in_block << ", span.length=" << span.length
                       << ", block.size=" << block_data.size() << std::endl;
             return false;
         }
-        
+
         if (!sink.write(block_data.data() + span.offset_in_block, span.length)) {
             return false;
         }
@@ -602,7 +630,8 @@ bool MarReader::extract_file_to_sink(size_t index, CompressionSink& sink) {
 
 bool MarReader::extract_file_to_sink(const std::string& name, CompressionSink& sink) {
     auto found = find_file(name);
-    if (!found) return false;
+    if (!found)
+        return false;
     return extract_file_to_sink(found->first, sink);
 }
 
@@ -618,7 +647,8 @@ void MarReader::extract_all(const std::string& output_dir, size_t strip_componen
     fs::create_directories(output_dir);
     for (size_t i = 0; i < files_.size(); ++i) {
         auto name_opt = get_name(i);
-        if (!name_opt) continue;
+        if (!name_opt)
+            continue;
 
         // Strip components
         std::string name = *name_opt;
@@ -631,24 +661,25 @@ void MarReader::extract_all(const std::string& output_dir, size_t strip_componen
             }
         }
 
-        if (name.empty()) continue;
+        if (name.empty())
+            continue;
 
         const auto& entry = files_[i];
         fs::path output_path = fs::path(output_dir) / name;
 
         switch (entry.entry_type) {
             case EntryType::Directory:
-                fs::create_directories(output_path);
+                fs::create_directories(output_path);  // NOLINT(bugprone-unused-return-value)
                 break;
 
             case EntryType::RegularFile: {
                 if (output_path.has_parent_path()) {
-                    fs::create_directories(output_path.parent_path());
+                    fs::create_directories(output_path.parent_path());  // NOLINT(bugprone-unused-return-value)
                 }
-                
+
                 const auto& entry = files_[i];
                 auto hints = hints_for_extraction(entry.logical_size);
-                
+
                 FileHandle out;
                 if (out.openWrite(output_path.string().c_str(), hints)) {
                     DescriptorCompressionSink sink(out.getFd());
@@ -661,7 +692,7 @@ void MarReader::extract_all(const std::string& output_dir, size_t strip_componen
                 auto target = get_symlink_target(i);
                 if (target) {
                     if (output_path.has_parent_path()) {
-                        fs::create_directories(output_path.parent_path());
+                        fs::create_directories(output_path.parent_path());  // NOLINT(bugprone-unused-return-value)
                     }
                     fs::create_symlink(*target, output_path);
                 }
@@ -678,7 +709,8 @@ void MarReader::extract_all(const std::string& output_dir, size_t strip_componen
             if (entry.entry_type != EntryType::Symlink) {
                 try {
                     fs::permissions(output_path, static_cast<fs::perms>(meta.mode & 0777));
-                } catch (...) {}
+                } catch (...) {
+                }
             }
         }
     }
@@ -686,29 +718,30 @@ void MarReader::extract_all(const std::string& output_dir, size_t strip_componen
 
 void MarReader::extract_file(size_t index, const std::string& output_dir) {
     auto name_opt = get_name(index);
-    if (!name_opt) return;
+    if (!name_opt)
+        return;
 
     const auto& entry = files_[index];
     fs::path output_path = fs::path(output_dir) / *name_opt;
 
     switch (entry.entry_type) {
         case EntryType::Directory:
-            fs::create_directories(output_path);
+            fs::create_directories(output_path);  // NOLINT(bugprone-unused-return-value)
             break;
 
         case EntryType::RegularFile: {
             if (output_path.has_parent_path()) {
-                fs::create_directories(output_path.parent_path());
+                fs::create_directories(output_path.parent_path());  // NOLINT(bugprone-unused-return-value)
             }
-            
+
             const auto& entry = files_[index];
             auto hints = hints_for_extraction(entry.logical_size);
-            
+
             FileHandle out;
             if (!out.openWrite(output_path.string().c_str(), hints)) {
                 throw IOError("Failed to open output file: " + output_path.string());
             }
-            
+
             DescriptorCompressionSink sink(out.getFd());
             if (!extract_file_to_sink(index, sink)) {
                 throw MarError("Extraction failed for " + output_path.string());
@@ -720,12 +753,14 @@ void MarReader::extract_file(size_t index, const std::string& output_dir) {
             auto target = get_symlink_target(index);
             if (target) {
                 if (output_path.has_parent_path()) {
-                    fs::create_directories(output_path.parent_path());
+                    fs::create_directories(output_path.parent_path());  // NOLINT(bugprone-unused-return-value)
                 }
                 try {
-                    if (fs::exists(output_path)) fs::remove(output_path);
+                    if (fs::exists(output_path))
+                        fs::remove(output_path);  // NOLINT(bugprone-unused-return-value)
                     fs::create_symlink(*target, output_path);
-                } catch (...) {}
+                } catch (...) {
+                }
             }
             break;
         }
@@ -740,7 +775,8 @@ void MarReader::extract_file(size_t index, const std::string& output_dir) {
         if (entry.entry_type != EntryType::Symlink) {
             try {
                 fs::permissions(output_path, static_cast<fs::perms>(meta.mode & 0777));
-            } catch (...) {}
+            } catch (...) {
+            }
         }
     }
 }
@@ -761,7 +797,8 @@ void MarReader::extract_all_parallel(const std::string& output_dir, size_t num_t
     extract_indices_parallel(indices, output_dir, num_threads, strip_components);
 }
 
-void MarReader::extract_files_parallel(const std::vector<std::string>& names, const std::string& output_dir, size_t num_threads, size_t strip_components) {
+void MarReader::extract_files_parallel(const std::vector<std::string>& names, const std::string& output_dir,
+                                       size_t num_threads, size_t strip_components) {
     // Optimization: If there are many names, build a temporary name-to-index map
     // to avoid O(N^2) complexity.
     std::vector<size_t> indices;
@@ -789,15 +826,17 @@ void MarReader::extract_files_parallel(const std::vector<std::string>& names, co
     extract_indices_parallel(indices, output_dir, num_threads, strip_components);
 }
 
-void MarReader::extract_indices_parallel(const std::vector<size_t>& indices, const std::string& output_dir, size_t num_threads, size_t strip_components) {
+void MarReader::extract_indices_parallel(const std::vector<size_t>& indices, const std::string& output_dir,
+                                         size_t num_threads, size_t strip_components) {
     if (num_threads == 0) {
         num_threads = std::thread::hardware_concurrency();
-        if (num_threads == 0) num_threads = 4;
+        if (num_threads == 0)
+            num_threads = 4;
     }
-    
+
     // Create output directory
     fs::create_directories(output_dir);
-    
+
     // Helper to strip components
     auto get_stripped_name = [strip_components](std::string name) -> std::optional<std::string> {
         for (size_t c = 0; c < strip_components && !name.empty(); ++c) {
@@ -808,7 +847,8 @@ void MarReader::extract_indices_parallel(const std::vector<size_t>& indices, con
                 name = name.substr(pos + 1);
             }
         }
-        if (name.empty()) return std::nullopt;
+        if (name.empty())
+            return std::nullopt;
         return name;
     };
 
@@ -816,14 +856,16 @@ void MarReader::extract_indices_parallel(const std::vector<size_t>& indices, con
     for (size_t idx : indices) {
         if (files_[idx].entry_type == EntryType::Directory) {
             auto name_opt = get_name(idx);
-            if (!name_opt) continue;
+            if (!name_opt)
+                continue;
             auto stripped = get_stripped_name(*name_opt);
-            if (!stripped) continue;
+            if (!stripped)
+                continue;
             fs::path output_path = fs::path(output_dir) / *stripped;
             fs::create_directories(output_path);
         }
     }
-    
+
     // Second pass: extract regular files in parallel
     struct FileOutput {
         size_t index;
@@ -833,24 +875,28 @@ void MarReader::extract_indices_parallel(const std::vector<size_t>& indices, con
     std::vector<FileOutput> file_outputs;
     file_outputs.reserve(indices.size());
     for (size_t idx : indices) {
-        if (files_[idx].entry_type != EntryType::RegularFile) continue;
+        if (files_[idx].entry_type != EntryType::RegularFile)
+            continue;
         auto name_opt = get_name(idx);
-        if (!name_opt) continue;
+        if (!name_opt)
+            continue;
         auto stripped = get_stripped_name(*name_opt);
-        if (!stripped) continue;
+        if (!stripped)
+            continue;
 
         fs::path output_path = fs::path(output_dir) / *stripped;
         fs::path parent = output_path.parent_path();
         file_outputs.push_back({idx, std::move(output_path), std::move(parent)});
     }
-    
+
     // Sort file indices by block_id to ensure sequential read access to the archive
     // and maximize block cache hits.
     if (header_.index_type == IndexType::Multiblock && file_spans_) {
         std::sort(file_outputs.begin(), file_outputs.end(), [this](const FileOutput& a, const FileOutput& b) {
             auto spans_a = file_spans_->get_file_spans(static_cast<u32>(a.index));
             auto spans_b = file_spans_->get_file_spans(static_cast<u32>(b.index));
-            if (spans_a.empty() || spans_b.empty()) return a.index < b.index;
+            if (spans_a.empty() || spans_b.empty())
+                return a.index < b.index;
             if (spans_a[0].block_id != spans_b[0].block_id) {
                 return spans_a[0].block_id < spans_b[0].block_id;
             }
@@ -870,7 +916,7 @@ void MarReader::extract_indices_parallel(const std::vector<size_t>& indices, con
             fs::create_directories(parent);
         }
     }
-    
+
     // Parallel extraction with streaming I/O (constant memory usage)
     if (num_threads > 1 && file_outputs.size() > 1) {
         ThreadPool pool(std::min(num_threads, file_outputs.size()));
@@ -882,14 +928,16 @@ void MarReader::extract_indices_parallel(const std::vector<size_t>& indices, con
             futures.push_back(pool.enqueue([this, &file_outputs, &next_index]() {
                 while (true) {
                     size_t out_index = next_index++;
-                    if (out_index >= file_outputs.size()) break;
+                    if (out_index >= file_outputs.size())
+                        break;
 
                     const auto& output = file_outputs[out_index];
                     const auto& entry = files_[output.index];
                     auto hints = hints_for_extraction(entry.logical_size);
 
                     FileHandle out;
-                    if (!out.openWrite(output.output_path.string().c_str(), hints)) continue;
+                    if (!out.openWrite(output.output_path.string().c_str(), hints))
+                        continue;
 
                     // Stream extraction - constant memory usage
                     DescriptorCompressionSink sink(out.getFd());
@@ -925,13 +973,14 @@ void MarReader::extract_indices_parallel(const std::vector<size_t>& indices, con
                 }
                 last_parent = parent;
             }
-            
+
             const auto& entry = files_[output.index];
             auto hints = hints_for_extraction(entry.logical_size);
-            
+
             FileHandle out;
-            if (!out.openWrite(output_path.string().c_str(), hints)) continue;
-            
+            if (!out.openWrite(output_path.string().c_str(), hints))
+                continue;
+
             // Stream extraction - constant memory usage
             DescriptorCompressionSink sink(out.getFd());
             extract_file_to_sink(output.index, sink);
@@ -949,18 +998,20 @@ void MarReader::extract_indices_parallel(const std::vector<size_t>& indices, con
             }
         }
     }
-    
+
     // Third pass: handle symlinks and other types
     for (size_t idx : indices) {
         const auto& entry = files_[idx];
         if (entry.entry_type != EntryType::RegularFile && entry.entry_type != EntryType::Directory) {
             auto name_opt = get_name(idx);
-            if (!name_opt) continue;
+            if (!name_opt)
+                continue;
             auto stripped = get_stripped_name(*name_opt);
-            if (!stripped) continue;
-            
+            if (!stripped)
+                continue;
+
             fs::path output_path = fs::path(output_dir) / *stripped;
-            
+
             switch (entry.entry_type) {
                 case EntryType::Symlink: {
                     auto target = get_symlink_target(idx);
@@ -969,9 +1020,10 @@ void MarReader::extract_indices_parallel(const std::vector<size_t>& indices, con
                             fs::create_directories(output_path.parent_path());
                         }
                         try {
-                            if (fs::exists(output_path)) fs::remove(output_path);
+                            if (fs::exists(output_path))
+                                fs::remove(output_path);
                             fs::create_symlink(*target, output_path);
-                            
+
                             // Set symlink metadata
                             if (posix_meta_ && idx < posix_meta_->size()) {
                                 const auto& meta = (*posix_meta_)[idx];
@@ -982,7 +1034,8 @@ void MarReader::extract_indices_parallel(const std::vector<size_t>& indices, con
                                 times[1].tv_nsec = 0;
                                 utimensat(AT_FDCWD, output_path.c_str(), times, AT_SYMLINK_NOFOLLOW);
                             }
-                        } catch (...) {}
+                        } catch (...) {
+                        }
                     }
                     break;
                 }
@@ -991,26 +1044,30 @@ void MarReader::extract_indices_parallel(const std::vector<size_t>& indices, con
             }
         }
     }
-    
+
     // Fourth pass: restore POSIX metadata for directories
     if (has_posix_meta()) {
         for (size_t idx : indices) {
-            if (files_[idx].entry_type != EntryType::Directory) continue;
+            if (files_[idx].entry_type != EntryType::Directory)
+                continue;
 
             auto name_opt = get_name(idx);
-            if (!name_opt) continue;
+            if (!name_opt)
+                continue;
             auto stripped = get_stripped_name(*name_opt);
-            if (!stripped) continue;
-            
+            if (!stripped)
+                continue;
+
             fs::path output_path = fs::path(output_dir) / *stripped;
-            
+
             auto posix = get_posix_meta(idx);
-            if (!posix) continue;
-            
+            if (!posix)
+                continue;
+
             // Set permissions and timestamps for directories
             try {
                 fs::permissions(output_path, static_cast<fs::perms>(posix->mode & 0777));
-                
+
                 struct timespec times[2];
                 times[0].tv_sec = posix->atime;
                 times[0].tv_nsec = 0;
@@ -1024,10 +1081,12 @@ void MarReader::extract_indices_parallel(const std::vector<size_t>& indices, con
     }
 }
 
-bool MarReader::cat_files_parallel(const std::vector<std::string>& names, const std::string& output_file, size_t num_threads) {
+bool MarReader::cat_files_parallel(const std::vector<std::string>& names, const std::string& output_file,
+                                   size_t num_threads) {
     if (num_threads == 0) {
         num_threads = std::thread::hardware_concurrency();
-        if (num_threads == 0) num_threads = 4;
+        if (num_threads == 0)
+            num_threads = 4;
     }
 
     struct CatTask {
@@ -1062,7 +1121,8 @@ bool MarReader::cat_files_parallel(const std::vector<std::string>& names, const 
         }
     }
 
-    if (tasks.empty()) return true;
+    if (tasks.empty())
+        return true;
 
     std::atomic<bool> success{true};
     ThreadPool pool(num_threads);
@@ -1080,24 +1140,28 @@ bool MarReader::cat_files_parallel(const std::vector<std::string>& names, const 
             // Use cross-platform AsyncIO (auto-detects io_uring/kqueue/sync)
             // Queue depth: 128 entries for optimal throughput on parallel extraction
             static thread_local AsyncIO io(64);
-            
+
             if (io.getBackend() == AsyncIO::Backend::URING) {
                 // Async I/O path (io_uring on Linux)
                 UringCompressionSink sink(out_fd, io, task.out_offset);
-                if (!extract_file_to_sink(task.index, sink)) success = false;
+                if (!extract_file_to_sink(task.index, sink))
+                    success = false;
             } else {
                 // Synchronous fallback (when async I/O not available)
                 struct PwriteSink : public CompressionSink {
-                    int fd; u64 off;
+                    int fd;
+                    u64 off;
                     PwriteSink(int f, u64 o) : fd(f), off(o) {}
                     bool write(const u8* data, size_t len) override {
                         ssize_t n = ::pwrite(fd, data, len, off);
-                        if (n < 0) return false;
+                        if (n < 0)
+                            return false;
                         off += n;
                         return true;
                     }
                 } sink(out_fd, task.out_offset);
-                if (!extract_file_to_sink(task.index, sink)) success = false;
+                if (!extract_file_to_sink(task.index, sink))
+                    success = false;
             }
             ::close(out_fd);
         }));
@@ -1110,15 +1174,18 @@ bool MarReader::cat_files_parallel(const std::vector<std::string>& names, const 
 bool MarReader::validate_parallel(size_t num_threads, bool verbose) {
     if (num_threads == 0) {
         num_threads = std::thread::hardware_concurrency();
-        if (num_threads == 0) num_threads = 4;
+        if (num_threads == 0)
+            num_threads = 4;
     }
 
     std::unordered_set<u32> redacted_blocks;
     redacted_blocks.reserve(files_.size());
     for (size_t i = 0; i < files_.size(); ++i) {
         const auto& entry = files_[i];
-        if (entry.entry_type != EntryType::RegularFile) continue;
-        if ((entry.entry_flags & entry_flags::REDACTED) == 0) continue;
+        if (entry.entry_type != EntryType::RegularFile)
+            continue;
+        if ((entry.entry_flags & entry_flags::REDACTED) == 0)
+            continue;
         for (u32 block_id : get_block_ids_for_file(i)) {
             redacted_blocks.insert(block_id);
         }
@@ -1145,7 +1212,8 @@ bool MarReader::validate_parallel(size_t num_threads, bool verbose) {
                 }
 
                 if (block_header.fast_checksum_type != ChecksumType::None) {
-                    if (!verify_fast_checksum(payload_ptr, block_header.stored_size, block_header.fast_checksum_type, block_header.fast_checksum)) {
+                    if (!verify_fast_checksum(payload_ptr, block_header.stored_size, block_header.fast_checksum_type,
+                                              block_header.fast_checksum)) {
                         throw ChecksumError("Block checksum mismatch");
                     }
                 }
@@ -1154,7 +1222,8 @@ bool MarReader::validate_parallel(size_t num_threads, bool verbose) {
                 // This is now done even if a fast checksum is present, to ensure
                 // that the data is actually decompressible and consistent.
                 if (block_header.comp_algo != CompressionAlgo::None && block_header.raw_size > 0) {
-                    (void)decompress(payload_ptr, block_header.stored_size, block_header.comp_algo, block_header.raw_size);
+                    (void)decompress(payload_ptr, block_header.stored_size, block_header.comp_algo,
+                                     block_header.raw_size);
                 }
             } catch (const ChecksumError& e) {
                 all_valid = false;
@@ -1174,4 +1243,4 @@ bool MarReader::validate_parallel(size_t num_threads, bool verbose) {
     return all_valid;
 }
 
-} // namespace mar
+}  // namespace mar

@@ -24,6 +24,30 @@ PROJECT_REPO = https://github.com/earthframe/mar
 PROJECT_MAINTAINER = EarthFrame Corporation
 PROJECT_LICENSE = MIT
 
+# Developer tool versions
+ZIG_VERSION = 0.16.0
+
+# Detect OS
+UNAME_S := $(shell uname -s)
+
+# Developer tool paths — override if your tools are not on PATH.
+# macOS users: after 'brew install llvm', tools are under $(brew --prefix llvm)/bin/.
+ifeq ($(UNAME_S),Darwin)
+    LLVM_ROOT := $(shell brew --prefix llvm 2>/dev/null)
+    ifneq ($(LLVM_ROOT),)
+        LLVM_BIN := $(LLVM_ROOT)/bin
+        # macOS needs sysroot to find system headers (<string>, <mutex>, etc.)
+        _MACOS_SDK := $(shell xcrun --show-sdk-path 2>/dev/null)
+        LINT_FLAGS := --sysroot=$(_MACOS_SDK) \
+                      -I$(LLVM_ROOT)/include/c++/v1 \
+                      -stdlib=libc++
+    endif
+endif
+
+CLANG_TIDY   ?= clang-tidy
+CLANG_FORMAT ?= clang-format
+ZIG          ?= zig
+
 CXX ?= g++
 # -----------------------------------------------------------------------------
 # Build configuration knobs
@@ -43,8 +67,7 @@ LTO ?= 0                # 1 => -flto
 SANITIZERS ?=           # e.g. address,undefined,thread
 PGO_DIR ?= ./pgo        # profile data dir for PGO
 
-# Detect OS
-UNAME_S := $(shell uname -s)
+# Detect OS (already detected at top)
 
 BASE_CXXFLAGS ?= -std=c++17 -Wall -Wextra -Wpedantic
 CXXFLAGS += $(BASE_CXXFLAGS)
@@ -72,6 +95,10 @@ SRCS = src/format.cpp src/checksum.cpp src/compression.cpp src/compression_gzip.
        src/index_registry.cpp src/index_minhash.cpp 
 MAIN_SRC = src/main.cpp
 TEST_SRC = tests/test_main.cpp
+
+# Source files subject to lint checks.
+# Excludes vendored/generated headers (xxhash3.h, deps/).
+LINT_SRCS := $(wildcard src/*.cpp) $(wildcard include/mar/*.hpp) tests/test_main.cpp
 
 # Object files
 BUILD_DIR = build
@@ -289,16 +316,20 @@ ifneq ($(ZLIB_FOUND),yes)
 endif
 
 # Phony targets
-.PHONY: all clean test install check-deps drop-cache static release \
-        deps debug system-deps \
+.PHONY: all clean test install check-deps check-dev-deps drop-cache static release \
+        deps debug system-deps dev-deps lint lint-fix format \
         dist-linux-x86_64 \
 		dist-linux-x86_64-sse42 \
 		dist-linux-x86_64-avx2 \
         dist-linux-arm64 \
+		dist-linux-x86_64-musl \
+		dist-linux-x86_64-sse42-musl \
+		dist-linux-arm64-musl \
 		dist-macos-arm64 \
 		dist-macos-x86_64 \
 		dist-macos-universal \
         dist-all \
+		zig-check \
 		native \
 		native-lto \
 		help \
@@ -405,6 +436,79 @@ system-deps:
 		exit 1; \
 	fi
 
+# Developer tool installation (bear, clang-tidy, clang-format, zig)
+# These are only needed for linting and building musl static binaries.
+# See CONTRIBUTING.md for details.
+dev-deps:
+	@echo "Installing developer tools (bear, clang-tidy, clang-format, zig)..."
+	@if [ "$(UNAME_S)" = "Darwin" ]; then \
+	    if ! command -v brew >/dev/null 2>&1; then \
+	        echo "Error: Homebrew not found. Please install it from https://brew.sh"; \
+	        exit 1; \
+	    fi; \
+	    echo "Installing via Homebrew..."; \
+	    brew install bear llvm zig; \
+	    echo ""; \
+	    echo "NOTE: clang-tidy and clang-format are installed under llvm, not on PATH by default."; \
+	    echo "Add the following to your shell profile, or override in make invocations:"; \
+	    echo "  export PATH=\"$$(brew --prefix llvm)/bin:\$$PATH\""; \
+	    echo "Or pass them explicitly:"; \
+	    echo "  make lint CLANG_TIDY=$$(brew --prefix llvm)/bin/clang-tidy CLANG_FORMAT=$$(brew --prefix llvm)/bin/clang-format"; \
+	elif [ "$(UNAME_S)" = "Linux" ]; then \
+	    if [ -f /etc/debian_version ]; then \
+	        echo "Detected Debian/Ubuntu. Installing via apt..."; \
+	        sudo apt update && sudo apt install -y bear clang-tidy clang-format; \
+	    elif [ -f /etc/fedora-release ] || [ -f /etc/redhat-release ]; then \
+	        echo "Detected Fedora/RHEL. Installing via dnf..."; \
+	        sudo dnf install -y bear clang-tools-extra; \
+	    elif [ -f /etc/arch-release ]; then \
+	        echo "Detected Arch Linux. Installing via pacman..."; \
+	        sudo pacman -S --noconfirm bear clang; \
+	    else \
+	        echo "Unsupported Linux distribution."; \
+	        echo "Please install bear, clang-tidy, and clang-format manually."; \
+	    fi; \
+	    echo ""; \
+	    echo "Installing zig $(ZIG_VERSION)..."; \
+	    ZIG_ARCH=$$(uname -m); \
+	    ZIG_DIR="zig-linux-$${ZIG_ARCH}-$(ZIG_VERSION)"; \
+	    ZIG_TARBALL="$${ZIG_DIR}.tar.xz"; \
+	    ZIG_URL="https://ziglang.org/download/$(ZIG_VERSION)/$${ZIG_TARBALL}"; \
+	    ZIG_DEST="$${HOME}/.local/bin"; \
+	    mkdir -p "$${ZIG_DEST}"; \
+	    echo "Downloading $${ZIG_URL}..."; \
+	    curl -L "$${ZIG_URL}" | tar xJ -C /tmp; \
+	    cp "/tmp/$${ZIG_DIR}/zig" "$${ZIG_DEST}/zig"; \
+	    chmod +x "$${ZIG_DEST}/zig"; \
+	    echo "zig installed to $${ZIG_DEST}/zig"; \
+	    echo "Make sure $${ZIG_DEST} is in your PATH (add to ~/.bashrc or ~/.profile if needed)."; \
+	else \
+	    echo "Unsupported OS: $(UNAME_S)"; \
+	    exit 1; \
+	fi
+	@echo ""
+	@echo "Done. Run 'make check-dev-deps' to verify all tools are available."
+
+# Verify developer tools are installed and print their versions
+check-dev-deps:
+	@echo "Checking developer tools..."
+	@printf "  bear:         "; \
+	    command -v bear >/dev/null 2>&1 \
+	    && bear --version 2>&1 | head -1 \
+	    || echo "NOT FOUND  (run: make dev-deps)"
+	@printf "  clang-tidy:   "; \
+	    command -v $(CLANG_TIDY) >/dev/null 2>&1 \
+	    && $(CLANG_TIDY) --version 2>&1 | head -1 \
+	    || echo "NOT FOUND  (run: make dev-deps)"
+	@printf "  clang-format: "; \
+	    command -v $(CLANG_FORMAT) >/dev/null 2>&1 \
+	    && $(CLANG_FORMAT) --version 2>&1 | head -1 \
+	    || echo "NOT FOUND  (run: make dev-deps)"
+	@printf "  zig:          "; \
+	    command -v $(ZIG) >/dev/null 2>&1 \
+	    && $(ZIG) version \
+	    || echo "NOT FOUND  (run: make dev-deps)"
+
 # Debug build
 debug:
 	$(MAKE) BUILD=debug clean all-internal
@@ -429,6 +533,76 @@ test: $(TEST_TARGET)
 integration-test: $(TARGET)
 	@echo "Running integration tests..."
 	@./tests/integration_test.sh
+
+# =============================================================================
+# Lint & Static Analysis
+# =============================================================================
+#
+# Requires: bear, clang-tidy, clang-format  (run: make dev-deps)
+#
+# Workflow:
+#   1. Generate compile_commands.json once:  bear -- make
+#   2. Check for issues:                     make lint
+#   3. Auto-fix formatting:                  make lint-fix
+#
+# CLANG_TIDY and CLANG_FORMAT can be overridden on the command line if the
+# tools are not on PATH (common on macOS after 'brew install llvm'):
+#   make lint CLANG_TIDY=$(brew --prefix llvm)/bin/clang-tidy \
+#             CLANG_FORMAT=$(brew --prefix llvm)/bin/clang-format
+
+_LINT_CPP_SRCS := $(filter %.cpp,$(LINT_SRCS))
+
+# Check formatting and run static analysis. Exits non-zero on any issue.
+lint:
+	@echo "==> clang-format (check)"
+	@PATH="$(LLVM_BIN):$(PATH)" $(CLANG_FORMAT) --dry-run --Werror $(LINT_SRCS) || { echo "❌ Formatting issues found. Run 'make format'."; exit 1; }
+	@echo "==> clang-tidy"
+	@if [ ! -f compile_commands.json ]; then echo "❌ Error: compile_commands.json missing. Run 'bear -- make'."; exit 1; fi
+	@if PATH="$(LLVM_BIN):$(PATH)" command -v run-clang-tidy >/dev/null 2>&1; then \
+	    TIDY_ARGS=""; \
+	    for arg in $(LINT_FLAGS); do TIDY_ARGS="$$TIDY_ARGS -extra-arg=$$arg"; done; \
+	    OUTPUT=$$(PATH="$(LLVM_BIN):$(PATH)" run-clang-tidy -p . $$TIDY_ARGS 2>&1); \
+	    echo "$$OUTPUT" | python3 scripts/lint_filter.py; \
+	    FILTER_EXIT=$$?; \
+	    if [ $$FILTER_EXIT -ne 0 ]; then exit $$FILTER_EXIT; fi; \
+	else \
+	    TIDY_ARGS=""; \
+	    for arg in $(LINT_FLAGS); do TIDY_ARGS="$$TIDY_ARGS --extra-arg=$$arg"; done; \
+	    OUTPUT=$$(PATH="$(LLVM_BIN):$(PATH)" $(CLANG_TIDY) $(_LINT_CPP_SRCS) -p . $$TIDY_ARGS 2>&1); \
+	    echo "$$OUTPUT" | python3 scripts/lint_filter.py; \
+	    FILTER_EXIT=$$?; \
+	    if [ $$FILTER_EXIT -ne 0 ]; then exit $$FILTER_EXIT; fi; \
+	fi
+	@echo "✅ lint passed"
+
+# Generate a structured report of linting issues for systematic resolution.
+# Filters out system header errors and organizes issues by package.
+lint-report:
+	@echo "==> Generating lint reports..."
+	@if PATH="$(LLVM_BIN):$(PATH)" command -v run-clang-tidy >/dev/null 2>&1; then \
+	    TIDY_ARGS=""; \
+	    for arg in $(LINT_FLAGS); do TIDY_ARGS="$$TIDY_ARGS -extra-arg=$$arg"; done; \
+	    PATH="$(LLVM_BIN):$(PATH)" run-clang-tidy -p . $$TIDY_ARGS 2>&1 | python3 scripts/lint_filter.py --format md > LINT_REPORT.md || true; \
+	    PATH="$(LLVM_BIN):$(PATH)" run-clang-tidy -p . $$TIDY_ARGS 2>&1 | python3 scripts/lint_filter.py --format json > LINT_REPORT.json || true; \
+	else \
+	    TIDY_ARGS=""; \
+	    for arg in $(LINT_FLAGS); do TIDY_ARGS="$$TIDY_ARGS --extra-arg=$$arg"; done; \
+	    PATH="$(LLVM_BIN):$(PATH)" $(CLANG_TIDY) $(_LINT_CPP_SRCS) -p . $$TIDY_ARGS 2>&1 | python3 scripts/lint_filter.py --format md > LINT_REPORT.md || true; \
+	    PATH="$(LLVM_BIN):$(PATH)" $(CLANG_TIDY) $(_LINT_CPP_SRCS) -p . $$TIDY_ARGS 2>&1 | python3 scripts/lint_filter.py --format json > LINT_REPORT.json || true; \
+	fi
+	@echo "✅ Reports generated:"
+	@echo "   - LINT_REPORT.md (Markdown, organized by package)"
+	@echo "   - LINT_REPORT.json (JSON, machine-readable)"
+
+# Apply clang-format fixes in place. Does not apply clang-tidy fixes
+# automatically since those require careful review.
+lint-fix: format
+
+# Alias for lint-fix: reformat all source files in place.
+format:
+	@echo "==> clang-format (fix)"
+	@$(CLANG_FORMAT) -i $(LINT_SRCS)
+	@echo "    Done. Review changes with 'git diff' before committing."
 
 # Performance smoke test - quick regression detection
 # Generates previous_run.txt for performance tracking
@@ -524,63 +698,118 @@ dist-linux-arm64:
 	@echo "Built: $(DIST_DIR)/mar-linux-arm64 (ARMv8-A with NEON)"
 	@ls -lh $(DIST_DIR)/mar-linux-arm64
 
-# macOS ARM64 (Apple Silicon: M1, M2, M3, M4)
-dist-macos-arm64:
+# =============================================================================
+# Musl Static Builds (truly portable Linux binaries — no glibc dependency)
+# =============================================================================
+#
+# Uses 'zig c++' as a drop-in compiler replacement targeting musl libc.
+# The resulting binaries are self-contained and run on any Linux, regardless
+# of glibc version (RHEL 7 / glibc 2.17 and later, Alpine, etc).
+#
+# Requires: zig 0.16.0+ on PATH  (run: make dev-deps)
+#
+# Note: these targets compile on any OS that has zig, but are intended to
+# run on Linux. Build on Linux CI for release artifacts.
+
+# Verify zig is available before attempting musl builds.
+zig-check:
+	@command -v $(ZIG) >/dev/null 2>&1 || { \
+	    echo ""; \
+	    echo "  Error: zig not found on PATH."; \
+	    echo "  Install with:  make dev-deps"; \
+	    echo ""; \
+	    exit 1; \
+	}
+	@echo "zig: $(shell $(ZIG) version)"
+
+_MUSL_LINUX_GUARD = \
+	if [ "$(UNAME_S)" != "Linux" ]; then \
+	    echo ""; \
+	    echo "  Error: musl static builds must run on Linux."; \
+	    echo "  The system library .a files on macOS are not linkable into Linux binaries."; \
+	    echo "  Run this target on a Linux machine or in CI."; \
+	    echo ""; \
+	    exit 1; \
+	fi
+
+# Linux x86_64 — musl static, SSE2 baseline (maximum portability)
+dist-linux-x86_64-musl: zig-check
+	@$(_MUSL_LINUX_GUARD)
 	@mkdir -p $(DIST_DIR)
 	$(MAKE) clean
-	$(MAKE) BUILD=release \
-	        ARCH_FLAGS="-arch arm64" \
-	        TARGET_NAME=$(DIST_DIR)/mar-macos-arm64 \
+	$(MAKE) STATIC=1 BUILD=release \
+	        CXX="$(ZIG) c++ -target x86_64-linux-musl" \
+	        ARCH_FLAGS="-march=x86-64 -mtune=generic" \
+	        TARGET_NAME=$(DIST_DIR)/mar-linux-x86_64-musl \
 	        all-internal
 	@echo ""
-	@echo "Built: $(DIST_DIR)/mar-macos-arm64 (Apple Silicon)"
-	@file $(DIST_DIR)/mar-macos-arm64
-	@ls -lh $(DIST_DIR)/mar-macos-arm64
+	@echo "Built: $(DIST_DIR)/mar-linux-x86_64-musl  (musl static, x86_64 SSE2)"
+	@file $(DIST_DIR)/mar-linux-x86_64-musl
+	@ls -lh $(DIST_DIR)/mar-linux-x86_64-musl
 
-# macOS x86_64 (Intel Macs)
-dist-macos-x86_64:
+# Linux x86_64 — musl static, SSE4.2 optimized (2008+ CPUs)
+dist-linux-x86_64-sse42-musl: zig-check
+	@$(_MUSL_LINUX_GUARD)
 	@mkdir -p $(DIST_DIR)
 	$(MAKE) clean
-	$(MAKE) BUILD=release \
-	        ARCH_FLAGS="-arch x86_64 -march=nehalem" \
-	        TARGET_NAME=$(DIST_DIR)/mar-macos-x86_64 \
+	$(MAKE) STATIC=1 BUILD=release \
+	        CXX="$(ZIG) c++ -target x86_64-linux-musl" \
+	        ARCH_FLAGS="-march=nehalem -mtune=generic" \
+	        TARGET_NAME=$(DIST_DIR)/mar-linux-x86_64-sse42-musl \
 	        all-internal
 	@echo ""
-	@echo "Built: $(DIST_DIR)/mar-macos-x86_64 (Intel Macs, 2008+)"
-	@file $(DIST_DIR)/mar-macos-x86_64
-	@ls -lh $(DIST_DIR)/mar-macos-x86_64
+	@echo "Built: $(DIST_DIR)/mar-linux-x86_64-sse42-musl  (musl static, SSE4.2)"
+	@file $(DIST_DIR)/mar-linux-x86_64-sse42-musl
+	@ls -lh $(DIST_DIR)/mar-linux-x86_64-sse42-musl
 
-# macOS Universal Binary (ARM64 + x86_64)
-dist-macos-universal:
+# Linux ARM64 — musl static (zig handles cross-compilation from any Linux host)
+dist-linux-arm64-musl: zig-check
+	@$(_MUSL_LINUX_GUARD)
 	@mkdir -p $(DIST_DIR)
-	@echo "Building macOS Universal Binary (ARM64 + x86_64)..."
-	$(MAKE) dist-macos-arm64
-	@mv $(DIST_DIR)/mar-macos-arm64 $(DIST_DIR)/mar-arm64-temp
-	$(MAKE) dist-macos-x86_64
-	@mv $(DIST_DIR)/mar-macos-x86_64 $(DIST_DIR)/mar-x86_64-temp
-	lipo -create -output $(DIST_DIR)/mar-macos-universal $(DIST_DIR)/mar-arm64-temp $(DIST_DIR)/mar-x86_64-temp
-	@rm $(DIST_DIR)/mar-arm64-temp $(DIST_DIR)/mar-x86_64-temp
+	$(MAKE) clean
+	$(MAKE) STATIC=1 BUILD=release \
+	        CXX="$(ZIG) c++ -target aarch64-linux-musl" \
+	        ARCH_FLAGS="-march=armv8-a+simd -mtune=generic" \
+	        TARGET_NAME=$(DIST_DIR)/mar-linux-arm64-musl \
+	        all-internal
 	@echo ""
-	@echo "Built: $(DIST_DIR)/mar-macos-universal (ARM64 + x86_64)"
-	@lipo -info $(DIST_DIR)/mar-macos-universal
-	@ls -lh $(DIST_DIR)/mar-macos-universal
+	@echo "Built: $(DIST_DIR)/mar-linux-arm64-musl  (musl static, ARM64)"
+	@file $(DIST_DIR)/mar-linux-arm64-musl
+	@ls -lh $(DIST_DIR)/mar-linux-arm64-musl
 
-# Build all distribution binaries for current platform
+# Note: macOS builds now use Homebrew for distribution.
+# See 'make brew-formula' and RELEASING.md for details.
+
+# Build all distribution binaries for the current platform.
+#
+# On Linux: builds musl static variants if zig is available (preferred for
+# releases), otherwise falls back to glibc static variants.
+# On macOS: builds a Universal Binary (ARM64 + x86_64).
 dist-all:
 	@mkdir -p $(DIST_DIR)
 	@echo "Building all distribution binaries for current platform..."
 	@if [ "$(UNAME_S)" = "Linux" ]; then \
 	    if [ "$$(uname -m)" = "x86_64" ]; then \
-	        echo "==> Building Linux x86_64 variants..."; \
-	        $(MAKE) dist-linux-x86_64; \
-	        $(MAKE) dist-linux-x86_64-sse42; \
+	        if command -v $(ZIG) >/dev/null 2>&1; then \
+	            echo "==> zig found: building musl static variants (portable, no glibc dependency)"; \
+	            $(MAKE) dist-linux-x86_64-musl; \
+	            $(MAKE) dist-linux-x86_64-sse42-musl; \
+	        else \
+	            echo "==> zig not found: building glibc static variants (run 'make dev-deps' to enable musl builds)"; \
+	            $(MAKE) dist-linux-x86_64; \
+	            $(MAKE) dist-linux-x86_64-sse42; \
+	        fi \
 	    elif [ "$$(uname -m)" = "aarch64" ]; then \
-	        echo "==> Building Linux ARM64..."; \
-	        $(MAKE) dist-linux-arm64; \
+	        if command -v $(ZIG) >/dev/null 2>&1; then \
+	            echo "==> zig found: building musl static ARM64"; \
+	            $(MAKE) dist-linux-arm64-musl; \
+	        else \
+	            echo "==> zig not found: building glibc static ARM64 (run 'make dev-deps' to enable musl builds)"; \
+	            $(MAKE) dist-linux-arm64; \
+	        fi \
 	    fi \
 	elif [ "$(UNAME_S)" = "Darwin" ]; then \
-	    echo "==> Building macOS Universal Binary..."; \
-	    $(MAKE) dist-macos-universal; \
+	    echo "Note: macOS distribution is handled via Homebrew. See 'make brew-formula'."; \
 	fi
 	@echo ""
 	@echo "Distribution builds complete!"
@@ -661,14 +890,18 @@ help:
 	@echo "  make test         - Build and run tests"
 	@echo ""
 	@echo "Distribution Builds (Portable):"
-	@echo "  make dist-linux-x86_64        - Linux SSE2 (max compatibility)"
-	@echo "  make dist-linux-x86_64-sse42  - Linux SSE4.2 (2008+ CPUs)"
-	@echo "  make dist-linux-x86_64-avx2   - Linux AVX2 (2013+ CPUs)"
-	@echo "  make dist-linux-arm64         - Linux ARM64 (ARMv8-A)"
-	@echo "  make dist-macos-arm64         - macOS Apple Silicon"
-	@echo "  make dist-macos-x86_64        - macOS Intel"
-	@echo "  make dist-macos-universal     - macOS Universal (ARM64+x86_64)"
-	@echo "  make dist-all                 - Build all for current platform"
+	@echo "  make dist-all                      - Build all for current platform"
+	@echo "                                       (prefers musl on Linux if zig is available)"
+	@echo "  make dist-linux-x86_64-musl        - Linux musl static, SSE2  (recommended)"
+	@echo "  make dist-linux-x86_64-sse42-musl  - Linux musl static, SSE4.2"
+	@echo "  make dist-linux-arm64-musl         - Linux musl static, ARM64"
+	@echo "  make dist-linux-x86_64             - Linux glibc static, SSE2"
+	@echo "  make dist-linux-x86_64-sse42       - Linux glibc static, SSE4.2"
+	@echo "  make dist-linux-x86_64-avx2        - Linux glibc static, AVX2"
+	@echo "  make dist-linux-arm64              - Linux glibc static, ARM64"
+	@echo "  make dist-macos-arm64              - macOS Apple Silicon"
+	@echo "  make dist-macos-x86_64             - macOS Intel"
+	@echo "  make dist-macos-universal          - macOS Universal (ARM64+x86_64)"
 	@echo ""
 	@echo "Performance Builds (Host-Specific, Not Portable):"
 	@echo "  make native       - Optimize for current CPU"
@@ -680,10 +913,20 @@ help:
 	@echo "  make brew-formula - Generate Homebrew formula (mar.rb)"
 	@echo ""
 	@echo "Advanced:"
-	@echo "  make STATIC=1     - Force static linking"
-	@echo "  make NATIVE=1     - Force native optimization"
-	@echo "  make LTO=1        - Enable link-time optimization"
-	@echo "  make perf-smoke   - Run performance smoke tests"
-	@echo "  make system-deps  - Install system dependencies (macOS/Linux)"
+	@echo "  make STATIC=1        - Force static linking"
+	@echo "  make NATIVE=1        - Force native optimization"
+	@echo "  make LTO=1           - Enable link-time optimization"
+	@echo "  make perf-smoke      - Run performance smoke tests"
+	@echo "  make system-deps     - Install build dependencies (macOS/Linux)"
 	@echo ""
-	@echo "See docs/BUILD_CONFIGURATIONS.md for details"
+	@echo "Lint & Static Analysis:"
+	@echo "  bear -- make         - Generate compile_commands.json (run once before lint)"
+	@echo "  make format          - Reformat all source files in place (clang-format)"
+	@echo "  make lint            - Check formatting + run clang-tidy (requires compile_commands.json)"
+	@echo "  make lint-fix        - Alias for 'make format'"
+	@echo ""
+	@echo "Developer Tools:"
+	@echo "  make dev-deps        - Install dev tools: bear, clang-tidy, clang-format, zig"
+	@echo "  make check-dev-deps  - Verify dev tools are installed and show versions"
+	@echo ""
+	@echo "See CONTRIBUTING.md for the full developer setup guide."

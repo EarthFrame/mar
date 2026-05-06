@@ -1,4 +1,5 @@
 #include "mar/sections.hpp"
+
 #include "mar/endian.hpp"
 #include "mar/errors.hpp"
 
@@ -114,7 +115,7 @@ std::vector<u8> write_name_table(const std::vector<std::string>& names) {
     std::vector<u8> out;
 
     // Calculate size for pre-allocation
-    size_t total_size = 4; // name_count
+    size_t total_size = 4;  // name_count
     for (const auto& name : names) {
         total_size += 4 + name.size();
     }
@@ -134,7 +135,7 @@ std::vector<u8> write_name_table(const std::vector<std::string>& names) {
 
 std::vector<u8> write_name_table_front_coded(const std::vector<std::string>& names, u32 reset_interval) {
     std::vector<u8> out;
-    out.reserve(names.size() * 8); // Rough estimate
+    out.reserve(names.size() * 8);  // Rough estimate
 
     write_le_vec<u32>(out, static_cast<u32>(names.size()));
     write_le_vec<u32>(out, reset_interval);
@@ -262,8 +263,10 @@ std::vector<u8> write_file_spans(const std::vector<std::vector<Span>>& all_spans
     out.resize(total_size);
     u8* p = out.data();
 
-    write_le_ptr(p, file_count); p += 4;
-    write_le_ptr(p, total_spans); p += 4;
+    write_le_ptr(p, file_count);
+    p += 4;
+    write_le_ptr(p, total_spans);
+    p += 4;
 
     // Write span_starts
     u32 offset = 0;
@@ -542,11 +545,11 @@ std::pair<HashAlgo, std::vector<FileHashEntry>> read_file_hashes(const u8* data,
     if (stored_count != file_count) {
         throw InvalidArchiveError("FILE_HASHES file count mismatch");
     }
-    (void)stored_count; // Used for validation above
+    (void)stored_count;  // Used for validation above
 
     u8 algo = *p++;
     u8 hash_len = *p++;
-    p += 2; // reserved
+    p += 2;  // reserved
 
     if (hash_len != 32) {
         throw InvalidArchiveError("Unsupported hash length");
@@ -590,8 +593,8 @@ std::vector<u8> write_file_hashes(HashAlgo algo, const std::vector<FileHashEntry
 
     write_le_vec<u32>(out, file_count);
     out.push_back(static_cast<u8>(algo));
-    out.push_back(32); // hash_len
-    out.push_back(0);  // reserved
+    out.push_back(32);  // hash_len
+    out.push_back(0);   // reserved
     out.push_back(0);
 
     // Write bitset
@@ -617,4 +620,4 @@ std::vector<u8> write_file_hashes(HashAlgo algo, const std::vector<FileHashEntry
     return out;
 }
 
-} // namespace mar
+}  // namespace mar

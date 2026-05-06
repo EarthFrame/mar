@@ -1,8 +1,8 @@
 #pragma once
 
-#include "mar/types.hpp"
-#include "mar/enums.hpp"
 #include "mar/async_io.hpp"
+#include "mar/enums.hpp"
+#include "mar/types.hpp"
 
 #include <array>
 #include <cstring>
@@ -27,9 +27,7 @@ public:
     // Write compressed data to sink
     // Returns true on success, false on error
     virtual bool write(const u8* data, size_t len) = 0;
-    virtual bool write(const std::vector<u8>& data) {
-        return write(data.data(), data.size());
-    }
+    virtual bool write(const std::vector<u8>& data) { return write(data.data(), data.size()); }
 };
 
 // Concrete implementation of CompressionSink for buffering to a vector
@@ -38,11 +36,11 @@ private:
     std::vector<u8>& output_;
 
 public:
-    explicit VectorCompressionSink(std::vector<u8>& output)
-        : output_(output) {}
+    explicit VectorCompressionSink(std::vector<u8>& output) : output_(output) {}
 
     bool write(const u8* data, size_t len) override {
-        if (len == 0) return true;
+        if (len == 0)
+            return true;
         const size_t old_size = output_.size();
         output_.resize(old_size + len);
         std::memcpy(output_.data() + old_size, data, len);
@@ -56,8 +54,7 @@ private:
     std::ofstream& out_;
 
 public:
-    explicit FileCompressionSink(std::ofstream& out)
-        : out_(out) {}
+    explicit FileCompressionSink(std::ofstream& out) : out_(out) {}
 
     bool write(const u8* data, size_t len) override {
         if (!out_.write(reinterpret_cast<const char*>(data), len)) {
@@ -88,7 +85,8 @@ public:
     explicit OstreamCompressionSink(std::ostream& out) : out_(out) {}
 
     bool write(const u8* data, size_t len) override {
-        if (len == 0) return true;
+        if (len == 0)
+            return true;
         if (!out_.write(reinterpret_cast<const char*>(data), len)) {
             return false;
         }
@@ -105,31 +103,33 @@ private:
     off_t offset_;
 
 public:
-    UringCompressionSink(int fd, AsyncIO& io, off_t start_offset = 0) 
-        : fd_(fd), io_(io), offset_(start_offset) {}
+    UringCompressionSink(int fd, AsyncIO& io, off_t start_offset = 0) : fd_(fd), io_(io), offset_(start_offset) {}
 
     bool write(const u8* data, size_t len) override {
-        if (len == 0) return true;
-        
+        if (len == 0)
+            return true;
+
         AsyncIO::Request req;
         req.op = AsyncIO::Op::WRITE;
         req.fd = fd_;
         req.buf = const_cast<u8*>(data);
         req.len = len;
         req.offset = offset_;
-        
-        if (!io_.submit(req)) return false;
-        
+
+        if (!io_.submit(req))
+            return false;
+
         // In a real high-perf implementation, we'd manage multiple buffers
         // and not wait immediately. But for this wrapper, we wait to ensure
         // the data is written before the caller potentially frees the buffer.
         AsyncIO::Request* completed;
         if (io_.wait(&completed)) {
-            if (completed->result < 0) return false;
+            if (completed->result < 0)
+                return false;
             offset_ += completed->result;
             return true;
         }
-        
+
         return false;
     }
 };
@@ -194,17 +194,17 @@ bool have_zstd();
 bool have_zlib();
 bool have_lz4();
 bool have_bzip2();
-bool have_libdeflate(); // gzip backend (if zlib is present)
+bool have_libdeflate();  // gzip backend (if zlib is present)
 
 // ============================================================================
 // Streaming compression from file to sink
 // ============================================================================
 
 /// Stream compress a file directly to a sink with optional checksums
-/// 
+///
 /// This is the key optimization: compress and output concurrently.
 /// If checksum_type is not None, computes checksum of RAW data during the same pass.
-/// 
+///
 /// @param input_path Path to file to compress
 /// @param algo Compression algorithm to use
 /// @param sink Output destination for compressed data
@@ -214,41 +214,21 @@ bool have_libdeflate(); // gzip backend (if zlib is present)
 /// @param known_size Optimization hint: file size if known (0 = auto-detect)
 /// @param out_full_hash Output parameter for BLAKE3 hash (32 bytes, see BLAKE3_HASH_SIZE)
 /// @return Number of bytes written to sink
-u64 stream_compress_file_to_sink(
-    const std::string& input_path,
-    CompressionAlgo algo,
-    CompressionSink& sink,
-    int level = -1,
-    ChecksumType checksum_type = ChecksumType::None,
-    u32* out_checksum = nullptr,
-    u64 known_size = 0,
-    std::array<u8, 32>* out_full_hash = nullptr
-);
+u64 stream_compress_file_to_sink(const std::string& input_path, CompressionAlgo algo, CompressionSink& sink,
+                                 int level = -1, ChecksumType checksum_type = ChecksumType::None,
+                                 u32* out_checksum = nullptr, u64 known_size = 0,
+                                 std::array<u8, 32>* out_full_hash = nullptr);
 
-u64 stream_compress_file_range_to_sink(
-    const std::string& input_path,
-    u64 offset,
-    u64 length,
-    CompressionAlgo algo,
-    CompressionSink& sink,
-    int level = -1,
-    ChecksumType checksum_type = ChecksumType::None,
-    u32* out_checksum = nullptr,
-    std::function<void(const u8*, size_t)> raw_data_callback = {}
-);
+u64 stream_compress_file_range_to_sink(const std::string& input_path, u64 offset, u64 length, CompressionAlgo algo,
+                                       CompressionSink& sink, int level = -1,
+                                       ChecksumType checksum_type = ChecksumType::None, u32* out_checksum = nullptr,
+                                       std::function<void(const u8*, size_t)> raw_data_callback = {});
 
 // New version that takes an open file descriptor
-u64 stream_compress_fd_range_to_sink(
-    int fd,
-    u64 offset,
-    u64 length,
-    CompressionAlgo algo,
-    CompressionSink& sink,
-    int level = -1,
-    ChecksumType checksum_type = ChecksumType::None,
-    u32* out_checksum = nullptr,
-    std::function<void(const u8*, size_t)> raw_data_callback = {}
-);
+u64 stream_compress_fd_range_to_sink(int fd, u64 offset, u64 length, CompressionAlgo algo, CompressionSink& sink,
+                                     int level = -1, ChecksumType checksum_type = ChecksumType::None,
+                                     u32* out_checksum = nullptr,
+                                     std::function<void(const u8*, size_t)> raw_data_callback = {});
 
 // ============================================================================
 // Streaming compression interface
@@ -314,20 +294,20 @@ private:
 
 // Thread-local buffer pool for reusing aligned memory across files
 // This significantly reduces allocation overhead in parallel tasks.
-// 
+//
 // Thread Safety: This class is NOT thread-safe. Each thread should maintain
 // its own instance or use external synchronization. The thread_local keyword
 // can be used with a static instance to ensure per-thread isolation:
-// 
+//
 //   static thread_local ThreadLocalBufferPool pool;
-// 
+//
 class ThreadLocalBufferPool {
 public:
     /// Acquire an aligned buffer of at least size bytes (thread-local)
     static u8* acquire(size_t size);
-    
+
     /// Release a buffer back to the thread-local pool
     static void release(u8* ptr);
 };
 
-} // namespace mar
+}  // namespace mar

@@ -1,10 +1,11 @@
 #pragma once
 
-#include "mar/reader.hpp"
 #include "mar/index_format.hpp"
+#include "mar/reader.hpp"
+
+#include <map>
 #include <memory>
 #include <string>
-#include <map>
 #include <vector>
 
 namespace mar {
@@ -53,10 +54,10 @@ private:
 // The 'content' field is populated by the vector searcher only; all others
 // leave it empty.
 struct SearchResult {
-    u32         file_id   = 0;
+    u32 file_id = 0;
     std::string filename;
-    double      score     = 0.0;
-    std::string content;   // best-matching snippet (vector) or empty
+    double score = 0.0;
+    std::string content;                          // best-matching snippet (vector) or empty
     std::map<std::string, std::string> metadata;  // type-specific key/value pairs
 };
 
@@ -99,11 +100,8 @@ public:
     // Returns a ranked list of results (may be empty on no match).
     // Implementations may also write directly to stdout for extraction modes
     // (e.g. genomic --extract); in that case they still return summary results.
-    virtual std::vector<SearchResult> search(
-        const MarReader& reader,
-        const MAIReader& index,
-        const std::string& query,
-        const IndexOptions& opts) = 0;
+    virtual std::vector<SearchResult> search(const MarReader& reader, const MAIReader& index, const std::string& query,
+                                             const IndexOptions& opts) = 0;
 };
 
 // ============================================================================
@@ -124,8 +122,8 @@ public:
 
 private:
     IndexRegistry() = default;
-    std::vector<std::unique_ptr<Indexer>>  indexers_;
+    std::vector<std::unique_ptr<Indexer>> indexers_;
     std::vector<std::unique_ptr<Searcher>> searchers_;
 };
 
-} // namespace mar
+}  // namespace mar

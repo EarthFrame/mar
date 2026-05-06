@@ -79,4 +79,4 @@ private:
     Impl* impl_;
 };
 
-} // namespace mar
+}  // namespace mar
