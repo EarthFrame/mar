@@ -336,7 +336,14 @@ std::vector<u32> MarReader::get_block_ids_for_file(size_t index) const {
                 block_index++;
             }
         }
-        return {static_cast<u32>(block_index)};
+
+        // Bounds check to ensure no overflow when casting to u32 (format constraint)
+        if (block_index > static_cast<size_t>(std::numeric_limits<u32>::max())) {
+            throw IOError("Block index exceeds maximum u32 value (format constraint)");
+        }
+
+        // NOLINT(bugprone-narrowing-conversions) - block_index is bounded by u32 (format constraint)
+        return {static_cast<u32>(block_index)};  // NOLINT(bugprone-narrowing-conversions)
     }
 
     std::vector<u32> ids;
@@ -662,12 +669,12 @@ void MarReader::extract_all(const std::string& output_dir, size_t strip_componen
 
         switch (entry.entry_type) {
             case EntryType::Directory:
-                fs::create_directories(output_path);
+                fs::create_directories(output_path);  // NOLINT(bugprone-unused-return-value)
                 break;
 
             case EntryType::RegularFile: {
                 if (output_path.has_parent_path()) {
-                    fs::create_directories(output_path.parent_path());
+                    fs::create_directories(output_path.parent_path());  // NOLINT(bugprone-unused-return-value)
                 }
 
                 const auto& entry = files_[i];
@@ -685,7 +692,7 @@ void MarReader::extract_all(const std::string& output_dir, size_t strip_componen
                 auto target = get_symlink_target(i);
                 if (target) {
                     if (output_path.has_parent_path()) {
-                        fs::create_directories(output_path.parent_path());
+                        fs::create_directories(output_path.parent_path());  // NOLINT(bugprone-unused-return-value)
                     }
                     fs::create_symlink(*target, output_path);
                 }
@@ -719,12 +726,12 @@ void MarReader::extract_file(size_t index, const std::string& output_dir) {
 
     switch (entry.entry_type) {
         case EntryType::Directory:
-            fs::create_directories(output_path);
+            fs::create_directories(output_path);  // NOLINT(bugprone-unused-return-value)
             break;
 
         case EntryType::RegularFile: {
             if (output_path.has_parent_path()) {
-                fs::create_directories(output_path.parent_path());
+                fs::create_directories(output_path.parent_path());  // NOLINT(bugprone-unused-return-value)
             }
 
             const auto& entry = files_[index];
@@ -746,11 +753,11 @@ void MarReader::extract_file(size_t index, const std::string& output_dir) {
             auto target = get_symlink_target(index);
             if (target) {
                 if (output_path.has_parent_path()) {
-                    fs::create_directories(output_path.parent_path());
+                    fs::create_directories(output_path.parent_path());  // NOLINT(bugprone-unused-return-value)
                 }
                 try {
                     if (fs::exists(output_path))
-                        fs::remove(output_path);
+                        fs::remove(output_path);  // NOLINT(bugprone-unused-return-value)
                     fs::create_symlink(*target, output_path);
                 } catch (...) {
                 }

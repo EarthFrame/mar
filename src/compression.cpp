@@ -396,7 +396,8 @@ void ThreadLocalBufferPool::release(u8* ptr) {
 
     while (remaining > 0) {
         size_t to_read = std::min((size_t)remaining, buf_size);
-        ssize_t bytes_read = ::pread(fd, in_buf_ptr, to_read, offset + (length - remaining));
+        // NOLINT(bugprone-narrowing-conversions) - file offset is always non-negative and within valid archive bounds
+        ssize_t bytes_read = ::pread(fd, in_buf_ptr, to_read, static_cast<off_t>(offset + (length - remaining)));
 
         if (bytes_read <= 0)
             break;

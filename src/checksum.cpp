@@ -106,7 +106,7 @@ inline u32 md5_i(u32 x, u32 y, u32 z) {
 
 inline void md5_step(u32& a, u32 b, u32 c, u32 d, u32 x, u32 s, u32 t, u32 (*f)(u32, u32, u32)) {
     a += f(b, c, d) + x + t;
-    a = mar::xxhash3::rotl32(a, s) + b;
+    a = mar::xxhash3::rotl32(a, static_cast<int>(s)) + b;
 }
 
 void md5_transform(u32 state[4], const u8 block[64]) {
