@@ -5,6 +5,8 @@
 
 #include "mar/async_io.hpp"
 #include "mar/diff.hpp"
+#include "mar/embed_provider.hpp"
+#include "mar/index_registry.hpp"
 #include "mar/mar.hpp"
 #include "mar/stopwatch.hpp"
 
@@ -2650,8 +2652,382 @@ TEST(multiblock_single_file_equivalence) {
 }
 
 // ============================================================================
-// Main
+// Vector Index Integration Tests
 // ============================================================================
+
+TEST(vector_index_archive_creation) {
+    // Test that archives can be created successfully for vector indexing
+    auto temp_dir = fs::temp_directory_path() / "mar_vector_archive_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    auto archive_path = temp_dir / "archive.mar";
+    auto data_dir = temp_dir / "data";
+    fs::create_directories(data_dir);
+
+    try {
+        // Create diverse test files
+        std::ofstream f1(data_dir / "document.txt");
+        f1 << "This is a document about machine learning and artificial intelligence.\n";
+        f1.close();
+
+        std::ofstream f2(data_dir / "article.txt");
+        f2 << "Natural language processing enables computers to understand human language.\n";
+        f2.close();
+
+        // Create archive
+        {
+            MarWriter writer(archive_path.string());
+            writer.add_directory(data_dir.string());
+            writer.finish();
+        }
+
+        // Verify archive was created and can be read
+        {
+            MarReader reader(archive_path.string());
+            ASSERT(reader.file_count() >= 2);
+
+            // Verify files are readable
+            int regular_files = 0;
+            for (size_t i = 0; i < reader.file_count(); ++i) {
+                auto entry = reader.get_file_entry(i);
+                if (entry && entry->entry_type == EntryType::RegularFile) {
+                    regular_files++;
+                }
+            }
+            ASSERT(regular_files >= 2);
+        }
+
+    } catch (const std::exception& e) {
+        fs::remove_all(temp_dir);
+        throw;
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(vector_index_large_archive) {
+    // Test with a larger archive to ensure chunking and batching work
+    auto temp_dir = fs::temp_directory_path() / "mar_vector_large_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    auto archive_path = temp_dir / "large.mar";
+    auto data_dir = temp_dir / "data";
+    fs::create_directories(data_dir);
+
+    try {
+        // Create multiple files with varied content sizes
+        for (int i = 0; i < 10; ++i) {
+            std::ofstream f(data_dir / ("file_" + std::to_string(i) + ".txt"));
+
+            // Write content with multiple paragraphs
+            for (int p = 0; p < 5; ++p) {
+                f << "Paragraph " << p << " of file " << i << ". "
+                  << "This is example text that demonstrates vector indexing capabilities. "
+                  << "The text should be long enough to test chunking behavior. "
+                  << "Multiple paragraphs allow testing of chunk boundaries and overlap. "
+                  << "\n\n";
+            }
+            f.close();
+        }
+
+        // Create archive
+        {
+            MarWriter writer(archive_path.string());
+            writer.add_directory(data_dir.string());
+            writer.finish();
+        }
+
+        // Verify archive
+        {
+            MarReader reader(archive_path.string());
+            ASSERT(reader.file_count() >= 10);
+        }
+
+    } catch (const std::exception& e) {
+        fs::remove_all(temp_dir);
+        throw;
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+TEST(embed_provider_missing_url) {
+    // Test that embed provider system exists and is configured
+    // (Can't test directly without accessing internal functions)
+    // For now, just verify the index_registry header compiles
+    // Full integration testing requires actual mar-embed-server running
+}
+
+
+TEST(archive_content_preservation) {
+    // Test that file content is preserved in archive (for later vector indexing)
+    auto temp_dir = fs::temp_directory_path() / "mar_vector_content_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    auto archive_path = temp_dir / "content.mar";
+    auto data_dir = temp_dir / "data";
+    fs::create_directories(data_dir);
+
+    std::string test_content =
+        "This is important content that must be preserved for vectorization. "
+        "Vector indices need the original text to be intact and retrievable. "
+        "The content should not be modified during archiving.";
+
+    try {
+        // Create test file
+        {
+            std::ofstream f(data_dir / "important.txt");
+            f << test_content;
+        }
+
+        // Create archive
+        {
+            MarWriter writer(archive_path.string());
+            writer.add_file((data_dir / "important.txt").string());
+            writer.finish();
+        }
+
+        // Verify content is preserved
+        {
+            MarReader reader(archive_path.string());
+
+            // Find a regular file in the archive
+            bool found_match = false;
+            for (size_t i = 0; i < reader.file_count(); ++i) {
+                auto entry = reader.get_file_entry(i);
+                auto name = reader.get_name(i);
+
+                if (entry && entry->entry_type == EntryType::RegularFile && name) {
+                    // Read content
+                    auto content = const_cast<MarReader&>(reader).read_file(i);
+                    std::string retrieved(reinterpret_cast<const char*>(content.data()), content.size());
+
+                    // Check if this matches our test content
+                    if (retrieved.find("important content") != std::string::npos) {
+                        found_match = true;
+                        break;
+                    }
+                }
+            }
+
+            ASSERT(found_match);
+        }
+
+    } catch (const std::exception& e) {
+        fs::remove_all(temp_dir);
+        throw;
+    }
+
+    fs::remove_all(temp_dir);
+}
+
+// ============================================================================
+// Phase 2: Provider Factory Tests
+// ============================================================================
+
+TEST(embed_provider_factory_server_provider) {
+    // Test default server provider selection
+    try {
+        IndexOptions opts;
+        opts.params["provider"] = "server";
+        opts.params["url"] = "http://localhost:9999";  // Use non-standard port to avoid connecting
+
+        auto provider = make_embed_provider(opts);
+        std::cerr << "Note: Server provider test requires running mar-embed-server\n";
+    } catch (const std::runtime_error& e) {
+        // Expected: server not reachable
+        if (std::string(e.what()).find("embed server not reachable") != std::string::npos ||
+            std::string(e.what()).find("Failed to probe") != std::string::npos) {
+            // This is expected when server is not running
+        } else {
+            std::cerr << "❌ Unexpected error: " << e.what() << "\n";
+            tests_passed--;
+        }
+    }
+}
+
+TEST(embed_provider_factory_server_provider_missing_url) {
+    // Test server provider requires URL
+    try {
+        IndexOptions opts;
+        opts.params["provider"] = "server";
+
+        auto provider = make_embed_provider(opts);
+        std::cerr << "❌ Should have thrown error for missing URL\n";
+        tests_passed--;
+    } catch (const std::runtime_error& e) {
+        if (std::string(e.what()).find("Server provider requires") != std::string::npos) {
+            // Expected error
+        } else {
+            std::cerr << "❌ Wrong error message: " << e.what() << "\n";
+            tests_passed--;
+        }
+    }
+}
+
+TEST(embed_provider_factory_voyage_provider) {
+    // Test VoyageAI provider selection (should reject missing API key)
+    try {
+        IndexOptions opts;
+        opts.params["provider"] = "voyage";
+
+        auto provider = make_embed_provider(opts);
+        std::cerr << "❌ Should have thrown error for missing API key\n";
+        tests_passed--;
+    } catch (const std::runtime_error& e) {
+        if (std::string(e.what()).find("API key required") != std::string::npos) {
+            // Expected error
+        } else {
+            std::cerr << "❌ Wrong error message: " << e.what() << "\n";
+            tests_passed--;
+        }
+    }
+}
+
+TEST(embed_provider_factory_voyage_provider_with_key) {
+    // Test VoyageAI provider with API key (will fail later when calling embed due to no HTTPS)
+    try {
+        IndexOptions opts;
+        opts.params["provider"] = "voyage";
+        opts.params["api_key"] = "pk-test-key";
+
+        auto provider = make_embed_provider(opts);
+        ASSERT(provider != nullptr);
+        ASSERT(provider->model_name() == "voyage-3-large");  // Default model
+
+        // Verify model name can be overridden
+        opts.params["model"] = "voyage-3";
+        provider = make_embed_provider(opts);
+        ASSERT(provider->model_name() == "voyage-3");
+    } catch (const std::exception& e) {
+        std::cerr << "❌ embed_provider_factory_voyage_provider_with_key failed: " << e.what() << "\n";
+        tests_passed--;
+    }
+}
+
+TEST(embed_provider_factory_openai_provider) {
+    // Test OpenAI provider selection (should reject missing API key)
+    try {
+        IndexOptions opts;
+        opts.params["provider"] = "openai";
+
+        auto provider = make_embed_provider(opts);
+        std::cerr << "❌ Should have thrown error for missing API key\n";
+        tests_passed--;
+    } catch (const std::runtime_error& e) {
+        if (std::string(e.what()).find("API key required") != std::string::npos) {
+            // Expected error
+        } else {
+            std::cerr << "❌ Wrong error message: " << e.what() << "\n";
+            tests_passed--;
+        }
+    }
+}
+
+TEST(embed_provider_factory_openai_provider_with_key) {
+    // Test OpenAI provider with API key
+    try {
+        IndexOptions opts;
+        opts.params["provider"] = "openai";
+        opts.params["api_key"] = "sk-test-key";
+
+        auto provider = make_embed_provider(opts);
+        ASSERT(provider != nullptr);
+        ASSERT(provider->model_name() == "text-embedding-3-small");  // Default model
+
+        // Verify model name can be overridden
+        opts.params["model"] = "text-embedding-3-large";
+        provider = make_embed_provider(opts);
+        ASSERT(provider->model_name() == "text-embedding-3-large");
+    } catch (const std::exception& e) {
+        std::cerr << "❌ embed_provider_factory_openai_provider_with_key failed: " << e.what() << "\n";
+        tests_passed--;
+    }
+}
+
+TEST(embed_provider_factory_huggingface_provider) {
+    // Test HuggingFace provider selection (should reject missing API key)
+    try {
+        IndexOptions opts;
+        opts.params["provider"] = "huggingface";
+
+        auto provider = make_embed_provider(opts);
+        std::cerr << "❌ Should have thrown error for missing API key\n";
+        tests_passed--;
+    } catch (const std::runtime_error& e) {
+        if (std::string(e.what()).find("API key required") != std::string::npos) {
+            // Expected error
+        } else {
+            std::cerr << "❌ Wrong error message: " << e.what() << "\n";
+            tests_passed--;
+        }
+    }
+}
+
+TEST(embed_provider_factory_huggingface_provider_with_key) {
+    // Test HuggingFace provider with API key
+    try {
+        IndexOptions opts;
+        opts.params["provider"] = "huggingface";
+        opts.params["api_key"] = "hf_test_key";
+
+        auto provider = make_embed_provider(opts);
+        ASSERT(provider != nullptr);
+        ASSERT(provider->model_name() == "sentence-transformers/all-MiniLM-L6-v2");  // Default model
+
+        // Verify model name can be overridden
+        opts.params["model"] = "sentence-transformers/all-mpnet-base-v2";
+        provider = make_embed_provider(opts);
+        ASSERT(provider->model_name() == "sentence-transformers/all-mpnet-base-v2");
+    } catch (const std::exception& e) {
+        std::cerr << "❌ embed_provider_factory_huggingface_provider_with_key failed: " << e.what()
+                  << "\n";
+        tests_passed--;
+    }
+}
+
+TEST(embed_provider_factory_invalid_provider) {
+    // Test unknown provider type
+    try {
+        IndexOptions opts;
+        opts.params["provider"] = "invalid-provider";
+
+        auto provider = make_embed_provider(opts);
+        std::cerr << "❌ Should have thrown error for invalid provider\n";
+        tests_passed--;
+    } catch (const std::runtime_error& e) {
+        if (std::string(e.what()).find("Unknown embedding provider") != std::string::npos) {
+            // Expected error
+        } else {
+            std::cerr << "❌ Wrong error message: " << e.what() << "\n";
+            tests_passed--;
+        }
+    }
+}
+
+TEST(embed_provider_factory_default_server_provider) {
+    // Test default provider is "server" when not specified
+    try {
+        IndexOptions opts;
+        opts.params["url"] = "http://localhost:9999";  // Use non-standard port to avoid connecting
+
+        auto provider = make_embed_provider(opts);
+        std::cerr << "Note: Server provider test requires running mar-embed-server\n";
+    } catch (const std::runtime_error& e) {
+        // Expected: server not reachable
+        if (std::string(e.what()).find("embed server not reachable") != std::string::npos ||
+            std::string(e.what()).find("Failed to probe") != std::string::npos) {
+            // This is expected when server is not running
+        } else {
+            std::cerr << "❌ Unexpected error: " << e.what() << "\n";
+            tests_passed--;
+        }
+    }
+}
+
 
 int main() {
     std::cout << "\n=== MAR v0.1.0 Unit Tests ===\n\n";

@@ -1,0 +1,5 @@
+# Performance Baselines for Linux (Ubuntu)
+# Format: OP=TIME_IN_MS
+CREATE=1000
+VALIDATE=500
+EXTRACT=800
