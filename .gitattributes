@@ -1,0 +1,13 @@
+# Ensure consistent line endings for source files
+*.hpp text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+
+# Treat archives as binary (don't attempt diffs)
+*.mar binary
+*.mai binary
+*.tar binary
+*.tgz binary
+*.a binary
