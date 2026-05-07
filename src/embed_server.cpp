@@ -105,35 +105,39 @@ private:
             try {
                 httplib::Client cli(host_, port_);
                 cli.set_connection_timeout(5);
+                cli.set_read_timeout(10);
 
-                auto res = cli.Get("/healthz");
-
-                if (!res) {
-                    if (attempt < MAX_RETRIES) {
-                        std::cerr << "Warning: Embed server connection attempt " << (attempt + 1)
-                                  << " failed, retrying in " << retry_delay_ms << "ms...\n";
-                        std::this_thread::sleep_for(std::chrono::milliseconds(retry_delay_ms));
-                        retry_delay_ms =
-                            std::min(static_cast<int>(retry_delay_ms * RETRY_BACKOFF_MULTIPLIER), MAX_RETRY_DELAY_MS);
-                        continue;
-                    }
-                    throw std::runtime_error("embed server connection failed after " + std::to_string(MAX_RETRIES + 1) +
-                                             " attempts at " + url_);
+                // First check health
+                auto health_res = cli.Get("/healthz");
+                if (!health_res || health_res->status != 200) {
+                    throw std::runtime_error("Server not healthy");
                 }
 
-                if (res->status != 200) {
-                    throw std::runtime_error("embed server returned HTTP " + std::to_string(res->status) +
-                                             " from /healthz: " + res->body);
+                // Then get model info from /v1/models
+                auto models_res = cli.Get("/v1/models");
+                if (!models_res || models_res->status != 200) {
+                    throw std::runtime_error("Could not fetch model info");
                 }
 
-                // Successfully connected
-                try {
-                    auto jres = nlohmann::json::parse(res->body);
-                    if (jres.contains("dims") && jres["dims"].is_number()) {
-                        dims_ = jres["dims"].get<u32>();
+                auto jres = nlohmann::json::parse(models_res->body);
+                if (!jres.contains("data") || !jres["data"].is_array() || jres["data"].empty()) {
+                    throw std::runtime_error("Invalid /v1/models response format");
+                }
+
+                auto model_info = jres["data"][0];
+                if (!model_info.contains("dims") || !model_info["dims"].is_number()) {
+                    throw std::runtime_error("/v1/models response missing dims field");
+                }
+
+                dims_ = model_info["dims"].get<u32>();
+                
+                // Validate compatibility if model was specified
+                if (!model_.empty() && model_info.contains("id")) {
+                    std::string server_model = model_info["id"].get<std::string>();
+                    if (server_model != model_) {
+                        std::cerr << "Warning: Requested model '" << model_ << "' but server has '"
+                                  << server_model << "'. Using server model.\n";
                     }
-                } catch (const std::exception& e) {
-                    std::cerr << "Warning: Could not parse /healthz response: " << e.what() << "\n";
                 }
 
                 return;  // Success
