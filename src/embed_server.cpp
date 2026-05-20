@@ -208,6 +208,7 @@ private:
         nlohmann::json body;
         body["model"] = model_;
         body["input"] = texts;
+        body["vector_dtype"] = "float32";
 
         httplib::Client cli(host_, port_);
         cli.set_connection_timeout(10);
