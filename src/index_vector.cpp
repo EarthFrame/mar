@@ -74,7 +74,7 @@ static_assert(sizeof(VectorParams) == 256, "VectorParams must be 256 bytes");
 static_assert(sizeof(VectorEntry) == 24, "VectorEntry must be 24 bytes");
 
 // ============================================================================
-// Paragraph-aware chunking
+// Text chunking
 // ============================================================================
 
 struct Chunk {
@@ -84,105 +84,69 @@ struct Chunk {
     std::string text;
 };
 
-static std::vector<Chunk> chunk_text(const std::string& text, size_t chunk_size, size_t chunk_overlap) {
+// Returns the largest byte position p ≤ pos (and ≥ min_pos) that is a natural
+// text break. Priority: paragraph → newline → sentence end → word → UTF-8 boundary.
+// Searches at most `window` bytes behind `pos`, so this runs in O(window) = O(1).
+static size_t find_break(const std::string& text, size_t pos, size_t min_pos,
+                         size_t window = 200) {
+    if (pos >= text.size()) return text.size();
+
+    // Retreat to a valid UTF-8 codepoint start (not a continuation byte 0x80–0xBF).
+    while (pos > min_pos && (static_cast<unsigned char>(text[pos]) & 0xC0) == 0x80)
+        --pos;
+
+    const size_t lo = (pos > min_pos + window) ? pos - window : min_pos;
+    size_t p;
+
+    // Paragraph boundary (\n\n): break after the blank line.
+    p = text.rfind("\n\n", pos);
+    if (p != std::string::npos && p + 2 > lo) return p + 2;
+
+    // Single newline.
+    p = text.rfind('\n', pos);
+    if (p != std::string::npos && p >= lo) return p + 1;
+
+    // Sentence-ending punctuation followed by whitespace.
+    for (size_t i = pos; i > lo; --i) {
+        char prev = text[i - 1];
+        if ((prev == '.' || prev == '!' || prev == '?') &&
+            (text[i] == ' ' || text[i] == '\t'))
+            return i + 1;
+    }
+
+    // Word boundary (whitespace).
+    p = text.rfind(' ', pos);
+    if (p != std::string::npos && p >= lo) return p + 1;
+
+    return pos;  // hard cut, already UTF-8-safe
+}
+
+// Splits `text` into overlapping chunks of at most `chunk_size` bytes, advancing
+// by `chunk_size - chunk_overlap` bytes between chunks. Chunk end boundaries are
+// snapped to natural text breaks (paragraph, sentence, word, or UTF-8 codepoint
+// boundary) so each chunk covers a coherent span of text.
+static std::vector<Chunk> chunk_text(const std::string& text, size_t chunk_size,
+                                     size_t chunk_overlap) {
     std::vector<Chunk> chunks;
-    if (text.empty())
-        return chunks;
+    if (text.empty() || chunk_size == 0) return chunks;
+    if (chunk_overlap >= chunk_size) chunk_overlap = chunk_size / 2;
 
-    // Split on paragraph boundaries (\n\n).
-    std::vector<std::string> paras;
-    std::vector<size_t> para_offsets;
-    size_t pos = 0;
-    while (pos < text.size()) {
-        size_t end = text.find("\n\n", pos);
-        if (end == std::string::npos)
-            end = text.size();
-        if (end > pos) {
-            paras.push_back(text.substr(pos, end - pos));
-            para_offsets.push_back(pos);
-        }
-        pos = (end == text.size()) ? end : end + 2;
-    }
+    const size_t stride = chunk_size - chunk_overlap;
+    chunks.reserve(text.size() / stride + 2);
 
-    if (paras.empty()) {
-        // Degenerate: one chunk covering the whole text.
+    for (size_t pos = 0; pos < text.size(); pos += stride) {
+        size_t hard_end = std::min(pos + chunk_size, text.size());
+        size_t end = (hard_end < text.size()) ? find_break(text, hard_end, pos) : hard_end;
+        if (end <= pos) end = hard_end;  // guarantee forward progress
+
         Chunk c;
-        c.byte_offset = 0;
-        c.byte_len = text.size();
-        c.idx = 0;
-        c.text = text.substr(0, std::min(text.size(), chunk_size));
+        c.byte_offset = pos;
+        c.byte_len    = end - pos;
+        c.idx         = static_cast<u32>(chunks.size());
+        c.text        = text.substr(pos, c.byte_len);
         chunks.push_back(std::move(c));
-        return chunks;
-    }
 
-    // Greedily merge adjacent paragraphs up to chunk_size, with overlap.
-    std::string running;
-    size_t running_start = 0;
-    u32 chunk_idx = 0;
-    std::string prev_tail;  // last chunk_overlap chars of previous chunk
-
-    auto emit = [&](const std::string& content, size_t start, size_t len) {
-        Chunk c;
-        c.byte_offset = start;
-        c.byte_len = len;
-        c.idx = chunk_idx++;
-        c.text = prev_tail + content;
-        if (c.text.size() > chunk_size * 2)
-            c.text.resize(chunk_size * 2);
-
-        if (content.size() > chunk_overlap)
-            prev_tail = content.substr(content.size() - chunk_overlap);
-        else
-            prev_tail = content;
-
-        chunks.push_back(std::move(c));
-    };
-
-    for (size_t i = 0; i < paras.size(); ++i) {
-        const std::string& para = paras[i];
-        size_t para_start = para_offsets[i];
-
-        // If a single paragraph exceeds chunk_size, split further.
-        if (para.size() > chunk_size) {
-            // Emit any accumulated content first.
-            if (!running.empty()) {
-                emit(running, running_start, running.size());
-                running.clear();
-            }
-            // Split the large paragraph on sentence boundaries.
-            size_t p2 = 0;
-            while (p2 < para.size()) {
-                size_t end2 = std::min(p2 + chunk_size, para.size());
-                // Try to break on ". " or "\n".
-                if (end2 < para.size()) {
-                    size_t dot = para.rfind(". ", end2);
-                    size_t nl = para.rfind('\n', end2);
-                    size_t brk = std::max(dot == std::string::npos ? 0 : dot + 2, nl == std::string::npos ? 0 : nl + 1);
-                    if (brk > p2)
-                        end2 = brk;
-                }
-                std::string piece = para.substr(p2, end2 - p2);
-                emit(piece, para_start + p2, piece.size());
-                p2 = end2;
-            }
-            running_start = (i + 1 < paras.size()) ? para_offsets[i + 1] : text.size();
-            continue;
-        }
-
-        if (running.empty()) {
-            running = para;
-            running_start = para_start;
-        } else if (running.size() + 2 + para.size() <= chunk_size) {
-            running += "\n\n";
-            running += para;
-        } else {
-            emit(running, running_start, running.size());
-            running = para;
-            running_start = para_start;
-        }
-    }
-    if (!running.empty()) {
-        emit(running, running_start, running.size());
+        if (end >= text.size()) break;
     }
 
     return chunks;
@@ -240,8 +204,7 @@ public:
                   << " dtype=" << (use_int8 ? "int8" : "float32") << " HNSW M=" << hnsw_M << " ef=" << hnsw_ef << "\n";
 
         const size_t file_count = reader.file_count();
-
-        // Collect all chunks across all files.
+        std::cerr << "Reading archive (" << file_count << " entries)...\n";
         struct RawChunk {
             u32 file_id;
             u64 byte_offset;
@@ -253,14 +216,24 @@ public:
 
         for (u32 fi = 0; fi < file_count; ++fi) {
             auto entry_opt = reader.get_file_entry(fi);
-            if (!entry_opt || entry_opt->entry_type != EntryType::RegularFile)
+            if (!entry_opt) {
+                std::cerr << "  Entry " << fi << ": no entry data\n";
                 continue;
+            }
+            if (entry_opt->entry_type != EntryType::RegularFile) {
+                std::cerr << "  Entry " << fi << ": not a regular file (type=" << static_cast<int>(entry_opt->entry_type) << ")\n";
+                continue;
+            }
 
-            auto data = const_cast<MarReader&>(reader).read_file(fi);
             auto name_opt = reader.get_name(fi);
-            std::string name = name_opt ? *name_opt : "";
+            std::string name = name_opt ? *name_opt : "<unnamed>";
+            std::cerr << "  Reading file " << fi << ": " << name << "...\n";
+            
+            auto data = const_cast<MarReader&>(reader).read_file(fi);
+            std::cerr << "    Loaded " << data.size() << " bytes\n";
 
             // Detect UTF-8 validity (heuristic: no byte > 0x7F is invalid Latin-1).
+            std::cerr << "    Checking if text...\n";
             bool is_text = true;
             for (size_t bi = 0; bi < std::min(data.size(), size_t(4096)); ++bi) {
                 u8 c = data[bi];
@@ -270,6 +243,7 @@ public:
                     break;
                 }
             }
+            std::cerr << "    Text: " << (is_text ? "yes" : "no") << "\n";
 
             if (!is_text || data.empty()) {
                 // Synthetic chunk for binary files.
@@ -287,11 +261,14 @@ public:
                 rc.chunk_idx = 0;
                 rc.text = name + " | " + hex_preview;
                 raw_chunks.push_back(std::move(rc));
+                std::cerr << "  " << name << ": " << data.size() << " bytes (binary) → 1 chunk\n";
                 continue;
             }
 
             std::string text(reinterpret_cast<const char*>(data.data()), data.size());
+            std::cerr << "    Chunking...\n";
             auto cks = chunk_text(text, chunk_size, chunk_overlap);
+            std::cerr << "    Created " << cks.size() << " chunks\n";
             for (auto& ck : cks) {
                 RawChunk rc;
                 rc.file_id = fi;
@@ -301,21 +278,33 @@ public:
                 rc.text = std::move(ck.text);
                 raw_chunks.push_back(std::move(rc));
             }
+            std::cerr << "  " << name << ": " << data.size() << " bytes → " << cks.size() << " chunks\n";
         }
 
         const u32 num_vectors = static_cast<u32>(raw_chunks.size());
-        std::cerr << "Embedding " << num_vectors << " chunks in batches of " << batch_sz << "...\n";
+        std::cerr << "Total: " << num_vectors << " chunks to embed\n";
 
         // Embed in batches.
         std::vector<float> all_floats;
         std::vector<float> all_scales;  // empty for float32
         all_floats.reserve(static_cast<size_t>(num_vectors) * dims);
 
-        for (u32 i = 0; i < num_vectors; i += batch_sz) {
-            u32 end = std::min(i + batch_sz, num_vectors);
-            std::vector<std::string> texts;
-            texts.reserve(end - i);
-            for (u32 j = i; j < end; ++j) texts.push_back(raw_chunks[j].text);
+        if (num_vectors == 0) {
+            std::cerr << "Warning: No chunks to embed. Archive may be empty or all files are binary.\n";
+        } else {
+            std::cerr << "Embedding " << num_vectors << " chunks in batches of " << batch_sz << "...\n";
+
+            for (u32 i = 0; i < num_vectors; i += batch_sz) {
+                u32 end = std::min(i + batch_sz, num_vectors);
+                u32 batch_num = (i / batch_sz) + 1;
+                u32 total_batches = (num_vectors + batch_sz - 1) / batch_sz;
+                
+                std::cerr << "  Batch " << batch_num << "/" << total_batches << ": chunks " 
+                          << (i + 1) << "-" << end << "...\n";
+                
+                std::vector<std::string> texts;
+                texts.reserve(end - i);
+                for (u32 j = i; j < end; ++j) texts.push_back(raw_chunks[j].text);
 
             auto vecs = provider->embed(texts);
             if (vecs.size() != static_cast<size_t>(end - i) * dims) {
@@ -339,6 +328,8 @@ public:
             }
         }
         std::cerr << "\n";
+        std::cerr << "✓ Embedding complete: " << num_vectors << " vectors created\n";
+        }
 
         // Build HNSW graph (always in float32, using inner-product on L2-normalised vectors).
         std::cerr << "Building HNSW graph (M=" << hnsw_M << " ef=" << hnsw_ef << ")...\n";
