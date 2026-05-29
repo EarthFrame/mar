@@ -4,7 +4,7 @@ benchmarks/visuals/
 benchmarks/scratch_*/
 
 build/
-mar
+/mar
 test_mar
 test_nar
 .perf/

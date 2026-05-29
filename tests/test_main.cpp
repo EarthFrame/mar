@@ -2003,6 +2003,59 @@ TEST(extract_file_to_sink_streaming) {
     fs::remove_all(temp_dir);
 }
 
+TEST(read_file_range) {
+    fs::path temp_dir = fs::temp_directory_path() / "mar_test_read_range";
+    fs::create_directories(temp_dir);
+    fs::path archive_path = temp_dir / "test_range.mar";
+
+    std::vector<u8> content;
+    for (int i = 0; i < 10000; ++i) {
+        content.push_back(static_cast<u8>(i % 256));
+    }
+
+    {
+        WriteOptions opts;
+        opts.multiblock = true;
+        opts.block_size = 1024; // Multiple blocks
+        opts.compression = CompressionAlgo::None;
+        MarWriter writer(archive_path.string(), opts);
+        writer.add_memory("range.bin", content);
+        writer.finish();
+    }
+
+    {
+        MarReader reader(archive_path.string());
+        
+        // Test various ranges
+        auto test_range = [&](u64 off, u64 len) {
+            std::vector<u8> buf(len);
+            size_t n = reader.read_file_range(0, off, len, buf.data());
+            ASSERT_EQ(n, len);
+            for (u64 i = 0; i < len; ++i) {
+                ASSERT_EQ(buf[i], content[off + i]);
+            }
+        };
+
+        test_range(0, 10);          // Start
+        test_range(100, 50);        // Middle of first block
+        test_range(1000, 100);      // Across block boundary (1024)
+        test_range(5000, 2000);     // Across multiple blocks
+        test_range(9990, 10);       // End
+
+        // Test out of bounds
+        std::vector<u8> buf(10);
+        ASSERT_EQ(reader.read_file_range(0, 10000, 10, buf.data()), 0UL);
+        
+        // Test partial read at end
+        ASSERT_EQ(reader.read_file_range(0, 9995, 10, buf.data()), 5UL);
+        for (int i = 0; i < 5; ++i) {
+            ASSERT_EQ(buf[i], content[9995 + i]);
+        }
+    }
+
+    fs::remove_all(temp_dir);
+}
+
 // ============================================================================
 // Format Constraint Tests (MAR 0.1.0 Design Limits)
 // ============================================================================

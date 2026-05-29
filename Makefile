@@ -92,7 +92,7 @@ SRCS = src/format.cpp src/checksum.cpp src/compression.cpp src/compression_gzip.
        src/compression_zstd.cpp src/compression_lz4.cpp src/compression_bzip2.cpp \
        src/sections.cpp src/name_index.cpp src/reader.cpp src/writer.cpp \
        src/file_descriptor_manager.cpp src/async_io.cpp src/thread_pool.cpp src/redact.cpp src/diff.cpp \
-       src/index_registry.cpp src/index_minhash.cpp 
+       src/index_registry.cpp src/index_minhash.cpp src/fuse.cpp src/mount.cpp
 MAIN_SRC = src/main.cpp
 TEST_SRC = tests/test_main.cpp
 
@@ -123,6 +123,8 @@ BZIP2_FOUND := $(shell ldconfig -p 2>/dev/null | grep -q libbz2 && echo yes || (
 BLAKE3_FOUND := $(shell pkg-config --exists libblake3 2>/dev/null && echo yes)
 URING_FOUND := $(shell pkg-config --exists liburing 2>/dev/null && echo yes)
 KQUEUE_FOUND := $(shell test "$(UNAME_S)" = "Darwin" && echo yes)
+FUSE3_FOUND := $(shell pkg-config --exists fuse3 && echo yes)
+FUSE_FOUND := $(shell pkg-config --exists fuse && echo yes)
 
 # Library flags
 LDFLAGS =
@@ -217,6 +219,14 @@ endif
 
 ifeq ($(KQUEUE_FOUND),yes)
     CXXFLAGS += -DMAR_HAS_KQUEUE=1
+endif
+
+ifeq ($(FUSE3_FOUND),yes)
+    CXXFLAGS += $(shell pkg-config --cflags fuse3) -DMAR_HAS_FUSE=3
+    LDFLAGS += $(shell pkg-config $(PKG_CONFIG_STATIC) --libs fuse3)
+else ifeq ($(FUSE_FOUND),yes)
+    CXXFLAGS += $(shell pkg-config --cflags fuse) -DMAR_HAS_FUSE=2
+    LDFLAGS += $(shell pkg-config $(PKG_CONFIG_STATIC) --libs fuse)
 endif
 
 # Local BLAKE3 detection

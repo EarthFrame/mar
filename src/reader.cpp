@@ -532,6 +532,80 @@ std::vector<u8> MarReader::read_file(const std::string& name) {
     return read_file(found->first);
 }
 
+size_t MarReader::read_file_range(size_t index, u64 offset, u64 length, u8* buffer) {
+    if (index >= files_.size()) {
+        return 0;
+    }
+
+    const auto& entry = files_[index];
+    if (entry.entry_type != EntryType::RegularFile || entry.is_redacted()) {
+        return 0;
+    }
+
+    if (offset >= entry.logical_size) {
+        return 0;
+    }
+
+    if (offset + length > entry.logical_size) {
+        length = entry.logical_size - offset;
+    }
+
+    if (length == 0) {
+        return 0;
+    }
+
+    if (header_.index_type == IndexType::SingleFilePerBlock) {
+        size_t block_index = 0;
+        for (size_t i = 0; i < index; ++i) {
+            if (files_[i].entry_type == EntryType::RegularFile) {
+                block_index++;
+            }
+        }
+        const auto& block_data = get_block_data(block_offsets_[block_index]);
+        if (offset + length > block_data.size()) {
+            return 0;
+        }
+        std::memcpy(buffer, block_data.data() + offset, length);
+        return length;
+    }
+
+    // Multiblock mode
+    if (!file_spans_) {
+        return 0;
+    }
+
+    auto spans = file_spans_->get_file_spans(static_cast<u32>(index));
+    u64 current_file_pos = 0;
+    size_t total_read = 0;
+
+    for (const auto& span : spans) {
+        u64 span_start = current_file_pos;
+        u64 span_end = current_file_pos + span.length;
+
+        // Check if this span overlaps with the requested range [offset, offset + length)
+        if (span_end > offset && span_start < offset + length) {
+            u64 read_start_in_span = (offset > span_start) ? (offset - span_start) : 0;
+            u64 read_end_in_span = (offset + length < span_end) ? (offset + length - span_start) : span.length;
+            u64 read_len = read_end_in_span - read_start_in_span;
+
+            const auto& block_data = get_block_data(block_offsets_[span.block_id]);
+            if (span.offset_in_block + read_start_in_span + read_len > block_data.size()) {
+                break;
+            }
+
+            std::memcpy(buffer + total_read, block_data.data() + span.offset_in_block + read_start_in_span, read_len);
+            total_read += read_len;
+        }
+
+        current_file_pos = span_end;
+        if (current_file_pos >= offset + length) {
+            break;
+        }
+    }
+
+    return total_read;
+}
+
 bool MarReader::extract_file_to_sink(size_t index, CompressionSink& sink) {
     if (index >= files_.size())
         return false;

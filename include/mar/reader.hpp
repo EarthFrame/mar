@@ -118,6 +118,17 @@ public:
     // Read file contents by name
     [[nodiscard]] std::vector<u8> read_file(const std::string& name);
 
+    /**
+     * Read a range of a file by index.
+     *
+     * @param index File entry index.
+     * @param offset Byte offset within the file.
+     * @param length Number of bytes to read.
+     * @param buffer Output buffer (must be at least length bytes).
+     * @return Number of bytes read, or 0 on error.
+     */
+    size_t read_file_range(size_t index, u64 offset, u64 length, u8* buffer);
+
     // Read raw block by index
     [[nodiscard]] std::vector<u8> read_block(size_t block_index);
 

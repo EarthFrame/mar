@@ -39,29 +39,31 @@ To build `mar` with all features enabled, you need the following dependencies:
 - **liblz4** (for LZ4 compression)
 - **libbz2** (for Bzip2 compression)
 - **libdeflate** (for faster Gzip/Deflate implementation)
+- **libfuse** or **fuse3** (for mounting archives as a filesystem)
 - **libblake3** (for accelerated BLAKE3 checksums - vendored in `deps/`, so no system install is required)
 
 #### Installation Commands
 
 **Apple macOS (using Homebrew):**
 ```bash
+# Note: FUSE on macOS requires macFUSE (https://osxfuse.github.io/)
 brew install gcc zstd lz4 bzip2 libdeflate
 ```
 
 **Debian / Ubuntu / Linux Mint:**
 ```bash
 sudo apt update
-sudo apt install build-essential cmake libzstd-dev liblz4-dev libbz2-dev zlib1g-dev libdeflate-dev
+sudo apt install build-essential cmake libzstd-dev liblz4-dev libbz2-dev zlib1g-dev libdeflate-dev libfuse3-dev
 ```
 
 **Fedora / RHEL / CentOS:**
 ```bash
-sudo dnf install gcc-c++ cmake zstd-devel lz4-devel bzip2-devel zlib-devel libdeflate-devel
+sudo dnf install gcc-c++ cmake zstd-devel lz4-devel bzip2-devel zlib-devel libdeflate-devel fuse3-devel
 ```
 
 **Arch Linux:**
 ```bash
-sudo pacman -S gcc cmake zstd lz4 bzip2 zlib libdeflate
+sudo pacman -S gcc cmake zstd lz4 bzip2 zlib libdeflate fuse3
 ```
 
 #### Building
@@ -188,6 +190,24 @@ mar get -c archive.mar path/to/file.txt
 
 # Extract to directory
 mar get -o /tmp archive.mar file1.txt file2.txt
+```
+
+### Mounting (FUSE)
+
+MAR can mount archives as read-only filesystems using FUSE. This allows tools to access archived data directly without extraction.
+
+```bash
+# Mount archive (relative paths appear in CWD, absolute paths at their locations)
+mar mount archive.mar
+
+# Mount with a specific prefix
+mar mount --prefix /data/references archive.mar
+
+# Unmount all sessions for an archive
+mar unmount archive.mar
+
+# Run in foreground for debugging
+mar mount --foreground archive.mar
 ```
 
 ## Indexing and Search

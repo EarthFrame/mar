@@ -73,6 +73,7 @@ The formula includes:
   - `lz4`: LZ4 compression
   - `libdeflate`: DEFLATE compression
   - `bzip2`: BZIP2 compression
+  - `macfuse`: FUSE support (optional, required for `mar mount`)
 - **Build Instructions**: `make release`
 - **Smoke Test**: Verifies installation by running `mar --version`
 

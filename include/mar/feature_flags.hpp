@@ -14,10 +14,16 @@ namespace mar {
 enum class FeatureFlag : unsigned {
     IndexCommand = 0,
     SearchCommand = 1,
+    MountCommand = 2,
 };
 
 namespace {
-inline constexpr size_t kFeatureCount = 2;
+inline constexpr size_t kFeatureCount = 3;
+
+inline std::array<std::atomic<bool>, kFeatureCount>& feature_states() {
+    static std::array<std::atomic<bool>, kFeatureCount> states{{true, true, true}};
+    return states;
+}
 
 inline size_t FeatureIndex(FeatureFlag flag) {
     return static_cast<size_t>(flag);
@@ -52,24 +58,17 @@ inline bool parse_env_flag(const char* name, bool default_value) {
 }  // namespace
 
 inline bool is_feature_enabled(FeatureFlag flag) {
-    static std::array<std::atomic<bool>, kFeatureCount> states{{
-        true,
-        true,
-    }};
-    return states[FeatureIndex(flag)].load(std::memory_order_relaxed);
+    return feature_states()[FeatureIndex(flag)].load(std::memory_order_relaxed);
 }
 
 inline void set_feature_enabled(FeatureFlag flag, bool enabled) {
-    static std::array<std::atomic<bool>, kFeatureCount> states{{
-        true,
-        true,
-    }};
-    states[FeatureIndex(flag)].store(enabled, std::memory_order_relaxed);
+    feature_states()[FeatureIndex(flag)].store(enabled, std::memory_order_relaxed);
 }
 
 inline void init_feature_flags_from_env() {
     set_feature_enabled(FeatureFlag::IndexCommand, parse_env_flag("MAR_FEATURE_INDEX", true));
     set_feature_enabled(FeatureFlag::SearchCommand, parse_env_flag("MAR_FEATURE_SEARCH", true));
+    set_feature_enabled(FeatureFlag::MountCommand, parse_env_flag("MAR_FEATURE_MOUNT", true));
 }
 
 }  // namespace mar

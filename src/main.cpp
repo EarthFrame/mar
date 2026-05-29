@@ -8,6 +8,7 @@
 #include "mar/feature_flags.hpp"
 #include "mar/index_registry.hpp"
 #include "mar/mar.hpp"
+#include "mar/mount.hpp"
 #include "mar/redact.hpp"
 #include "mar/stopwatch.hpp"
 #include "mar/writer.hpp"
@@ -97,6 +98,11 @@ void print_usage() {
               << "  cat      Dump file contents to stdout or as JSON\n"
               << "  diff     Compare two archives and show differences\n"
               << "  redact   Overwrite file data with zeros and mark redacted\n";
+
+    if (is_feature_enabled(FeatureFlag::MountCommand)) {
+        std::cout << "  mount    Mount an archive as a filesystem\n"
+                  << "  unmount  Unmount a previously mounted archive\n";
+    }
 
     if (is_feature_enabled(FeatureFlag::IndexCommand)) {
         std::cout << "  index    Create a sidecar index for an archive\n";
@@ -340,6 +346,35 @@ Notes:
 Examples:
   mar redact -o out.mar in.mar secrets.txt keys.pem
   printf "a\nb\n" | mar redact -I -T - in.mar
+)";
+}
+
+void print_mount_usage() {
+    std::cout << R"(Usage: mar mount [options] <archive> [mountpoint]
+
+Mount an archive as it is described / implemented at a specific location on the file system.
+
+Options:
+  -p, --prefix <dir>         Only mount files in the archive starting with this prefix
+  -a, --all                  Mount all files in the archive (default)
+  -f, --force                Create mount points if they do not exist
+  -v, --verbose              Enable verbose output
+  --foreground               Run in foreground (do not background)
+
+Examples:
+  mar mount archive.mar /mnt/archive
+  mar mount --prefix /data/references archive.mar /mnt/data
+  mar mount -f archive.mar
+)";
+}
+
+void print_unmount_usage() {
+    std::cout << R"(Usage: mar unmount <archive>
+
+Unmount a previously mounted archive.
+
+Examples:
+  mar unmount archive.mar
 )";
 }
 
@@ -1915,6 +1950,84 @@ int cmd_redact(int argc, char* argv[]) {
 }
 
 // ============================================================================
+// Command: mount
+// ============================================================================
+
+int cmd_mount(int argc, char* argv[]) {
+    MountOptions opts;
+    
+    for (int i = 0; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            print_mount_usage();
+            return EXIT_OK;
+        } else if (arg == "-p" || arg == "--prefix") {
+            if (++i >= argc) {
+                print_error("Missing prefix directory", "mount");
+                return EXIT_USAGE;
+            }
+            opts.prefix = argv[i];
+        } else if (arg == "-a" || arg == "--all") {
+            opts.all = true;
+        } else if (arg == "-f" || arg == "--force") {
+            opts.force = true;
+        } else if (arg == "-v" || arg == "--verbose") {
+            opts.verbose = true;
+        } else if (arg == "--foreground") {
+            opts.background = false;
+        } else if (arg[0] == '-') {
+            print_error("Unknown option: " + arg, "mount");
+            return EXIT_USAGE;
+        } else if (opts.archive_path.empty()) {
+            opts.archive_path = arg;
+        } else if (opts.mount_point.empty()) {
+            opts.mount_point = arg;
+        } else {
+            print_error("Unexpected argument: " + arg, "mount");
+            return EXIT_USAGE;
+        }
+    }
+
+    if (opts.archive_path.empty()) {
+        print_error("Missing archive path", "mount");
+        return EXIT_USAGE;
+    }
+
+    return mount_archive(opts);
+}
+
+// ============================================================================
+// Command: unmount
+// ============================================================================
+
+int cmd_unmount(int argc, char* argv[]) {
+    std::string archive_path;
+    
+    for (int i = 0; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            print_unmount_usage();
+            return EXIT_OK;
+        } else if (arg[0] == '-') {
+            print_error("Unknown option: " + arg, "unmount");
+            return EXIT_USAGE;
+        } else if (archive_path.empty()) {
+            archive_path = arg;
+        } else {
+            print_error("Unexpected argument: " + arg, "unmount");
+            return EXIT_USAGE;
+        }
+    }
+
+    if (archive_path.empty()) {
+        print_error("Missing archive path", "unmount");
+        return EXIT_USAGE;
+    }
+
+    return unmount_archive(archive_path);
+}
+
+// ============================================================================
 // Command: index
 // ============================================================================
 
@@ -2359,6 +2472,14 @@ int main(int argc, char* argv[]) {
         print_error("Command disabled: search");
         return EXIT_UNAVAILABLE;
     }
+    if (command == "mount" && !is_feature_enabled(FeatureFlag::MountCommand)) {
+        print_error("Command disabled: mount");
+        return EXIT_UNAVAILABLE;
+    }
+    if (command == "unmount" && !is_feature_enabled(FeatureFlag::MountCommand)) {
+        print_error("Command disabled: unmount");
+        return EXIT_UNAVAILABLE;
+    }
 
     // Build filtered argument list for command (excluding global options)
     std::vector<char*> cmd_args;
@@ -2390,6 +2511,10 @@ int main(int argc, char* argv[]) {
         return run_with_timing("diff", [=]() { return cmd_diff(cmd_argc, cmd_argv); });
     } else if (command == "redact") {
         return run_with_timing("redact", [=]() { return cmd_redact(cmd_argc, cmd_argv); });
+    } else if (command == "mount") {
+        return run_with_timing("mount", [=]() { return cmd_mount(cmd_argc, cmd_argv); });
+    } else if (command == "unmount") {
+        return run_with_timing("unmount", [=]() { return cmd_unmount(cmd_argc, cmd_argv); });
     } else if (command == "index") {
         return run_with_timing("index", [=]() { return cmd_index(cmd_argc, cmd_argv); });
     } else if (command == "search") {

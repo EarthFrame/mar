@@ -316,6 +316,23 @@ test_header_command() {
     run_test "header help" "$MAR_BIN header --help"
 }
 
+test_mount_command() {
+    log_info "=== Mount Command Test ==="
+    
+    # Check if mount command is available
+    set +e
+    "$MAR_BIN" mount --help > /dev/null 2>&1
+    local exit_code=$?
+    set -e
+    if [ $exit_code -eq 69 ]; then
+        log_warn "Mount command disabled/unavailable in this build, skipping"
+        return 0
+    fi
+
+    run_test "mount help" "$MAR_BIN mount --help"
+    run_test "unmount help" "$MAR_BIN unmount --help"
+}
+
 test_create_syntax() {
     log_info "=== Create Command Syntax Test ==="
     
@@ -1966,6 +1983,68 @@ PY
     TESTS_RUN=$((TESTS_RUN + 1))
 }
 
+test_mount_unmount() {
+    log_info "=== Mount/Unmount Integration ==="
+
+    # Check if FUSE is available and we are on Linux/macOS
+    if ! command -v fusermount >/dev/null 2>&1 && ! command -v umount >/dev/null 2>&1; then
+        log_warn "fusermount/umount not found, skipping mount test"
+        return 0
+    fi
+
+    local workdir="$TEST_DIR/mount_unmount"
+    mkdir -p "$workdir"
+    cd "$workdir"
+
+    # 1. Setup data
+    mkdir -p input
+    echo "hello" > input/hello.txt
+    echo "world" > input/world.txt
+    
+    # 2. Create archive
+    run_test "create archive for mount" "$MAR_BIN create -f test.mar input"
+    
+    # 3. Try to mount
+    mkdir -p mountpoint
+    # Use --foreground with & to allow us to check if it's running and then kill it
+    # OR just use the standard backgrounding.
+    # Let's try the standard backgrounding as implemented.
+    if ! "$MAR_BIN" mount -v test.mar mountpoint > mount_log 2>&1; then
+        if grep -qi "not supported\|FUSE not found\|Command disabled" mount_log; then
+            log_warn "Mount not supported in this build, skipping"
+            return 0
+        fi
+        log_fail "Mount failed"
+        cat mount_log
+        return 1
+    fi
+
+    # Wait a bit for mount to materialize
+    sleep 2
+
+    # 4. Verify content
+    if [ -f "mountpoint/input/hello.txt" ]; then
+        assert_file_content "mountpoint/input/hello.txt" "hello" "Mounted file content matches"
+    else
+        log_fail "Mounted file not found"
+        ls -R mountpoint || true
+    fi
+
+    # 5. Unmount
+    run_test "unmount archive" "$MAR_BIN unmount test.mar"
+    
+    # 6. Verify unmounted
+    if [ ! -f "mountpoint/input/hello.txt" ]; then
+        log_pass "Unmount successful (file gone)"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        log_fail "Unmount failed (file still exists)"
+        # Force cleanup if possible
+        $MAR_BIN unmount test.mar >/dev/null 2>&1 || true
+    fi
+    TESTS_RUN=$((TESTS_RUN + 1))
+}
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -2020,6 +2099,7 @@ main() {
     test_cat_command
     test_get_command
     test_header_command
+    test_mount_command
     test_create_syntax
     test_extract_syntax
     test_hash_command
@@ -2074,6 +2154,7 @@ main() {
     test_diff_format_validation
     test_redact_roundtrip
     test_indexing_and_search
+    test_mount_unmount
     test_random_bit_flips
     
     # Summary
