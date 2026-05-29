@@ -220,6 +220,9 @@ std::vector<u8> compress(const std::vector<u8>& data, CompressionAlgo algo, int 
 }
 
 std::vector<u8> decompress(const u8* data, size_t len, CompressionAlgo algo, u64 raw_size) {
+    if (raw_size == 0 && len == 0) {
+        return {};
+    }
     switch (algo) {
         case CompressionAlgo::None:
             return std::vector<u8>(data, data + len);
