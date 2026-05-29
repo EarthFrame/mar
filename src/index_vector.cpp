@@ -285,9 +285,10 @@ public:
         std::cerr << "Total: " << num_vectors << " chunks to embed\n";
 
         // Embed in batches.
-        std::vector<float> all_floats;
+        std::vector<u8> all_vector_data;
         std::vector<float> all_scales;  // empty for float32
-        all_floats.reserve(static_cast<size_t>(num_vectors) * dims);
+        size_t bytes_per_vec = dims * (use_int8 ? sizeof(i8) : sizeof(float));
+        all_vector_data.reserve(static_cast<size_t>(num_vectors) * bytes_per_vec);
 
         if (num_vectors == 0) {
             std::cerr << "Warning: No chunks to embed. Archive may be empty or all files are binary.\n";
@@ -306,29 +307,35 @@ public:
                 texts.reserve(end - i);
                 for (u32 j = i; j < end; ++j) texts.push_back(raw_chunks[j].text);
 
-            auto vecs = provider->embed(texts);
-            if (vecs.size() != static_cast<size_t>(end - i) * dims) {
-                throw std::runtime_error("Embed server returned unexpected vector count");
-            }
-
-            if (use_int8) {
-                for (u32 j = 0; j < (end - i); ++j) {
-                    const float* src = vecs.data() + j * dims;
-                    std::vector<i8> q(dims);
-                    float scale = quantise_int8(src, q.data(), dims);
-                    for (auto v : q) all_floats.push_back(static_cast<float>(v));
-                    all_scales.push_back(scale);
+                auto vecs = provider->embed(texts);
+                if (vecs.size() != static_cast<size_t>(end - i) * dims) {
+                    throw std::runtime_error("Embed server returned unexpected vector count");
                 }
-            } else {
-                all_floats.insert(all_floats.end(), vecs.begin(), vecs.end());
-            }
 
-            if ((i / batch_sz) % 10 == 0) {
-                std::cerr << "  embedded " << std::min(end, num_vectors) << "/" << num_vectors << "\r" << std::flush;
+                if (use_int8) {
+                    for (u32 j = 0; j < (end - i); ++j) {
+                        const float* src = vecs.data() + j * dims;
+                        std::vector<i8> q(dims);
+                        float scale = quantise_int8(src, q.data(), dims);
+                        
+                        size_t current_size = all_vector_data.size();
+                        all_vector_data.resize(current_size + dims);
+                        std::memcpy(all_vector_data.data() + current_size, q.data(), dims);
+                        all_scales.push_back(scale);
+                    }
+                } else {
+                    size_t current_size = all_vector_data.size();
+                    size_t new_bytes = vecs.size() * sizeof(float);
+                    all_vector_data.resize(current_size + new_bytes);
+                    std::memcpy(all_vector_data.data() + current_size, vecs.data(), new_bytes);
+                }
+
+                if ((i / batch_sz) % 10 == 0) {
+                    std::cerr << "  embedded " << std::min(end, num_vectors) << "/" << num_vectors << "\r" << std::flush;
+                }
             }
-        }
-        std::cerr << "\n";
-        std::cerr << "✓ Embedding complete: " << num_vectors << " vectors created\n";
+            std::cerr << "\n";
+            std::cerr << "✓ Embedding complete: " << num_vectors << " vectors created\n";
         }
 
         // Build HNSW graph (always in float32, using inner-product on L2-normalised vectors).
@@ -339,10 +346,10 @@ public:
         for (u32 i = 0; i < num_vectors; ++i) {
             std::vector<float> vec(dims);
             if (use_int8) {
-                const i8* src = reinterpret_cast<const i8*>(all_floats.data() + i * dims);
+                const i8* src = reinterpret_cast<const i8*>(all_vector_data.data() + i * dims);
                 dequantise_int8(src, vec.data(), dims, all_scales[i]);
             } else {
-                std::memcpy(vec.data(), all_floats.data() + i * dims, dims * sizeof(float));
+                std::memcpy(vec.data(), all_vector_data.data() + i * dims * sizeof(float), dims * sizeof(float));
             }
             hnsw.addPoint(vec.data(), i);
         }
@@ -407,10 +414,7 @@ public:
 
         // Sec 3: VECTOR_DATA
         {
-            size_t data_bytes = static_cast<size_t>(num_vectors) * dims * (use_int8 ? sizeof(i8) : sizeof(float));
-            std::vector<u8> sec(data_bytes);
-            std::memcpy(sec.data(), all_floats.data(), data_bytes);
-            writer.add_section(SEC_VECTOR_DATA, sec);
+            writer.add_section(SEC_VECTOR_DATA, all_vector_data);
         }
 
         // Sec 4: VECTOR_SCALES (int8 only)
@@ -572,6 +576,9 @@ public:
         size_t k_candidates = topk * 10;
         if (k_candidates > num_vectors)
             k_candidates = num_vectors;
+
+        // Increase ef for better accuracy
+        hnsw.setEf(std::max(u32(k_candidates), u32(100)));
 
         auto knn = hnsw.searchKnn(q_vec.data(), k_candidates);
 

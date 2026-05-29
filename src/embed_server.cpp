@@ -107,37 +107,63 @@ private:
                 cli.set_connection_timeout(5);
                 cli.set_read_timeout(10);
 
-                // First check health
+                // First check health (optional, some servers don't have it)
                 auto health_res = cli.Get("/healthz");
-                if (!health_res || health_res->status != 200) {
-                    throw std::runtime_error("Server not healthy");
-                }
+                bool health_ok = health_res && (health_res->status == 200);
 
                 // Then get model info from /v1/models
                 auto models_res = cli.Get("/v1/models");
-                if (!models_res || models_res->status != 200) {
-                    throw std::runtime_error("Could not fetch model info");
+                if (!models_res || (models_res->status != 200 && !health_ok)) {
+                    throw std::runtime_error("Server not reachable or returned error (health=" + 
+                        (health_res ? std::to_string(health_res->status) : "timeout") + 
+                        ", models=" + (models_res ? std::to_string(models_res->status) : "timeout") + ")");
                 }
 
-                auto jres = nlohmann::json::parse(models_res->body);
-                if (!jres.contains("data") || !jres["data"].is_array() || jres["data"].empty()) {
-                    throw std::runtime_error("Invalid /v1/models response format");
-                }
+                if (models_res && models_res->status == 200) {
+                    auto jres = nlohmann::json::parse(models_res->body);
+                    if (jres.contains("data") && jres["data"].is_array() && !jres["data"].empty()) {
+                        // Find the requested model, or use the first one if model_ is empty
+                        auto it = jres["data"].begin();
+                        if (!model_.empty()) {
+                            for (auto model_it = jres["data"].begin(); model_it != jres["data"].end(); ++model_it) {
+                                if (model_it->contains("id") && (*model_it)["id"].get<std::string>() == model_) {
+                                    it = model_it;
+                                    break;
+                                }
+                            }
+                        }
 
-                auto model_info = jres["data"][0];
-                if (!model_info.contains("dims") || !model_info["dims"].is_number()) {
-                    throw std::runtime_error("/v1/models response missing dims field");
-                }
-
-                dims_ = model_info["dims"].get<u32>();
-                
-                // Validate compatibility if model was specified
-                if (!model_.empty() && model_info.contains("id")) {
-                    std::string server_model = model_info["id"].get<std::string>();
-                    if (server_model != model_) {
-                        std::cerr << "Warning: Requested model '" << model_ << "' but server has '"
-                                  << server_model << "'. Using server model.\n";
+                        auto model_info = *it;
+                        
+                        // Try to get dims if present (directly or in info object)
+                        if (model_info.contains("dims") && model_info["dims"].is_number()) {
+                            dims_ = model_info["dims"].get<u32>();
+                        } else if (model_info.contains("info") && model_info["info"].is_object() &&
+                                   model_info["info"].contains("dims") && model_info["info"]["dims"].is_number()) {
+                            dims_ = model_info["info"]["dims"].get<u32>();
+                        }
+                        
+                        // Set model if empty
+                        if (model_.empty() && model_info.contains("id")) {
+                            model_ = model_info["id"].get<std::string>();
+                        }
                     }
+                }
+
+                // If dims still unknown, perform a test embedding
+                if (dims_ == 0) {
+                    try {
+                        std::vector<float> test_vec = embed_request({"health_probe_test"});
+                        if (!test_vec.empty()) {
+                            dims_ = static_cast<u32>(test_vec.size() / 1); // 1 text
+                        }
+                    } catch (const std::exception& e) {
+                        std::cerr << "Warning: Test embedding failed during probe: " << e.what() << "\n";
+                    }
+                }
+
+                if (dims_ == 0) {
+                    throw std::runtime_error("Could not determine embedding dimensionality");
                 }
 
                 return;  // Success
@@ -153,9 +179,6 @@ private:
                     std::min(static_cast<int>(retry_delay_ms * RETRY_BACKOFF_MULTIPLIER), MAX_RETRY_DELAY_MS);
             }
         }
-
-        throw std::runtime_error("embed server not reachable at " + url_ + " after " + std::to_string(MAX_RETRIES + 1) +
-                                 " attempts");
     }
 
     void negotiate_batch_size() {

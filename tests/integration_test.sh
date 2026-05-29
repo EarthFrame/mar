@@ -1984,6 +1984,48 @@ parse_args() {
     done
 }
 
+test_vector_search() {
+    log_info "=== Indexing and Search: Vector Semantic Search ==="
+
+    local workdir="$TEST_DIR/vector_search"
+    mkdir -p "$workdir"
+    cd "$workdir"
+
+    # 1. Setup data
+    mkdir -p input
+    echo "The capital of France is Paris." > input/france.txt
+    echo "The capital of Germany is Berlin." > input/germany.txt
+    echo "Apples and oranges are fruits." > input/fruit.txt
+    
+    # 2. Create archive
+    run_test "create archive for vector indexing" "$MAR_BIN create -f test.mar input"
+    
+    # 3. Build Vector index
+    # Note: Using mar-embed-server at http://0.0.0.0:7998/v1
+    run_test "index archive (vector)" "$MAR_BIN index -i test.mar --type vector --with url=http://0.0.0.0:7998/v1 --with model=voyageai/voyage-4-nano --with chunk_size=512"
+    assert_file_exists "test.mar.vector.mai" "Vector index file created"
+    
+    # 5. Search semantic query
+    output=$("$MAR_BIN" search -i test.mar --index test.mar.vector.mai "What is the capital of France?" --with url=http://0.0.0.0:7998/v1 --with model=voyageai/voyage-4-nano --with topk=1 2>&1)
+    assert_output_contains "$output" "input/france.txt" "Vector search finds correct document for query"
+    
+    # 6. Search another semantic query
+    output=$("$MAR_BIN" search -i test.mar --index test.mar.vector.mai "Tell me about fruit" --with url=http://0.0.0.0:7998/v1 --with model=voyageai/voyage-4-nano --with topk=1 2>&1)
+    assert_output_contains "$output" "input/fruit.txt" "Vector search finds fruit document"
+
+    # 7. Test int8 quantization
+    run_test "index archive (vector int8)" "$MAR_BIN index -i test.mar --type vector --with url=http://0.0.0.0:7998/v1 --with model=voyageai/voyage-4-nano --with dtype=int8 -o test_int8.mai"
+    assert_file_exists "test_int8.mai" "Int8 vector index file created"
+    
+    output=$("$MAR_BIN" search -i test.mar --index test_int8.mai "Tell me about fruit" --with url=http://0.0.0.0:7998/v1 --with model=voyageai/voyage-4-nano --with topk=1 2>&1)
+    assert_output_contains "$output" "input/fruit.txt" "Int8 vector search finds correct document"
+
+    # 8. Test internal similarity (nearest neighbor to a file)
+    output=$("$MAR_BIN" search -i test.mar --index test.mar.vector.mai --with file=input/france.txt --with topk=2 2>&1)
+    # Should find france.txt itself and then maybe germany.txt (as they are both about capitals)
+    assert_output_contains "$output" "input/france.txt" "Internal similarity search finds self"
+}
+
 main() {
     parse_args "$@"
     
@@ -2074,6 +2116,7 @@ main() {
     test_diff_format_validation
     test_redact_roundtrip
     test_indexing_and_search
+    test_vector_search
     test_random_bit_flips
     
     # Summary
