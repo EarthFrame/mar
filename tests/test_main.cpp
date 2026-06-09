@@ -2210,13 +2210,14 @@ TEST(async_io_kqueue_basic_read) {
 
         // Prepare read buffer
         std::vector<u8> read_buf(512);
-        AsyncIO::Request req{.op = AsyncIO::Op::READ,
-                             .fd = fd,
-                             .buf = read_buf.data(),
-                             .len = read_buf.size(),
-                             .offset = 0,
-                             .user_data = nullptr,
-                             .result = 0};
+        AsyncIO::Request req = {};
+        req.op = AsyncIO::Op::READ;
+        req.fd = fd;
+        req.buf = read_buf.data();
+        req.len = read_buf.size();
+        req.offset = 0;
+        req.user_data = nullptr;
+        req.result = 0;
 
         // Submit read
         if (aio.submit(req)) {
@@ -2264,13 +2265,14 @@ TEST(async_io_kqueue_ssize_t_result_field) {
         AsyncIO aio;
         std::vector<u8> read_buf(2048);
 
-        AsyncIO::Request req{.op = AsyncIO::Op::READ,
-                             .fd = fd,
-                             .buf = read_buf.data(),
-                             .len = read_buf.size(),
-                             .offset = 0,
-                             .user_data = nullptr,
-                             .result = 0};
+        AsyncIO::Request req = {};
+        req.op = AsyncIO::Op::READ;
+        req.fd = fd;
+        req.buf = read_buf.data();
+        req.len = read_buf.size();
+        req.offset = 0;
+        req.user_data = nullptr;
+        req.result = 0;
 
         if (aio.submit(req)) {
             AsyncIO::Request* completed = nullptr;
@@ -2317,13 +2319,14 @@ TEST(async_io_uring_basic_read) {
 
         // Prepare read buffer
         std::vector<u8> read_buf(1024);
-        AsyncIO::Request req{.op = AsyncIO::Op::READ,
-                             .fd = fd,
-                             .buf = read_buf.data(),
-                             .len = read_buf.size(),
-                             .offset = 512,
-                             .user_data = nullptr,
-                             .result = 0};
+        AsyncIO::Request req = {};
+        req.op = AsyncIO::Op::READ;
+        req.fd = fd;
+        req.buf = read_buf.data();
+        req.len = read_buf.size();
+        req.offset = 512;
+        req.user_data = nullptr;
+        req.result = 0;
 
         // Submit and complete
         if (aio.submit(req)) {
