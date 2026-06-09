@@ -173,8 +173,14 @@ static u64 kmer_hash(const char* seq, u32 k, u64 seed, bool canonical) {
 
     // Reverse complement
     std::string rc(k, 'N');
-    static const char comp[256] = {['A'] = 'T', ['T'] = 'A', ['C'] = 'G', ['G'] = 'C', ['a'] = 't',
-                                   ['t'] = 'a', ['c'] = 'g', ['g'] = 'c', ['N'] = 'N', ['n'] = 'n'};
+    static char comp[256] = {0};
+    static bool comp_init = false;
+    if (!comp_init) {
+        comp['A'] = 'T'; comp['T'] = 'A'; comp['C'] = 'G'; comp['G'] = 'C';
+        comp['a'] = 't'; comp['t'] = 'a'; comp['c'] = 'g'; comp['g'] = 'c';
+        comp['N'] = 'N'; comp['n'] = 'n';
+        comp_init = true;
+    }
     for (u32 i = 0; i < k; ++i) rc[k - 1 - i] = comp[(u8)seq[i]];
     mar::xxhash3::XXHash3_64 h2(seed);
     h2.update(reinterpret_cast<const u8*>(rc.data()), k);
