@@ -62,6 +62,15 @@ If you want the exact snippets of code rather than just the file names, use `mod
   --with url=http://0.0.0.0:7998/v1 --with mode=chunks --with topk=2
 ```
 
+**Tip:** When searching archives with few files (e.g., a single text file), `mode=files` returns only one result (the file). Use `mode=chunks` to see multiple matching passages from within that file:
+
+```bash
+# Single-file archive example (Dickens text)
+./mar search -i dickens.mar --index dickens.mar.vector.mai \
+  "Ebenezer Scrooge and Christmas spirits" \
+  --with url=http://0.0.0.0:7998/v1 --with mode=chunks --with topk=10
+```
+
 ### JSON Output
 For integration with other tools or LLM pipelines, use `--format json`.
 
