@@ -265,13 +265,22 @@ private:
                                      std::to_string(texts.size()) + " input texts (mismatch)");
         }
 
-        // Determine dims from first vector if not yet known
-        if (dims_ == 0) {
-            if (data[0].contains("embedding") && data[0]["embedding"].is_array()) {
-                dims_ = static_cast<u32>(data[0]["embedding"].size());
-            } else {
-                throw std::runtime_error("First response item missing or invalid 'embedding' field");
-            }
+        // Determine dims from first vector if not yet known, or update if different
+        // (server may have used a different model during health probe than actual requests)
+        u32 actual_dims = dims_;
+        if (data[0].contains("embedding") && data[0]["embedding"].is_array()) {
+            actual_dims = static_cast<u32>(data[0]["embedding"].size());
+        } else {
+            throw std::runtime_error("First response item missing or invalid 'embedding' field");
+        }
+
+        // If dims were already determined but differ from actual response, update and warn
+        if (dims_ != 0 && dims_ != actual_dims) {
+            std::cerr << "Warning: Embedding dimensions changed from " << dims_ << " to " << actual_dims
+                      << " (model may differ from probe). Updating...\n";
+            dims_ = actual_dims;
+        } else if (dims_ == 0) {
+            dims_ = actual_dims;
         }
 
         // Extract embeddings and validate consistency

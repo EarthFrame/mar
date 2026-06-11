@@ -28,6 +28,67 @@
 #include <unistd.h>
 #include <vector>
 
+namespace {
+// Sanitize invalid UTF-8 sequences by replacing them with '?'.
+// This ensures JSON serialization won't fail on binary-like text data.
+std::string sanitize_utf8(const std::string& input) {
+    std::string output;
+    output.reserve(input.size());
+    size_t i = 0;
+    while (i < input.size()) {
+        unsigned char c = input[i];
+        // Single-byte ASCII (0x00-0x7F)
+        if ((c & 0x80) == 0) {
+            output.push_back(c);
+            ++i;
+        }
+        // Two-byte sequence (0xC2-0xDF followed by 0x80-0xBF)
+        else if ((c & 0xE0) == 0xC0) {
+            if (i + 1 < input.size() && (input[i + 1] & 0xC0) == 0x80) {
+                output.push_back(c);
+                output.push_back(input[i + 1]);
+                i += 2;
+            } else {
+                output.push_back('?');
+                ++i;
+            }
+        }
+        // Three-byte sequence (0xE0-0xEF followed by two 0x80-0xBF)
+        else if ((c & 0xF0) == 0xE0) {
+            if (i + 2 < input.size() && (input[i + 1] & 0xC0) == 0x80 && (input[i + 2] & 0xC0) == 0x80) {
+                output.push_back(c);
+                output.push_back(input[i + 1]);
+                output.push_back(input[i + 2]);
+                i += 3;
+            } else {
+                output.push_back('?');
+                ++i;
+            }
+        }
+        // Four-byte sequence (0xF0-0xF7 followed by three 0x80-0xBF)
+        else if ((c & 0xF8) == 0xF0) {
+            if (i + 3 < input.size() && (input[i + 1] & 0xC0) == 0x80 && (input[i + 2] & 0xC0) == 0x80 &&
+                (input[i + 3] & 0xC0) == 0x80) {
+                output.push_back(c);
+                output.push_back(input[i + 1]);
+                output.push_back(input[i + 2]);
+                output.push_back(input[i + 3]);
+                i += 4;
+            } else {
+                output.push_back('?');
+                ++i;
+            }
+        }
+        // Invalid continuation byte or overlong sequence start
+        else {
+            output.push_back('?');
+            ++i;
+        }
+    }
+    return output;
+}
+}  // namespace
+
 namespace mar {
 
 // ============================================================================
@@ -275,7 +336,8 @@ public:
                 rc.byte_offset = static_cast<u64>(ck.byte_offset);
                 rc.byte_len = static_cast<u32>(ck.byte_len);
                 rc.chunk_idx = ck.idx;
-                rc.text = std::move(ck.text);
+                // Sanitize UTF-8 to prevent JSON serialization errors
+                rc.text = sanitize_utf8(ck.text);
                 raw_chunks.push_back(std::move(rc));
             }
             std::cerr << "  " << name << ": " << data.size() << " bytes → " << cks.size() << " chunks\n";
