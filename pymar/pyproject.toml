@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel", "pybind11>=2.10"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pymar"
+version = "0.1.1"
+description = "Python bindings for the MAR archive format"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "EarthFrame Corporation", email = "info@earthframe.ai"}
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: C++",
+    "Topic :: System :: Archiving",
+]
+dependencies = [
+    "pydantic>=2.0",
+]
+
+[tool.setuptools]
+packages = ["pymar"]
+
+[tool.setuptools.package-data]
+pymar = ["*.so", "*.pyd"]
