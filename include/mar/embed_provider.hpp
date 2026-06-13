@@ -32,6 +32,19 @@ public:
     // All vectors are L2-normalised to unit length.
     // Throws std::runtime_error on failure.
     virtual std::vector<float> embed(const std::vector<std::string>& texts) = 0;
+
+    // Rerank documents based on relevance to a query.
+    // Returns a vector of (index, score) pairs sorted by score (highest first).
+    // Indices refer to the position in the documents vector.
+    // Default implementation returns empty (reranking not supported by this provider).
+    virtual std::vector<std::pair<size_t, float>> rerank(const std::string& query,
+                                                         const std::vector<std::string>& documents,
+                                                         size_t top_n) {
+        (void)query;
+        (void)documents;
+        (void)top_n;
+        return {};
+    }
 };
 
 // Factory: selects implementation based on IndexOptions.
