@@ -310,6 +310,78 @@ private:
 
         return out;
     }
+
+    // Rerank documents using the server's /v1/rerank endpoint (Cohere-compatible format)
+    std::vector<std::pair<size_t, float>> rerank(const std::string& query,
+                                                  const std::vector<std::string>& documents,
+                                                  size_t top_n) override {
+        if (documents.empty()) {
+            return {};
+        }
+        if (top_n == 0 || top_n > documents.size()) {
+            top_n = documents.size();
+        }
+
+        int retry_delay_ms = INITIAL_RETRY_DELAY_MS;
+
+        for (int attempt = 0; attempt <= MAX_RETRIES; ++attempt) {
+            try {
+                nlohmann::json body;
+                body["query"] = query;
+                body["documents"] = documents;
+                body["top_n"] = top_n;
+
+                httplib::Client cli(host_, port_);
+                cli.set_connection_timeout(10);
+                cli.set_read_timeout(60);
+
+                auto res = cli.Post("/v1/rerank", body.dump(), "application/json");
+
+                if (!res) {
+                    throw std::runtime_error("rerank server connection failed");
+                }
+
+                if (res->status != 200) {
+                    throw std::runtime_error("rerank server returned HTTP " + std::to_string(res->status) + ": " + res->body);
+                }
+
+                auto j = nlohmann::json::parse(res->body);
+
+                // Validate response structure
+                if (!j.contains("results") || !j["results"].is_array()) {
+                    throw std::runtime_error("Invalid rerank response: missing or non-array 'results' field");
+                }
+
+                const auto& results = j["results"];
+                std::vector<std::pair<size_t, float>> reranked;
+                reranked.reserve(results.size());
+
+                for (const auto& r : results) {
+                    if (!r.contains("index") || !r.contains("relevance_score")) {
+                        continue;
+                    }
+                    size_t idx = r["index"].get<size_t>();
+                    float score = r["relevance_score"].get<float>();
+                    reranked.push_back({idx, score});
+                }
+
+                return reranked;
+
+            } catch (const std::exception& e) {
+                if (attempt == MAX_RETRIES) {
+                    std::cerr << "Warning: Reranking failed after " << (MAX_RETRIES + 1) << " attempts: " << e.what() << "\n";
+                    std::cerr << "         Falling back to vector similarity scores.\n";
+                    return {};  // Return empty to signal fallback
+                }
+                std::cerr << "Warning: Rerank attempt " << (attempt + 1) << " failed: " << e.what()
+                          << ", retrying in " << retry_delay_ms << "ms...\n";
+                std::this_thread::sleep_for(std::chrono::milliseconds(retry_delay_ms));
+                retry_delay_ms = std::min(static_cast<int>(retry_delay_ms * RETRY_BACKOFF_MULTIPLIER), MAX_RETRY_DELAY_MS);
+            }
+        }
+
+        return {};  // Fallback
+    }
 };
 
 // ============================================================================
