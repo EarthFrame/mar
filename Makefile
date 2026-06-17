@@ -314,6 +314,11 @@ ifneq ($(ZLIB_FOUND),yes)
     ifeq ($(LIBDEFLATE_FOUND),)
         LDFLAGS += -lz
     endif
+else
+    # On macOS, pkg-config might find zlib but we still need to link it
+    ifeq ($(UNAME_S),Darwin)
+        LDFLAGS += -lz
+    endif
 endif
 
 # Phony targets
