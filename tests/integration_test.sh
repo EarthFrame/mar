@@ -2000,6 +2000,13 @@ test_vector_search() {
     # 2. Create archive
     run_test "create archive for vector indexing" "$MAR_BIN create -f test.mar input"
     
+    # Check if we can reach the embed server
+    if ! curl -s --connect-timeout 2 http://0.0.0.0:7998/v1/models >/dev/null; then
+        log_warn "Vector search tests skipped: embed server not reachable at http://0.0.0.0:7998"
+        TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
+        return 0
+    fi
+
     # 3. Build Vector index
     # Note: Using mar-embed-server at http://0.0.0.0:7998/v1
     run_test "index archive (vector)" "$MAR_BIN index -i test.mar --type vector --with url=http://0.0.0.0:7998/v1 --with model=voyageai/voyage-4-nano --with chunk_size=512"

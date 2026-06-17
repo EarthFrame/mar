@@ -2756,6 +2756,54 @@ TEST(vector_index_large_archive) {
     fs::remove_all(temp_dir);
 }
 
+TEST(vector_index_build_no_server) {
+    // Test that vector indexing fails gracefully when no server is available
+    auto temp_dir = fs::temp_directory_path() / "mar_vector_no_server_test";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    auto archive_path = temp_dir / "test.mar";
+    auto data_dir = temp_dir / "data";
+    fs::create_directories(data_dir);
+
+    try {
+        std::ofstream f(data_dir / "test.txt");
+        f << "Some test content for vector indexing.\n";
+        f.close();
+
+        {
+            MarWriter writer(archive_path.string());
+            writer.add_directory(data_dir.string());
+            writer.finish();
+        }
+
+        MarReader reader(archive_path.string());
+        auto indexer = IndexRegistry::instance().get_indexer("vector");
+        ASSERT(indexer != nullptr);
+
+        MAIWriter writer(archive_path.string(), MAIIndexType::Vector, 0x1234);
+        IndexOptions opts;
+        opts.params["url"] = "http://localhost:12345"; // Port that likely has no server
+
+        // This should throw because the server is not reachable
+        bool threw = false;
+        try {
+            indexer->build(reader, writer, opts);
+        } catch (const std::exception& e) {
+            threw = true;
+            std::string msg = e.what();
+            ASSERT(msg.find("Failed to probe embed server") != std::string::npos || 
+                   msg.find("Server provider requires") != std::string::npos);
+        }
+        ASSERT(threw);
+
+    } catch (...) {
+        fs::remove_all(temp_dir);
+        throw;
+    }
+    fs::remove_all(temp_dir);
+}
+
 TEST(embed_provider_missing_url) {
     // Test that embed provider system exists and is configured
     // (Can't test directly without accessing internal functions)
