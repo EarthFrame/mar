@@ -272,19 +272,21 @@ ifeq ($(UNAME_S),Darwin)
     
     # On macOS, if STATIC=1, we try to prefer .a files if they exist
     ifeq ($(STATIC),1)
-        # This is a bit of a hack but helps on macOS where -static isn't supported
-        # We replace -l<lib> with the full path to the .a file if it exists in Homebrew
-        LDFLAGS := $(subst -lzstd,$(wildcard $(HOMEBREW_PREFIX)/lib/libzstd.a),$(LDFLAGS))
-        LDFLAGS := $(subst -llz4,$(wildcard $(HOMEBREW_PREFIX)/lib/liblz4.a),$(LDFLAGS))
-        LDFLAGS := $(subst -lz,$(wildcard $(HOMEBREW_PREFIX)/lib/libz.a $(HOMEBREW_PREFIX)/opt/zlib/lib/libz.a),$(LDFLAGS))
-        LDFLAGS := $(subst -lbz2,$(wildcard $(HOMEBREW_PREFIX)/lib/libbz2.a),$(LDFLAGS))
-        LDFLAGS := $(subst -ldeflate,$(wildcard $(HOMEBREW_PREFIX)/lib/libdeflate.a),$(LDFLAGS))
+        # Helper function to find a static lib or fall back to the dynamic flag
+        # Usage: $(call find_static,libname,flag)
+        find_static = $(if $(wildcard $(HOMEBREW_PREFIX)/lib/$(1).a),$(HOMEBREW_PREFIX)/lib/$(1).a,$(2))
+
+        LDFLAGS := $(subst -lzstd,$(call find_static,libzstd,-lzstd),$(LDFLAGS))
+        LDFLAGS := $(subst -llz4,$(call find_static,liblz4,-llz4),$(LDFLAGS))
+        LDFLAGS := $(subst -lz,$(call find_static,libz,-lz),$(LDFLAGS))
+        LDFLAGS := $(subst -lbz2,$(call find_static,libbz2,-lbz2),$(LDFLAGS))
+        LDFLAGS := $(subst -ldeflate,$(call find_static,libdeflate,-ldeflate),$(LDFLAGS))
         
-        # Prefer local BLAKE3 static library if it exists
+        # Prefer local BLAKE3 static library if it exists, otherwise check Homebrew
         ifneq ($(wildcard $(LOCAL_BLAKE3_LIB)),)
             LDFLAGS := $(subst -lblake3,$(LOCAL_BLAKE3_LIB),$(LDFLAGS))
         else
-            LDFLAGS := $(subst -lblake3,$(wildcard $(HOMEBREW_PREFIX)/lib/libblake3.a),$(LDFLAGS))
+            LDFLAGS := $(subst -lblake3,$(call find_static,libblake3,-lblake3),$(LDFLAGS))
         endif
     endif
 
