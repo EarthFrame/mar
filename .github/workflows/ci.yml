@@ -247,9 +247,6 @@ jobs:
           - os: macos-latest
             os-label: macOS ARM64
             artifact-name: mar-macos-arm64
-          - os: macos-13
-            os-label: macOS x86_64
-            artifact-name: mar-macos-x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
