@@ -18,9 +18,9 @@ namespace mar {
 
 struct FixedHeader {
     u32 magic_number = MAGIC_NUMBER;
-    u8 version_major = VERSION_MAJOR;
-    u8 version_minor = VERSION_MINOR;
-    u8 version_patch = VERSION_PATCH;
+    u8 version_major = MAR_SPEC_MAJOR;
+    u8 version_minor = MAR_SPEC_MINOR;
+    u8 version_patch = MAR_SPEC_PATCH;
     u8 header_align_log2 = DEFAULT_ALIGN_LOG2;
     u64 header_size_bytes = FIXED_HEADER_SIZE;
     u64 meta_offset = FIXED_HEADER_SIZE;

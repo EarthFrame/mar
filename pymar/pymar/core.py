@@ -180,8 +180,16 @@ def index_archive(archive_path: str, index_type: str, output_path: Optional[str]
     return output_path
 
 def get_version() -> str:
-    """Get MAR version."""
-    return _mar.VERSION
+    """Get MAR tool version."""
+    return _mar.TOOL_VERSION
+
+def get_spec_version() -> str:
+    """Get MAR specification version."""
+    return _mar.SPEC_VERSION
+
+def get_tool_version() -> str:
+    """Get MAR tool version."""
+    return _mar.TOOL_VERSION
 
 def get_hash(path: str, algo: str = "xxhash64") -> str:
     """Compute archive hash."""

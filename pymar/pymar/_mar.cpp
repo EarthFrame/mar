@@ -54,6 +54,7 @@ PYBIND11_MODULE(_mar, m) {
         .value("GENOMIC", MAIIndexType::Genomic)
         .value("EMAIL", MAIIndexType::Email)
         .value("TIMESERIES", MAIIndexType::TimeSeries)
+        .value("BM25", MAIIndexType::BM25)
         .export_values();
 
     py::class_<Indexer>(m, "Indexer")
@@ -194,8 +195,9 @@ PYBIND11_MODULE(_mar, m) {
     });
 
     // Version
-    m.attr("VERSION") = std::to_string(VERSION_MAJOR) + "." + std::to_string(VERSION_MINOR) + "." + std::to_string(VERSION_PATCH);
+    m.attr("SPEC_VERSION") = std::to_string(MAR_SPEC_MAJOR) + "." + std::to_string(MAR_SPEC_MINOR) + "." + std::to_string(MAR_SPEC_PATCH);
     m.attr("TOOL_VERSION") = std::to_string(TOOL_VERSION_MAJOR) + "." + std::to_string(TOOL_VERSION_MINOR) + "." + std::to_string(TOOL_VERSION_PATCH);
+    m.attr("VERSION") = m.attr("SPEC_VERSION");
 
     // Hashing
     m.def("hash_file", [](const std::string& path, const std::string& algo) {

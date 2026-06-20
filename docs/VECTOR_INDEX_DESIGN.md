@@ -17,6 +17,12 @@ This document outlines the design for a flexible, extensible embedding architect
 
 ---
 
+## On-Disk Format
+
+The Vector index is stored as a sidecar `.mai` file. For detailed information on the internal structure of the Vector and BM25 indices, see [INDEX_FORMATS.md](INDEX_FORMATS.md).
+
+---
+
 ## Current Architecture
 
 ### Provider Abstraction Layer
