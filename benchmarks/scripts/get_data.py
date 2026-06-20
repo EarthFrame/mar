@@ -50,6 +50,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_BASE_URL = "https://public.earthframe.com/mar-benchmark-data"
 CACHE_FILE = REPO_ROOT / "benchmarks" / ".data_cache.json"
 
+# Default User-Agent required by Cloudflare-protected CDN
+DEFAULT_USER_AGENT = "mar-benchmark/1.0 (python-urllib)"
+
 
 def eprint(msg: str) -> None:
     """Print to stderr."""
@@ -203,7 +206,7 @@ def is_ready(cache: dict, dataset_key: str, data_dir: Path, spec: DatasetSpec) -
 
 
 
-def download(url: str, dest: Path, force: bool) -> None:
+def download(url: str, dest: Path, force: bool, user_agent: str = DEFAULT_USER_AGENT) -> None:
     """Download a file from url to dest, with progress bar."""
     dest.parent.mkdir(parents=True, exist_ok=True)
 
@@ -220,8 +223,11 @@ def download(url: str, dest: Path, force: bool) -> None:
     done = 0
     last_update = 0.0
 
+    # Create request with User-Agent header (required by Cloudflare-protected CDN)
+    req = urllib.request.Request(url, headers={"User-Agent": user_agent})
+
     try:
-        with urllib.request.urlopen(url) as r, open(tmp, "wb") as f:
+        with urllib.request.urlopen(req) as r, open(tmp, "wb") as f:
             total = None
             try:
                 total = int(r.headers.get("Content-Length", "0")) or None

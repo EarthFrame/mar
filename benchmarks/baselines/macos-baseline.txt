@@ -1,0 +1,5 @@
+# Performance Baselines for macOS
+# Format: OP=TIME_IN_MS
+CREATE=1200
+VALIDATE=600
+EXTRACT=1000

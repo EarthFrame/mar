@@ -36,7 +36,7 @@ std::string get_tool_version() {
 
 // Build MAR format version string from constants
 std::string get_mar_version() {
-    return std::to_string(VERSION_MAJOR) + "." + std::to_string(VERSION_MINOR) + "." + std::to_string(VERSION_PATCH);
+    return std::to_string(MAR_SPEC_MAJOR) + "." + std::to_string(MAR_SPEC_MINOR) + "." + std::to_string(MAR_SPEC_PATCH);
 }
 
 // Exit codes per spec
