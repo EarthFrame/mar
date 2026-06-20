@@ -1,0 +1,13 @@
+mar (0.2.0-1) unstable; urgency=low
+
+  * Update tool version to 0.2.0.
+  * Major updates to vector indexing and documentation.
+  * Separate specification version from tool version.
+
+ -- Eric T. Dawson Sat, 20 Jun 2026 12:00:00 +0000
+
+mar (0.1.1-1) unstable; urgency=low
+
+  * Initial release.
+
+ -- Eric T. Dawson Mon, 02 Feb 2026 12:00:00 +0000

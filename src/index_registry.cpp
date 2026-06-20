@@ -44,46 +44,70 @@ void MAIWriter::write_to_file(const std::string& path, u8 align_log2) {
 
     // 1. Write Fixed Header
     out.write(reinterpret_cast<const char*>(&header_), sizeof(header_));
+    if (!out) throw std::runtime_error("Failed to write header to: " + path);
 
     // 2. Write Archive Name
     out.write(archive_name_.c_str(), archive_name_.length());
+    if (!out) throw std::runtime_error("Failed to write archive name to: " + path);
 
     // 3. Write Section Directory
     u32 section_count = static_cast<u32>(sections_.size());
     out.write(reinterpret_cast<const char*>(&section_count), sizeof(section_count));
+    if (!out) throw std::runtime_error("Failed to write section count to: " + path);
 
     u64 dir_pos = out.tellp();
+    if (dir_pos == static_cast<u64>(-1))
+        throw std::runtime_error("Failed to get file position for directory");
+
     // Placeholder for directory
     for (size_t i = 0; i < sections_.size(); ++i) {
         MAISection dummy = {0, 0, 0, 0};
         out.write(reinterpret_cast<const char*>(&dummy), sizeof(dummy));
+        if (!out) throw std::runtime_error("Failed to write directory placeholder");
     }
 
     // 4. Align and Write Sections
     u64 current_offset = out.tellp();
+    if (current_offset == static_cast<u64>(-1))
+        throw std::runtime_error("Failed to get file position for sections");
+
     for (auto& pair : sections_) {
         if (align_log2) {
             u64 padding = (alignment - (current_offset % alignment)) % alignment;
             if (padding) {
                 std::vector<u8> pad(padding, 0);
                 out.write(reinterpret_cast<const char*>(pad.data()), padding);
+                if (!out) throw std::runtime_error("Failed to write padding");
                 current_offset += padding;
             }
         }
         pair.first.offset = current_offset;
         out.write(reinterpret_cast<const char*>(pair.second.data()), pair.second.size());
+        if (!out) throw std::runtime_error("Failed to write section data (disk full?)");
         current_offset += pair.second.size();
     }
 
     // 5. Update Header and Directory
     header_.index_data_offset = sections_.empty() ? 0 : sections_[0].first.offset;
     out.seekp(0);
+    if (!out) throw std::runtime_error("Failed to seek to header for update");
     out.write(reinterpret_cast<const char*>(&header_), sizeof(header_));
+    if (!out) throw std::runtime_error("Failed to update header");
 
     out.seekp(dir_pos);
+    if (!out) throw std::runtime_error("Failed to seek to directory for update");
     for (const auto& pair : sections_) {
         out.write(reinterpret_cast<const char*>(&pair.first), sizeof(pair.first));
+        if (!out) throw std::runtime_error("Failed to update directory entry");
     }
+
+    // Ensure all data is flushed to disk
+    out.flush();
+    if (!out) throw std::runtime_error("Failed to flush data to disk (disk full?)");
+
+    // Explicitly close and check for errors
+    out.close();
+    if (!out) throw std::runtime_error("Failed to close output file (data may be lost)");
 }
 
 // ============================================================================

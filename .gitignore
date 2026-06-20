@@ -3,12 +3,20 @@ benchmarks/results.csv
 benchmarks/visuals/
 benchmarks/scratch_*/
 
-build/
-mar
-test_mar
-test_nar
+# Build artifacts
+/build/
+/mar
+/test_mar
+/test_nar
+/dist/
+*.so
+*.a
+*.o
 .perf/
 casp15/
+
+# Specifically include include/mar
+!include/mar/
 
 # Archives
 *.mar
@@ -22,6 +30,9 @@ casp15/
 
 
 **/*.DS_Store
+
+# LLM Status Archive
+/llm_status_archive/
 
 deps/BLAKE3/c/CMakeCache.txt
 deps/BLAKE3/c/CMakeFiles/

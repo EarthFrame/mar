@@ -83,7 +83,7 @@ void FixedHeader::validate() const {
     if (magic_number != MAGIC_NUMBER) {
         throw InvalidArchiveError("Invalid magic number");
     }
-    if (version_major != VERSION_MAJOR) {
+    if (version_major != MAR_SPEC_MAJOR) {
         throw InvalidArchiveError("Unsupported major version: " + std::to_string(version_major));
     }
     if (header_size_bytes < FIXED_HEADER_SIZE) {

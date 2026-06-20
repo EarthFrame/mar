@@ -2,11 +2,16 @@
 # Implements MAR format specification v0.1.0
 
 # Versioning
-VERSION_MAJOR ?= 0
-VERSION_MINOR ?= 1
-VERSION_PATCH ?= 1
+MAR_SPEC_MAJOR ?= 0
+MAR_SPEC_MINOR ?= 1
+MAR_SPEC_PATCH ?= 1
+
+TOOL_VERSION_MAJOR ?= 0
+TOOL_VERSION_MINOR ?= 2
+TOOL_VERSION_PATCH ?= 0
 VERSION_RELEASE ?= 1
-VERSION = $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH)
+
+VERSION = $(TOOL_VERSION_MAJOR).$(TOOL_VERSION_MINOR).$(TOOL_VERSION_PATCH)
 PKG_VERSION = $(VERSION)-$(VERSION_RELEASE)
 
 # Installation paths
@@ -92,7 +97,8 @@ SRCS = src/format.cpp src/checksum.cpp src/compression.cpp src/compression_gzip.
        src/compression_zstd.cpp src/compression_lz4.cpp src/compression_bzip2.cpp \
        src/sections.cpp src/name_index.cpp src/reader.cpp src/writer.cpp \
        src/file_descriptor_manager.cpp src/async_io.cpp src/thread_pool.cpp src/redact.cpp src/diff.cpp \
-       src/index_registry.cpp src/index_minhash.cpp 
+       src/index_registry.cpp src/index_minhash.cpp src/index_vector.cpp src/index_bm25.cpp src/index_genomic.cpp \
+       src/index_email.cpp src/index_timeseries.cpp src/embed_server.cpp 
 MAIN_SRC = src/main.cpp
 TEST_SRC = tests/test_main.cpp
 
@@ -131,8 +137,6 @@ ifeq ($(STATIC),1)
         LDFLAGS += -static -static-libgcc -static-libstdc++
     endif
 endif
-
-CXXFLAGS += -DMAR_VERSION_MAJOR=$(VERSION_MAJOR) -DMAR_VERSION_MINOR=$(VERSION_MINOR) -DMAR_VERSION_PATCH=$(VERSION_PATCH)
 
 # -----------------------------------------------------------------------------
 # Build-mode specific flags
@@ -271,19 +275,21 @@ ifeq ($(UNAME_S),Darwin)
     
     # On macOS, if STATIC=1, we try to prefer .a files if they exist
     ifeq ($(STATIC),1)
-        # This is a bit of a hack but helps on macOS where -static isn't supported
-        # We replace -l<lib> with the full path to the .a file if it exists in Homebrew
-        LDFLAGS := $(subst -lzstd,$(wildcard $(HOMEBREW_PREFIX)/lib/libzstd.a),$(LDFLAGS))
-        LDFLAGS := $(subst -llz4,$(wildcard $(HOMEBREW_PREFIX)/lib/liblz4.a),$(LDFLAGS))
-        LDFLAGS := $(subst -lz,$(wildcard $(HOMEBREW_PREFIX)/lib/libz.a $(HOMEBREW_PREFIX)/opt/zlib/lib/libz.a),$(LDFLAGS))
-        LDFLAGS := $(subst -lbz2,$(wildcard $(HOMEBREW_PREFIX)/lib/libbz2.a),$(LDFLAGS))
-        LDFLAGS := $(subst -ldeflate,$(wildcard $(HOMEBREW_PREFIX)/lib/libdeflate.a),$(LDFLAGS))
+        # Helper function to find a static lib or fall back to the dynamic flag
+        # Usage: $(call find_static,libname,flag)
+        find_static = $(if $(wildcard $(HOMEBREW_PREFIX)/lib/$(1).a),$(HOMEBREW_PREFIX)/lib/$(1).a,$(2))
+
+        LDFLAGS := $(subst -lzstd,$(call find_static,libzstd,-lzstd),$(LDFLAGS))
+        LDFLAGS := $(subst -llz4,$(call find_static,liblz4,-llz4),$(LDFLAGS))
+        LDFLAGS := $(subst -lz,$(call find_static,libz,-lz),$(LDFLAGS))
+        LDFLAGS := $(subst -lbz2,$(call find_static,libbz2,-lbz2),$(LDFLAGS))
+        LDFLAGS := $(subst -ldeflate,$(call find_static,libdeflate,-ldeflate),$(LDFLAGS))
         
-        # Prefer local BLAKE3 static library if it exists
+        # Prefer local BLAKE3 static library if it exists, otherwise check Homebrew
         ifneq ($(wildcard $(LOCAL_BLAKE3_LIB)),)
             LDFLAGS := $(subst -lblake3,$(LOCAL_BLAKE3_LIB),$(LDFLAGS))
         else
-            LDFLAGS := $(subst -lblake3,$(wildcard $(HOMEBREW_PREFIX)/lib/libblake3.a),$(LDFLAGS))
+            LDFLAGS := $(subst -lblake3,$(call find_static,libblake3,-lblake3),$(LDFLAGS))
         endif
     endif
 
@@ -311,6 +317,11 @@ LDFLAGS := $(shell echo "$(LDFLAGS)" | tr ' ' '\n' | awk '!a[$$0]++' | tr '\n' '
 # Link zlib if not already handled by pkg-config or libdeflate
 ifneq ($(ZLIB_FOUND),yes)
     ifeq ($(LIBDEFLATE_FOUND),)
+        LDFLAGS += -lz
+    endif
+else
+    # On macOS, pkg-config might find zlib but we still need to link it
+    ifeq ($(UNAME_S),Darwin)
         LDFLAGS += -lz
     endif
 endif
