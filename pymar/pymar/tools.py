@@ -1,5 +1,16 @@
 from typing import List, Optional, Dict
-from .core import MarArchive, create_archive, index_archive, get_hash, get_version, SearchResult, FileInfo, HeaderInfo
+from .core import (
+    MarArchive,
+    create_archive,
+    index_archive,
+    get_hash,
+    get_version,
+    get_spec_version,
+    get_tool_version,
+    SearchResult,
+    FileInfo,
+    HeaderInfo
+)
 
 def mar_create(path: str, files: List[str], compression: str = "zstd") -> str:
     """
@@ -121,9 +132,27 @@ def mar_header(path: str) -> Dict:
 
 def mar_version() -> str:
     """
-    Get the version of the MAR tool and format.
+    Get the version of the MAR tool.
     
     Returns:
         Version string.
     """
-    return get_version()
+    return get_tool_version()
+
+def mar_spec_version() -> str:
+    """
+    Get the version of the MAR format specification.
+    
+    Returns:
+        Version string.
+    """
+    return get_spec_version()
+
+def mar_tool_version() -> str:
+    """
+    Get the version of the MAR tool.
+    
+    Returns:
+        Version string.
+    """
+    return get_tool_version()

@@ -335,7 +335,7 @@ struct InvertedIndex {
 class BM25Indexer : public Indexer {
 public:
     const char* type_name() const override { return "bm25"; }
-    MAIIndexType index_type() const override { return MAIIndexType::Generic; }
+    MAIIndexType index_type() const override { return MAIIndexType::BM25; }
 
     void build(const MarReader& reader, MAIWriter& writer, const IndexOptions& opts) override {
         const float k1 = std::stof(opts.get("bm25_k1", "1.2"));

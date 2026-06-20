@@ -2,11 +2,16 @@
 # Implements MAR format specification v0.1.0
 
 # Versioning
-VERSION_MAJOR ?= 0
-VERSION_MINOR ?= 1
-VERSION_PATCH ?= 1
+MAR_SPEC_MAJOR ?= 0
+MAR_SPEC_MINOR ?= 1
+MAR_SPEC_PATCH ?= 1
+
+TOOL_VERSION_MAJOR ?= 0
+TOOL_VERSION_MINOR ?= 1
+TOOL_VERSION_PATCH ?= 1
 VERSION_RELEASE ?= 1
-VERSION = $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH)
+
+VERSION = $(TOOL_VERSION_MAJOR).$(TOOL_VERSION_MINOR).$(TOOL_VERSION_PATCH)
 PKG_VERSION = $(VERSION)-$(VERSION_RELEASE)
 
 # Installation paths
@@ -132,8 +137,6 @@ ifeq ($(STATIC),1)
         LDFLAGS += -static -static-libgcc -static-libstdc++
     endif
 endif
-
-CXXFLAGS += -DMAR_VERSION_MAJOR=$(VERSION_MAJOR) -DMAR_VERSION_MINOR=$(VERSION_MINOR) -DMAR_VERSION_PATCH=$(VERSION_PATCH)
 
 # -----------------------------------------------------------------------------
 # Build-mode specific flags
