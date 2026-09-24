@@ -2,6 +2,14 @@
 
 MAR sidecar indices (`.mai` files) augment an archive with fast search capabilities without modifying the archive itself. Each index type is built once and searched many times.
 
+## OKF knowledge bundles
+
+For [Open Knowledge Format](../../okf/SPEC.md) bundles — pack, validate, lint, and inspect concepts inside a `.mar` archive — see the dedicated [OKF tutorial](okf.md).
+
+## Molecular ML & Boltz-2 (`mols.tar`)
+
+For converting, caching, streaming, and querying Boltz-2 / CCD molecular datasets (`mols.tar` → `mols.mar`) with zero-extraction conversion and PyTorch `DataLoader` integration, see the dedicated [Boltz-2 tutorial](boltz2.md).
+
 ## Quick reference
 
 | Index type | What it does | When to use it |

@@ -1,0 +1,39 @@
+[package]
+name = "mar-core"
+version = "0.2.0"
+edition = "2021"
+authors = ["EarthFrame Corporation <info@earthframe.ai>"]
+description = "High-performance pure Rust engine and CLI for the MAR archive format"
+license = "MIT"
+
+[lib]
+name = "mar_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mar"
+path = "src/bin/main.rs"
+
+[[bin]]
+name = "mar-bench-rust"
+path = "src/bin/bench.rs"
+
+[dependencies]
+zstd = "0.13"
+lz4_flex = "0.11"
+flate2 = "1.0"
+bzip2 = "0.4"
+crc32fast = "1.4"
+blake3 = { version = "1.5", features = ["rayon"] }
+twox-hash = "1.6"
+memmap2 = "0.9"
+parking_lot = "0.12"
+rayon = "1.10"
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+io-uring = { version = "0.7", optional = true }
+
+[features]
+default = []
+io_uring = ["dep:io-uring"]

@@ -4,41 +4,45 @@
 
 ```
 mar/
-├── include/mar/          # Public headers (always tracked)
-│   ├── *.hpp            # C++ headers (31 files)
-│   ├── xxhash3.h        # Third-party hash implementation
-│   └── types.hpp        # Common type definitions
+├── cpp/                  # C++ reference implementation
+│   ├── include/mar/      # Public headers (31 files)
+│   ├── src/              # Core implementation (20+ files)
+│   └── tests/            # C++ test suite (test_main.cpp)
 │
-├── src/                 # Implementation files
-│   ├── *.cpp            # Core implementation (20+ files)
-│   ├── embed_server.cpp # Vector embedding HTTP client
-│   └── index_*.cpp      # Index type implementations
+├── rust/                 # Pure Rust MAR engine & native CLI
+│   ├── Cargo.toml        # mar-core crate definition
+│   ├── src/lib.rs        # mar_core library
+│   ├── src/              # Reader, writer, codecs, indices, diff, redact
+│   └── src/bin/          # CLI executable (mar) and benchmark (mar-bench-rust)
 │
-├── tests/               # Test files
-│   ├── test_main.cpp    # Comprehensive test suite (101 tests)
-│   └── integration_test.sh
+├── python/               # Python bindings & package (pymar)
+│   ├── Cargo.toml        # PyO3 native module (_mar)
+│   ├── pyproject.toml    # Maturin configuration
+│   ├── src/              # PyO3 FFI bridge
+│   ├── pymar/            # Python package (core, remote, tar, torch)
+│   └── tests/            # pytest test suite
 │
-├── deps/                # Vendored dependencies (tracked)
-│   ├── httplib.h        # HTTP client library
-│   ├── nlohmann/        # JSON library
-│   ├── hnswlib/         # HNSW indexing
-│   ├── simde/           # SIMD emulation
-│   └── BLAKE3/          # Hash algorithm
+├── include/mar/          # Root C++ header path
+├── src/                  # Root C++ implementation files
+├── tests/                # Test suites & cross-implementation integration tests
+│   ├── test_main.cpp     # C++ unit tests
+│   └── integration_test.sh # Comprehensive 400+ CLI test suite
 │
-├── scripts/             # Build and utility scripts
-│   ├── lint_filter.py   # Linting output parser
-│   └── perf_check.sh    # Performance benchmarking
+├── deps/                 # Vendored C++ dependencies (tracked)
+│   ├── httplib.h         # HTTP client library
+│   ├── nlohmann/         # JSON library
+│   ├── hnswlib/          # HNSW indexing
+│   ├── simde/            # SIMD emulation
+│   └── BLAKE3/           # Hash algorithm
 │
-├── docs/                # Documentation
-│   ├── VECTOR_INDEX_USAGE_GUIDE.md
-│   ├── EMBEDDING_PROVIDERS.md
-│   ├── VECTOR_INDEX_DESIGN.md
-│   └── *.md
+├── benchmarks/           # Unified benchmarking suite
+│   ├── scripts/          # Head-to-head scripts & data generators
+│   └── configs/          # Benchmark configurations
 │
-└── mar-embed/           # Separate embedding server repo
-    ├── mar_embed/       # Python package
-    ├── server.py        # FastAPI server
-    └── cli.py           # CLI tools
+├── scripts/              # Build and utility scripts
+├── docs/                 # Documentation & tutorials
+├── Cargo.toml            # Root Cargo workspace orchestrator
+└── Makefile              # Root build orchestrator (make cpp, make rust, make python)
 ```
 
 ## Tracking Policy
