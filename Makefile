@@ -98,7 +98,10 @@ SRCS = src/format.cpp src/checksum.cpp src/compression.cpp src/compression_gzip.
        src/sections.cpp src/name_index.cpp src/reader.cpp src/writer.cpp \
        src/file_descriptor_manager.cpp src/async_io.cpp src/thread_pool.cpp src/redact.cpp src/diff.cpp \
        src/index_registry.cpp src/index_minhash.cpp src/index_vector.cpp src/index_bm25.cpp src/index_genomic.cpp \
-       src/index_email.cpp src/index_timeseries.cpp src/embed_server.cpp 
+       src/index_email.cpp src/index_timeseries.cpp src/embed_server.cpp \
+       src/okf_yaml.cpp src/okf_document.cpp src/okf_links.cpp src/okf_bundle.cpp src/okf_validate.cpp \
+       src/okf_cache.cpp src/okf_computation.cpp src/okf_lint.cpp src/okf_diff.cpp src/okf_index_gen.cpp \
+       src/okf_cli.cpp
 MAIN_SRC = src/main.cpp
 TEST_SRC = tests/test_main.cpp
 
@@ -328,7 +331,7 @@ endif
 
 # Phony targets
 .PHONY: all clean test install check-deps check-dev-deps drop-cache static release \
-        deps debug system-deps dev-deps lint lint-fix format \
+        deps debug system-deps dev-deps lint lint-fix format mar-rust cpp rust python test-all \
         dist-linux-x86_64 \
 		dist-linux-x86_64-sse42 \
 		dist-linux-x86_64-avx2 \
@@ -363,6 +366,52 @@ $(LOCAL_LIBDEFLATE_LIB):
 	@mkdir -p $(LOCAL_LIBDEFLATE_DIR)/build
 	@cd $(LOCAL_LIBDEFLATE_DIR)/build && cmake .. -DLIBDEFLATE_BUILD_SHARED_LIB=OFF && make
 	@cp $(LOCAL_LIBDEFLATE_DIR)/build/libdeflate.a $(LOCAL_LIBDEFLATE_LIB)
+
+cpp: $(TARGET)
+
+rust: mar-rust
+
+mar-rust:
+	@echo "Building pure Rust CLI (mar-rust)..."
+	@cargo build --release --manifest-path rust/Cargo.toml --bin mar
+	@TARGET_DIR=$$(cargo metadata --format-version 1 --manifest-path rust/Cargo.toml | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p'); \
+	if [ -f "$$TARGET_DIR/release/mar" ]; then \
+		cp "$$TARGET_DIR/release/mar" ./mar-rust; \
+	elif [ -f rust/target/release/mar ]; then \
+		cp rust/target/release/mar ./mar-rust; \
+	elif [ -n "$$CARGO_TARGET_DIR" ] && [ -f "$$CARGO_TARGET_DIR/release/mar" ]; then \
+		cp "$$CARGO_TARGET_DIR/release/mar" ./mar-rust; \
+	fi
+	@echo "mar-rust built successfully: ./mar-rust"
+
+python:
+	@echo "Building Python extension (_mar)..."
+	@cargo build --release --manifest-path python/Cargo.toml
+	@TARGET_DIR=$$(cargo metadata --format-version 1 --manifest-path python/Cargo.toml | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p'); \
+	DYLIB_PATH=""; \
+	if [ -f "$$TARGET_DIR/release/lib_mar.dylib" ]; then \
+		DYLIB_PATH="$$TARGET_DIR/release/lib_mar.dylib"; \
+	elif [ -f "$$TARGET_DIR/release/lib_mar.so" ]; then \
+		DYLIB_PATH="$$TARGET_DIR/release/lib_mar.so"; \
+	elif [ -n "$$CARGO_TARGET_DIR" ] && [ -f "$$CARGO_TARGET_DIR/release/lib_mar.dylib" ]; then \
+		DYLIB_PATH="$$CARGO_TARGET_DIR/release/lib_mar.dylib"; \
+	elif [ -n "$$CARGO_TARGET_DIR" ] && [ -f "$$CARGO_TARGET_DIR/release/lib_mar.so" ]; then \
+		DYLIB_PATH="$$CARGO_TARGET_DIR/release/lib_mar.so"; \
+	fi; \
+	if [ -n "$$DYLIB_PATH" ]; then \
+		cp "$$DYLIB_PATH" python/pymar/_mar.so; \
+		if [ -d pymar/pymar ]; then cp "$$DYLIB_PATH" pymar/pymar/_mar.so; fi; \
+		echo "Python extension built: python/pymar/_mar.so"; \
+	fi
+
+test-all: test
+	@echo "\n=== Running Rust Tests ==="
+	@cargo test --manifest-path rust/Cargo.toml
+	@echo "\n=== Running Rust CLI Integration Tests ==="
+	@$(MAKE) mar-rust
+	@MAR_BIN="$$(pwd)/mar-rust" ./tests/integration_test.sh
+	@echo "\n=== Running Python Tests ==="
+	@PYTHONPATH=python python3 -m pytest python/tests
 
 # Drop system caches (Linux only, requires sudo)
 drop-cache:
@@ -894,11 +943,15 @@ help:
 	@echo ""
 	@echo "Standard Builds:"
 	@echo "  make              - Build release binary (optimized)"
+	@echo "  make cpp          - Alias for C++ release binary"
+	@echo "  make rust         - Build pure Rust release CLI (mar-rust)"
+	@echo "  make python       - Build Python native extension (_mar.so)"
 	@echo "  make CXX=clang++  - Build using Clang instead of GCC"
 	@echo "  make debug        - Build with debug symbols"
 	@echo "  make static       - Build static binary"
 	@echo "  make release      - Build optimized static binary"
-	@echo "  make test         - Build and run tests"
+	@echo "  make test         - Build and run C++ tests"
+	@echo "  make test-all     - Run C++, Rust, and Python tests"
 	@echo ""
 	@echo "Distribution Builds (Portable):"
 	@echo "  make dist-all                      - Build all for current platform"

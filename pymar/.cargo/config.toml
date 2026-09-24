@@ -1,0 +1,15 @@
+[env]
+ZSTD_SYS_USE_PKG_CONFIG = "1"
+PKG_CONFIG_PATH = "/opt/homebrew/opt/zstd/lib/pkgconfig:/usr/local/lib/pkgconfig"
+
+[target.aarch64-apple-darwin]
+rustflags = [
+    "-C", "link-arg=-undefined",
+    "-C", "link-arg=dynamic_lookup",
+]
+
+[target.x86_64-apple-darwin]
+rustflags = [
+    "-C", "link-arg=-undefined",
+    "-C", "link-arg=dynamic_lookup",
+]

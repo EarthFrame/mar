@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from .core import (
     MarArchive,
     create_archive,
@@ -74,7 +74,24 @@ def mar_get(path: str, filename: str) -> str:
     except UnicodeDecodeError:
         return f"<Binary data: {len(content)} bytes>"
 
-def mar_search(path: str, index_path: str, query: str, topk: int = 5) -> List[Dict]:
+def mar_extract(path: str, output_dir: str, files: Optional[List[str]] = None, threads: int = 0) -> str:
+    """
+    Extract files from a MAR archive into a directory.
+
+    Args:
+        path: Path to the .mar archive.
+        output_dir: Directory where files should be extracted.
+        files: Optional list of specific file names to extract.
+        threads: Number of worker threads (0 = auto-detect hardware concurrency).
+
+    Returns:
+        A success message with the destination directory.
+    """
+    archive = MarArchive(path)
+    archive.extract(output_dir, files=files, threads=threads)
+    return f"Successfully extracted {path} to {output_dir}."
+
+def mar_search(path: str, index_path: str, query: str, topk: int = 5, params: Optional[Dict[str, Any]] = None) -> List[Dict]:
     """
     Search a MAR archive using a sidecar index.
     
@@ -83,12 +100,14 @@ def mar_search(path: str, index_path: str, query: str, topk: int = 5) -> List[Di
         index_path: Path to the .mai index file.
         query: Search query string.
         topk: Number of top results to return.
+        params: Optional dictionary of index-specific search parameters.
         
     Returns:
         A list of search results with scores and snippets.
     """
     archive = MarArchive(path)
-    results = archive.search(index_path, query, topk=topk)
+    search_params = params or {}
+    results = archive.search(index_path, query, topk=topk, **search_params)
     return [r.model_dump() for r in results]
 
 def mar_hash(path: str, algo: str = "xxhash64") -> str:
@@ -104,18 +123,19 @@ def mar_hash(path: str, algo: str = "xxhash64") -> str:
     """
     return get_hash(path, algo)
 
-def mar_validate(path: str) -> bool:
+def mar_validate(path: str, threads: int = 0) -> bool:
     """
     Validate the integrity of a MAR archive.
     
     Args:
         path: Path to the .mar archive.
+        threads: Number of worker threads (0 = auto-detect hardware concurrency).
         
     Returns:
         True if the archive is valid, False otherwise.
     """
     archive = MarArchive(path)
-    return archive.validate()
+    return archive.validate(threads=threads)
 
 def mar_header(path: str) -> Dict:
     """

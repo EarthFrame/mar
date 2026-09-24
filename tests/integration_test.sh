@@ -1966,6 +1966,28 @@ PY
     TESTS_RUN=$((TESTS_RUN + 1))
 }
 
+test_okf_pack_inspect() {
+    log_info "=== OKF: pack, inspect, lint, diff, unpack ==="
+
+    local fixture="${PROJECT_ROOT}/tests/data/okf/minimal"
+    local archive="$TEST_DIR/okf/minimal.mar"
+    local restored="$TEST_DIR/okf/restored"
+    mkdir -p "$(dirname "$archive")" "$restored"
+
+    run_test "okf pack minimal fixture" "$MAR_BIN okf pack \"$fixture\" -f \"$archive\""
+    assert_file_exists "$archive" "OKF archive created"
+
+    run_test "okf info archive" "$MAR_BIN okf info \"$archive\""
+    run_test "okf validate archive" "$MAR_BIN okf validate \"$archive\""
+    run_test "okf lint archive (clean)" "$MAR_BIN okf lint \"$archive\" --today 2026-07-01"
+    run_test "okf diff unchanged" "$MAR_BIN okf diff \"$fixture\" \"$archive\""
+    run_test "okf computations archive" "$MAR_BIN okf computations \"$archive\""
+
+    run_test "okf unpack archive" "$MAR_BIN okf unpack \"$archive\" -o \"$restored\""
+    assert_file_exists "$restored/metrics/revenue.md" "unpacked revenue concept"
+    assert_file_exists "$restored/computations/revenue.md" "unpacked computation concept"
+}
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -2001,7 +2023,7 @@ test_vector_search() {
     run_test "create archive for vector indexing" "$MAR_BIN create -f test.mar input"
     
     # Check if we can reach the embed server
-    if ! curl -s --connect-timeout 2 http://0.0.0.0:7998/v1/models >/dev/null; then
+    if ! curl -f -s --connect-timeout 2 http://0.0.0.0:7998/v1/models >/dev/null; then
         log_warn "Vector search tests skipped: embed server not reachable at http://0.0.0.0:7998"
         TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
         return 0
@@ -2122,6 +2144,7 @@ main() {
     test_diff_invalid_paths
     test_diff_format_validation
     test_redact_roundtrip
+    test_okf_pack_inspect
     test_indexing_and_search
     test_vector_search
     test_random_bit_flips

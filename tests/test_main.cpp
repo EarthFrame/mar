@@ -8,6 +8,12 @@
 #include "mar/embed_provider.hpp"
 #include "mar/index_registry.hpp"
 #include "mar/mar.hpp"
+#include "mar/okf/bundle.hpp"
+#include "mar/okf/diff.hpp"
+#include "mar/okf/document.hpp"
+#include "mar/okf/lint.hpp"
+#include "mar/okf/validate.hpp"
+#include "mar/okf/yaml.hpp"
 #include "mar/stopwatch.hpp"
 
 #if __has_include(<zlib.h>)
@@ -3077,6 +3083,56 @@ TEST(embed_provider_factory_default_server_provider) {
             tests_passed--;
         }
     }
+}
+
+TEST(okf_yaml_flow_mapping) {
+    using namespace mar::okf;
+    YamlError err;
+    Value root = Value::parse("type: Metric\ntitle: Revenue\ngenerated: { by: human:alice, at: 2026-06-25T09:00:00Z }",
+                              &err);
+    ASSERT(err.message.empty());
+    const auto* map = root.as_mapping();
+    ASSERT(map != nullptr);
+    ASSERT(map->get("type") != nullptr);
+    ASSERT_EQ(map->get("type")->scalar_string().value_or(""), "Metric");
+}
+
+TEST(okf_document_parse) {
+    using namespace mar::okf;
+    const std::string text = "---\ntype: Metric\ntitle: Revenue\n---\n\n# Body\n";
+    DocumentError err;
+    auto doc = Document::parse(text, &err);
+    ASSERT(doc.has_value());
+    ASSERT(doc->has_nonempty_type());
+    ASSERT_EQ(doc->frontmatter.title().value_or(""), "Revenue");
+    ASSERT(doc->body.find("# Body") != std::string::npos);
+}
+
+TEST(okf_bundle_minimal_fixture) {
+    using namespace mar::okf;
+    auto source = open_bundle_source("tests/data/okf/minimal");
+    Bundle bundle = Bundle::load(*source);
+    ASSERT_EQ(bundle.concepts().size(), 3u);
+    Report report = validate_bundle(bundle);
+    ASSERT(report.is_conformant());
+}
+
+TEST(okf_lint_minimal_fixture) {
+    using namespace mar::okf;
+    auto source = open_bundle_source("tests/data/okf/minimal");
+    Bundle bundle = Bundle::load(*source);
+    Report report = lint_bundle(bundle, std::string("2026-07-01"));
+    ASSERT(report.warning_count() == 0u);
+}
+
+TEST(okf_diff_unchanged) {
+    using namespace mar::okf;
+    auto a_source = open_bundle_source("tests/data/okf/minimal");
+    auto b_source = open_bundle_source("tests/data/okf/minimal");
+    Bundle a = Bundle::load(*a_source);
+    Bundle b = Bundle::load(*b_source);
+    BundleDiff diff = bundle_diff(a, b);
+    ASSERT(diff.is_empty());
 }
 
 

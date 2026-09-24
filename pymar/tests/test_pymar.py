@@ -236,8 +236,68 @@ def test_mar_index_bm25(mar_file, tmp_path):
         assert "Successfully created bm25 index" in msg
         assert os.path.exists(index_path)
         
-        with pytest.raises(RuntimeError, match="No searcher available for this index type"):
-            mar_search(mar_file, index_path, "Hello")
+        results = mar_search(mar_file, index_path, "Hello")
+        assert len(results) >= 1
+        assert "file1.txt" in results[0]["filename"]
+
+def test_mar_index_email(tmp_path):
+    path = str(tmp_path / "emails.mar")
+    opts = _mar.WriteOptions()
+    writer = _mar.MarWriter(path, opts)
+    raw_email = (
+        b"From: alice@example.com\n"
+        b"To: bob@example.com\n"
+        b"Subject: Meeting tomorrow\n"
+        b"\n"
+        b"Let's discuss the MAR archive format!\n"
+    )
+    writer.add_memory("email1.eml", raw_email)
+    writer.finish()
+
+    index_path = str(tmp_path / "emails.mai")
+    msg = mar_index(path, "email", index_path)
+    assert "Successfully created email index" in msg
+    assert os.path.exists(index_path)
+
+    results = mar_search(path, index_path, "Meeting")
+    assert len(results) >= 1
+    assert results[0]["filename"] == "email1.eml"
+    assert results[0]["metadata"]["from"] == "alice@example.com"
+    assert results[0]["metadata"]["to"] == "bob@example.com"
+
+def test_mar_index_timeseries(tmp_path):
+    path = str(tmp_path / "ts.mar")
+    opts = _mar.WriteOptions()
+    writer = _mar.MarWriter(path, opts)
+    csv_data = b"timestamp,temp\n1700000000000,21.5\n1700000060000,22.1\n"
+    writer.add_memory("sensors.csv", csv_data)
+    writer.finish()
+
+    index_path = str(tmp_path / "ts.mai")
+    msg = mar_index(path, "timeseries", index_path, params={"ts_col": "0", "ts_format": "epoch_ms"})
+    assert "Successfully created timeseries index" in msg
+    assert os.path.exists(index_path)
+
+    results = mar_search(path, index_path, "", params={"since": "1699999999999", "until": "1700000090000"})
+    assert len(results) >= 1
+    assert results[0]["filename"] == "sensors.csv"
+    assert results[0]["metadata"]["row_count"] == "2"
+
+def test_mar_index_genomic(tmp_path):
+    path = str(tmp_path / "genome.mar")
+    opts = _mar.WriteOptions()
+    writer = _mar.MarWriter(path, opts)
+    writer.add_memory("chr1.fa", b">chr1\nACGTACGTACGT\n")
+    writer.finish()
+
+    index_path = str(tmp_path / "genome.mai")
+    msg = mar_index(path, "genomic", index_path)
+    assert "Successfully created genomic index" in msg
+    assert os.path.exists(index_path)
+
+    results = mar_search(path, index_path, "chr1")
+    assert len(results) >= 1
+    assert "chr1.fa" in results[0]["filename"]
 
 if __name__ == "__main__":
     pytest.main([__file__])

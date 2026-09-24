@@ -1,0 +1,19 @@
+[package]
+name = "pymar"
+version = "0.2.0"
+edition = "2021"
+authors = ["EarthFrame Corporation <info@earthframe.ai>"]
+description = "High-performance Python bindings and Rust engine for the MAR archive format"
+license = "MIT"
+
+[lib]
+name = "_mar"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["abi3-py38"] }
+mar-core = { path = "../rust" }
+
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]

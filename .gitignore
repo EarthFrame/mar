@@ -6,6 +6,7 @@ benchmarks/scratch_*/
 # Build artifacts
 /build/
 /mar
+/mar-rust
 /test_mar
 /test_nar
 /dist/
@@ -13,7 +14,25 @@ benchmarks/scratch_*/
 *.a
 *.o
 .perf/
+compile_commands.json
+LINT_REPORT.json
+
+# Rust build artifacts
+target/
+**/target/
+Cargo.lock
+
+# Python build artifacts
+*.egg-info/
+.pytest_cache/
+
+# Test data & scratch directories
+extract_*/
+test_sample_data/
+test_data/
 casp15/
+okf/okf/
+okf/how-the-open-knowledge-format-can-improve-data-sharing
 
 # Specifically include include/mar
 !include/mar/

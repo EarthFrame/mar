@@ -69,28 +69,20 @@ class MarArchive:
             raise RuntimeError("Archive not open for reading")
         return self._reader.read_file(name)
 
-    def extract(self, output_dir: str, files: Optional[List[str]] = None):
-        """Extract files to a directory."""
+    def __getitem__(self, name: str) -> bytes:
+        return self.read_file(name)
+
+    def __contains__(self, name: str) -> bool:
+        if not self._reader:
+            return False
+        return self._reader.find_file(name) is not None
+
+    def extract(self, output_dir: str, files: Optional[List[str]] = None, threads: int = 0):
+        """Extract files to a directory using parallel streaming sinks (O(1) memory)."""
         if not self._reader:
             raise RuntimeError("Archive not open for reading")
         
-        os.makedirs(output_dir, exist_ok=True)
-        if files is None:
-            files = self.list_files()
-            
-        for name in files:
-            found = self._reader.find_file(name)
-            if not found:
-                continue
-            idx, entry = found
-            if entry.entry_type != _mar.EntryType.REGULAR_FILE:
-                continue
-                
-            content = self.read_file(name)
-            out_path = os.path.join(output_dir, name)
-            os.makedirs(os.path.dirname(out_path), exist_ok=True)
-            with open(out_path, "wb") as f:
-                f.write(content)
+        self._reader.extract(output_dir, files, threads)
 
     def get_header(self) -> HeaderInfo:
         """Get archive header information."""

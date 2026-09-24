@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel", "pybind11>=2.10"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "pymar"
 version = "0.2.0"
-description = "Python bindings for the MAR archive format"
+description = "High-performance Python package and Rust engine for the MAR archive format"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
@@ -14,15 +14,18 @@ authors = [
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: C++",
+    "Programming Language :: Rust",
     "Topic :: System :: Archiving",
 ]
 dependencies = [
     "pydantic>=2.0",
 ]
 
-[tool.setuptools]
-packages = ["pymar"]
+[project.optional-dependencies]
+s3 = ["boto3>=1.26.0"]
+torch = ["torch"]
 
-[tool.setuptools.package-data]
-pymar = ["*.so", "*.pyd"]
+[tool.maturin]
+features = ["extension-module"]
+python-source = "."
+module-name = "pymar._mar"

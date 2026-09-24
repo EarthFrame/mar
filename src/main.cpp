@@ -11,6 +11,7 @@
 #include "mar/redact.hpp"
 #include "mar/stopwatch.hpp"
 #include "mar/writer.hpp"
+#include "mar/okf/cli.hpp"
 #include "mar/xxhash3.h"
 
 #include <algorithm>
@@ -108,6 +109,7 @@ void print_usage() {
     std::cout << "  hash     Compute a fast archive hash\n"
               << "  header   Display archive header information\n"
               << "  validate Validate archive integrity and checksums\n"
+              << "  okf      Pack, inspect, and validate OKF knowledge bundles\n"
               << "  version  Display version information\n\n"
               << "Common options:\n"
               << "  -h, --help      Display this help message\n"
@@ -2398,6 +2400,8 @@ int main(int argc, char* argv[]) {
         return run_with_timing("header", [=]() { return cmd_header(cmd_argc, cmd_argv); });
     } else if (command == "validate") {
         return run_with_timing("validate", [=]() { return cmd_validate(cmd_argc, cmd_argv); });
+    } else if (command == "okf") {
+        return run_with_timing("okf", [=]() { return okf::cmd_okf(cmd_argc, cmd_argv); });
     } else if (command == "version") {
         return run_with_timing("version", [=]() { return cmd_version(cmd_argc, cmd_argv); });
     } else {

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "pymar"
+version = "0.2.0"
+description = "High-performance Python package and Rust engine for the MAR archive format"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "EarthFrame Corporation", email = "info@earthframe.ai"}
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: System :: Archiving",
+]
+dependencies = [
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+s3 = ["boto3>=1.26.0"]
+torch = ["torch"]
+
+[tool.maturin]
+features = ["extension-module"]
+python-source = "."
+module-name = "pymar._mar"
