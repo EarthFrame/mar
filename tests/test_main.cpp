@@ -3135,6 +3135,114 @@ TEST(okf_diff_unchanged) {
     ASSERT(diff.is_empty());
 }
 
+TEST(fasta_index_multi_file_and_extraction) {
+    fs::path test_dir = fs::temp_directory_path() / "mar_fasta_test";
+    fs::create_directories(test_dir);
+
+    fs::path fa1_path = test_dir / "proteins1.fa";
+    fs::path fa2_path = test_dir / "proteins2.fa";
+    fs::path archive_path = test_dir / "proteome.mar";
+    fs::path index_path = test_dir / "proteome.fasta.mai";
+
+    {
+        std::ofstream out1(fa1_path);
+        out1 << ">AF-A0A022R2B6-F1 AlphaFold prediction 1\n"
+             << "MKFLVNVALVFMVVYISYIYAAFPSQ\n"
+             << "EKSNEEQKEEEREEEEKK\n"
+             << ">AF-P12345-F1 Protein two\n"
+             << "ACDEFGHIKLMNPQRSTVWY\n";
+    }
+
+    {
+        std::ofstream out2(fa2_path);
+        out2 << ">MOUSE_001 Mouse protein\n"
+             << "MVKVGVNGFGRIGRLVTRAAFNSG\n"
+             << ">AF-SHARED-F1 Shared across files\n"
+             << "AAAAACCCCCGGGGGTTTTT\n";
+    }
+
+    // Create MAR archive in multiblock mode with Zstd compression
+    {
+        WriteOptions opts;
+        opts.multiblock = true;
+        opts.block_size = 4096;
+        MarWriter writer(archive_path.string(), opts);
+        writer.add_file(fa1_path.string(), "proteins1.fa");
+        writer.add_file(fa2_path.string(), "proteins2.fa");
+        writer.finish();
+    }
+
+    // Build FASTA index
+    {
+        MarReader reader(archive_path.string());
+        auto idx = IndexRegistry::instance().get_indexer("fasta");
+        ASSERT(idx != nullptr);
+        ASSERT_EQ(static_cast<u8>(idx->index_type()), static_cast<u8>(MAIIndexType::Fasta));
+
+        MAIWriter writer(archive_path.string(), idx->index_type(), 12345);
+        IndexOptions opts;
+        idx->build(reader, writer, opts);
+        writer.write_to_file(index_path.string());
+    }
+
+    // Search and verify
+    {
+        MarReader reader(archive_path.string());
+        auto mai = MAIReader::open(index_path.string());
+        ASSERT(mai != nullptr);
+        ASSERT_EQ(mai->header().index_type, static_cast<u8>(MAIIndexType::Fasta));
+
+        auto searcher = IndexRegistry::instance().get_searcher(MAIIndexType::Fasta);
+        ASSERT(searcher != nullptr);
+
+        // 1. Query by unique accession
+        {
+            IndexOptions opts;
+            auto results = searcher->search(reader, *mai, "AF-A0A022R2B6-F1", opts);
+            ASSERT_EQ(results.size(), 1u);
+            ASSERT_EQ(results[0].filename, "proteins1.fa");
+            ASSERT_EQ(results[0].metadata["id"], "AF-A0A022R2B6-F1");
+            ASSERT_EQ(results[0].metadata["seq_len"], "44");
+        }
+
+        // 2. Query second file accession
+        {
+            IndexOptions opts;
+            auto results = searcher->search(reader, *mai, "MOUSE_001", opts);
+            ASSERT_EQ(results.size(), 1u);
+            ASSERT_EQ(results[0].filename, "proteins2.fa");
+            ASSERT_EQ(results[0].metadata["id"], "MOUSE_001");
+            ASSERT_EQ(results[0].metadata["seq_len"], "24");
+        }
+
+        // 3. Qualified query proteins2.fa:AF-SHARED-F1
+        {
+            IndexOptions opts;
+            auto results = searcher->search(reader, *mai, "proteins2.fa:AF-SHARED-F1", opts);
+            ASSERT_EQ(results.size(), 1u);
+            ASSERT_EQ(results[0].filename, "proteins2.fa");
+        }
+
+        // 4. File-scoped iteration
+        {
+            IndexOptions opts;
+            opts.params["file"] = "proteins1.fa";
+            auto results = searcher->search(reader, *mai, "", opts);
+            ASSERT_EQ(results.size(), 2u);
+        }
+
+        // 5. Test extraction to stdout
+        {
+            IndexOptions opts;
+            opts.params["extract"] = "true";
+            auto results = searcher->search(reader, *mai, "AF-A0A022R2B6-F1", opts);
+            ASSERT_EQ(results.size(), 1u);
+        }
+    }
+
+    fs::remove_all(test_dir);
+}
+
 
 int main() {
     std::cout << "\n=== MAR v0.1.0 Unit Tests ===\n\n";
