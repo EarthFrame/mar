@@ -98,6 +98,7 @@ SRCS = src/format.cpp src/checksum.cpp src/compression.cpp src/compression_gzip.
        src/sections.cpp src/name_index.cpp src/reader.cpp src/writer.cpp \
        src/file_descriptor_manager.cpp src/async_io.cpp src/thread_pool.cpp src/redact.cpp src/diff.cpp \
        src/index_registry.cpp src/index_minhash.cpp src/index_vector.cpp src/index_bm25.cpp src/index_genomic.cpp \
+       src/index_fasta.cpp \
        src/index_email.cpp src/index_timeseries.cpp src/embed_server.cpp \
        src/okf_yaml.cpp src/okf_document.cpp src/okf_links.cpp src/okf_bundle.cpp src/okf_validate.cpp \
        src/okf_cache.cpp src/okf_computation.cpp src/okf_lint.cpp src/okf_diff.cpp src/okf_index_gen.cpp \
@@ -411,7 +412,7 @@ test-all: test
 	@$(MAKE) mar-rust
 	@MAR_BIN="$$(pwd)/mar-rust" ./tests/integration_test.sh
 	@echo "\n=== Running Python Tests ==="
-	@PYTHONPATH=python python3 -m pytest python/tests
+	@PYTHONPATH=python:python/pymar python3 -m pytest python/tests
 
 # Drop system caches (Linux only, requires sudo)
 drop-cache:

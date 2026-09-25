@@ -40,7 +40,7 @@ maturin develop
 
 ## Cloud Storage & Egress Optimization
 
-`pymar` supports direct mounting of archives hosted in AWS S3, Cloudflare R2, Backblaze B2, or any standard HTTP/HTTPS range-capable storage.
+`pymar` supports direct mounting of archives hosted in AWS S3, Cloudflare R2, Backblaze B2, or any standard HTTP/HTTPS range-capable storage. For an architectural deep-dive into private buckets, AWS VPC endpoints, and Cloudflare R2 zero-egress setups, see the [Cloud Storage Cost Optimization guide](../../docs/tutorials/cloud_storage_costs.md).
 
 ### S3 / R2 / B2 Configuration
 

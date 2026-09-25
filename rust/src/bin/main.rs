@@ -311,7 +311,7 @@ Create a sidecar index for an archive.
 
 Options:
   -i, --input <archive>      Path to the .mar archive
-  --type <type>              Index type: minhash, bm25, email, timeseries, genomic
+  --type <type>              Index type: minhash, bm25, email, timeseries, genomic, fasta
   --aux <file>               Auxiliary input file (repeatable)
   --with <key=value>         Type-specific parameter (repeatable)
   -o, --output <file>        Custom output path (default: <archive>.<type>.mai)
@@ -320,7 +320,7 @@ Options:
 Common --with parameters:
   threads=N                  Parallel build threads (default: CPU cores)
 
-Available types: minhash, bm25, email, timeseries, genomic
+Available types: minhash, bm25, email, timeseries, genomic, fasta
 Use 'mar index --type <type> --help' for type-specific options."#);
 }
 
@@ -1646,6 +1646,7 @@ fn cmd_index(args: &[String]) -> i32 {
         "email" => MAIIndexType::Email,
         "timeseries" => MAIIndexType::TimeSeries,
         "genomic" => MAIIndexType::Genomic,
+        "fasta" => MAIIndexType::Fasta,
         _ => {
             print_error(&format!("Unsupported index type: {}", type_name), "index");
             return EXIT_ERROR;
@@ -1659,6 +1660,7 @@ fn cmd_index(args: &[String]) -> i32 {
         MAIIndexType::Email => build_email_index(&reader, &mut writer, &opts),
         MAIIndexType::TimeSeries => build_timeseries_index(&reader, &mut writer, &opts),
         MAIIndexType::Genomic => build_genomic_index(&reader, &mut writer, &opts),
+        MAIIndexType::Fasta => build_fasta_index(&reader, &mut writer, &opts),
         _ => Err("Unsupported index type".to_string()),
     };
 
@@ -1767,6 +1769,8 @@ fn cmd_search(args: &[String]) -> i32 {
         search_timeseries(&reader, &index, &query, &opts)
     } else if itype == MAIIndexType::Genomic as u8 {
         search_genomic(&reader, &index, &query, &opts)
+    } else if itype == MAIIndexType::Fasta as u8 {
+        search_fasta(&reader, &index, &query, &opts)
     } else {
         print_error("No searcher available for this index type", "search");
         return EXIT_ERROR;

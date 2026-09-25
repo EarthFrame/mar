@@ -25,6 +25,7 @@ enum class MAIIndexType : u8 {
     Email = 5,
     TimeSeries = 6,
     BM25 = 7,
+    Fasta = 8,
 };
 
 #pragma pack(push, 1)

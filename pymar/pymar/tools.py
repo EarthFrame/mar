@@ -110,6 +110,22 @@ def mar_search(path: str, index_path: str, query: str, topk: int = 5, params: Op
     results = archive.search(index_path, query, topk=topk, **search_params)
     return [r.model_dump() for r in results]
 
+def mar_fasta_get(path: str, index_path: str, query: str, file: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve a FASTA record from an archive using a .fasta.mai index.
+
+    Args:
+        path: Path to the .mar archive.
+        index_path: Path to the .fasta.mai index file.
+        query: Sequence accession ID.
+        file: Optional filename within the archive to scope search.
+
+    Returns:
+        Dictionary with record details ('id', 'filename', 'seq_len', 'header', 'sequence') or None.
+    """
+    archive = MarArchive(path)
+    return archive.get_fasta_record(index_path, query, file=file)
+
 def mar_hash(path: str, algo: str = "xxhash64") -> str:
     """
     Compute a deterministic hash of a MAR archive.

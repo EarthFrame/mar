@@ -76,6 +76,7 @@ sources = [
     os.path.join(src_dir, "index_vector.cpp"),
     os.path.join(src_dir, "index_bm25.cpp"),
     os.path.join(src_dir, "index_genomic.cpp"),
+    os.path.join(src_dir, "index_fasta.cpp"),
     os.path.join(src_dir, "index_email.cpp"),
     os.path.join(src_dir, "index_timeseries.cpp"),
     os.path.join(src_dir, "embed_server.cpp"),
