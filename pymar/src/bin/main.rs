@@ -112,7 +112,7 @@ Options:
   --checksum <type>          Checksum: xxhash3 (default), xxhash32, blake3, crc32c, none
   -m, --multiblock           Use multiblock mode (default)
   --single-file              Use single-file-per-block mode
-  --block-size <bytes>       Target block size (default: 1MB)
+  --block-size <size>        Target block size, e.g. 64KB, 1MB, 4MB (default: 1MB)
   --name-format <fmt>        Name table: auto (default), raw, front-coded, trie
   -f, --force                Overwrite existing archive
   -T, --files-from <file>    Read file list from file (- for stdin)
@@ -408,14 +408,14 @@ fn cmd_create(args: &[String]) -> i32 {
                 print_error("Missing block size", "create");
                 return EXIT_USAGE;
             }
-            if let Ok(sz) = args[i].parse::<u64>() {
+            if let Some(sz) = parse_size(&args[i]) {
                 if sz < MIN_BLOCK_SIZE || sz > MAX_BLOCK_SIZE {
-                    print_error("Block size out of range", "create");
+                    print_error(&format!("Block size out of range (min: 4KB [4096 bytes], max: 1GB; got {})", args[i]), "create");
                     return EXIT_USAGE;
                 }
                 opts.block_size = sz;
             } else {
-                print_error("Invalid block size", "create");
+                print_error(&format!("Invalid block size: '{}'. Expected bytes or shorthand (e.g. 64KB, 1MB, 4MB)", args[i]), "create");
                 return EXIT_USAGE;
             }
         } else if arg == "-f" || arg == "--force" {

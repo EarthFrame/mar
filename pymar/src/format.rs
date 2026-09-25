@@ -20,7 +20,7 @@ pub const DEFAULT_ALIGN_LOG2: u8 = 6;
 pub const DEFAULT_ALIGNMENT: u64 = 64;
 
 pub const MIN_BLOCK_SIZE: u64 = 4096;
-pub const MAX_BLOCK_SIZE: u64 = 64 * 1024 * 1024;
+pub const MAX_BLOCK_SIZE: u64 = 1024 * 1024 * 1024; // 1 GB
 pub const DEFAULT_BLOCK_SIZE: u64 = 1024 * 1024;
 pub const META_CONTAINER_HEADER_SIZE: usize = 8;
 pub const DEFAULT_FILE_MODE: u32 = 0o644;
@@ -557,4 +557,74 @@ pub fn align_up(val: u64, alignment: u64) -> u64 {
         return val;
     }
     (val + alignment - 1) & !(alignment - 1)
+}
+
+/// Parses a human-readable size string with optional binary or decimal unit suffix
+/// (e.g., "4096", "64K", "64KB", "64KiB", "4M", "4MB", "4MiB", "1G", "1GB", "1GiB").
+pub fn parse_size(s: &str) -> Option<u64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+
+    let num_end = s.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(s.len());
+    let (num_str, unit_str) = s.split_at(num_end);
+    let num_str = num_str.trim();
+    let unit_str = unit_str.trim();
+
+    if num_str.is_empty() {
+        return None;
+    }
+
+    let multiplier: u64 = match unit_str.to_ascii_lowercase().as_str() {
+        "" | "b" => 1,
+        "k" | "kb" | "kib" => 1024,
+        "m" | "mb" | "mib" => 1024 * 1024,
+        "g" | "gb" | "gib" => 1024 * 1024 * 1024,
+        "t" | "tb" | "tib" => 1024 * 1024 * 1024 * 1024,
+        _ => return None,
+    };
+
+    if let Ok(val) = num_str.parse::<u64>() {
+        val.checked_mul(multiplier)
+    } else if let Ok(val) = num_str.parse::<f64>() {
+        if val < 0.0 || !val.is_finite() {
+            return None;
+        }
+        let bytes = val * (multiplier as f64);
+        if bytes > u64::MAX as f64 {
+            return None;
+        }
+        Some(bytes as u64)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_size() {
+        assert_eq!(parse_size("200"), Some(200));
+        assert_eq!(parse_size("4096"), Some(4096));
+        assert_eq!(parse_size("4096B"), Some(4096));
+        assert_eq!(parse_size("64K"), Some(65536));
+        assert_eq!(parse_size("64KB"), Some(65536));
+        assert_eq!(parse_size("64KiB"), Some(65536));
+        assert_eq!(parse_size("64kb"), Some(65536));
+        assert_eq!(parse_size("4M"), Some(4 * 1024 * 1024));
+        assert_eq!(parse_size("4MB"), Some(4 * 1024 * 1024));
+        assert_eq!(parse_size("4mb"), Some(4 * 1024 * 1024));
+        assert_eq!(parse_size("4MiB"), Some(4 * 1024 * 1024));
+        assert_eq!(parse_size("4 MiB"), Some(4 * 1024 * 1024));
+        assert_eq!(parse_size("1G"), Some(1024 * 1024 * 1024));
+        assert_eq!(parse_size("1GB"), Some(1024 * 1024 * 1024));
+        assert_eq!(parse_size("1.5MB"), Some(1572864));
+        assert_eq!(parse_size(""), None);
+        assert_eq!(parse_size("xyz"), None);
+        assert_eq!(parse_size("4xyz"), None);
+        assert_eq!(parse_size("-10MB"), None);
+    }
 }

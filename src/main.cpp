@@ -88,6 +88,58 @@ void print_verbose(const std::string& msg) {
     }
 }
 
+static bool parse_size(const std::string& str, uint64_t& out_bytes) {
+    if (str.empty()) return false;
+    size_t start = str.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return false;
+    size_t end = str.find_last_not_of(" \t\r\n");
+    std::string s = str.substr(start, end - start + 1);
+
+    size_t num_end = 0;
+    while (num_end < s.size() && (std::isdigit(static_cast<unsigned char>(s[num_end])) || s[num_end] == '.')) {
+        num_end++;
+    }
+    if (num_end == 0) return false;
+
+    std::string num_part = s.substr(0, num_end);
+    std::string unit_part = s.substr(num_end);
+    size_t u_start = unit_part.find_first_not_of(" \t\r\n");
+    if (u_start != std::string::npos) {
+        unit_part = unit_part.substr(u_start);
+        for (auto& c : unit_part) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    } else {
+        unit_part.clear();
+    }
+
+    uint64_t multiplier = 1;
+    if (unit_part.empty() || unit_part == "b") {
+        multiplier = 1;
+    } else if (unit_part == "k" || unit_part == "kb" || unit_part == "kib") {
+        multiplier = 1024ULL;
+    } else if (unit_part == "m" || unit_part == "mb" || unit_part == "mib") {
+        multiplier = 1024ULL * 1024ULL;
+    } else if (unit_part == "g" || unit_part == "gb" || unit_part == "gib") {
+        multiplier = 1024ULL * 1024ULL * 1024ULL;
+    } else if (unit_part == "t" || unit_part == "tb" || unit_part == "tib") {
+        multiplier = 1024ULL * 1024ULL * 1024ULL * 1024ULL;
+    } else {
+        return false;
+    }
+
+    try {
+        if (num_part.find('.') != std::string::npos) {
+            double d = std::stod(num_part);
+            if (d < 0.0) return false;
+            out_bytes = static_cast<uint64_t>(d * multiplier);
+        } else {
+            out_bytes = std::stoull(num_part) * multiplier;
+        }
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 void print_usage() {
     std::cout << "Usage: mar <command> [options] <arguments>\n\n"
               << "Commands:\n"
@@ -140,7 +192,7 @@ Options:
   --checksum <type>          Checksum: xxhash3 (default), xxhash32, blake3, crc32c, none
   -m, --multiblock           Use multiblock mode (default)
   --single-file              Use single-file-per-block mode
-  --block-size <bytes>       Target block size (default: 1MB)
+  --block-size <size>        Target block size, e.g. 64KB, 1MB, 4MB (default: 1MB)
   --name-format <fmt>        Name table: auto (default), raw, front-coded, trie
   -f, --force                Overwrite existing archive
   -T, --files-from <file>    Read file list from file (- for stdin)
@@ -402,11 +454,16 @@ int cmd_create(int argc, char* argv[]) {
                 print_error("Missing block size", "create");
                 return EXIT_USAGE;
             }
-            opts.block_size = std::stoull(argv[i]);
-            if (opts.block_size < MIN_BLOCK_SIZE || opts.block_size > MAX_BLOCK_SIZE) {
-                print_error("Block size out of range", "create");
+            uint64_t sz = 0;
+            if (!parse_size(argv[i], sz)) {
+                print_error("Invalid block size: '" + std::string(argv[i]) + "'. Expected bytes or shorthand (e.g. 64KB, 1MB, 4MB)", "create");
                 return EXIT_USAGE;
             }
+            if (sz < MIN_BLOCK_SIZE || sz > MAX_BLOCK_SIZE) {
+                print_error("Block size out of range (min: 64KB, max: 1GB)", "create");
+                return EXIT_USAGE;
+            }
+            opts.block_size = sz;
         } else if (arg == "-f" || arg == "--force") {
             force = true;
         } else if (arg == "-T" || arg == "--files-from") {
