@@ -72,20 +72,34 @@ Visit the [Releases page](https://github.com/earthframe/mar/releases) to confirm
 
 ### Linux
 
-Users can download static musl binaries directly from GitHub Releases:
+Users can download pre-built C++ and Rust binaries directly from GitHub Releases:
 
 ```bash
-# Download and extract (example for x86_64)
-curl -L https://github.com/earthframe/mar/releases/download/v0.1.2/mar-linux-x86_64-musl -o mar
+# C++ static musl binary (x86_64)
+curl -L https://github.com/earthframe/mar/releases/download/v0.2.0/mar-linux-x86_64-musl -o mar
 chmod +x mar
 ./mar --version
+
+# Pure Rust standalone binary (x86_64)
+curl -L https://github.com/earthframe/mar/releases/download/v0.2.0/mar-rust-linux-x86_64 -o mar-rust
+chmod +x mar-rust
+./mar-rust --version
 ```
 
 Or use the static binary in a Docker container for maximum portability.
 
 ### macOS
 
-macOS users install via Homebrew. The formula is automatically maintained in `Formula/mar.rb`:
+Users can download pre-built binaries or install via Homebrew:
+
+```bash
+# Pure Rust standalone binary (Apple Silicon ARM64)
+curl -L https://github.com/earthframe/mar/releases/download/v0.2.0/mar-rust-macos-arm64 -o mar-rust
+chmod +x mar-rust
+./mar-rust --version
+```
+
+Homebrew formula is automatically maintained in `Formula/mar.rb`:
 
 ```bash
 brew install earthframe/mar  # Once the tap is registered

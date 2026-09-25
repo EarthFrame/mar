@@ -17,6 +17,7 @@ from .tools import (
     mar_get,
     mar_extract,
     mar_search,
+    mar_fasta_get,
     mar_hash,
     mar_validate,
     mar_header,

@@ -27,7 +27,7 @@ Working with `mols.tar` creates three major bottlenecks:
 - **High compression ratio**: Compresses 1.85 GB of molecular pickle files down to ~350 MB using Zstandard (`zstd`), an ~81% storage reduction.
 - **Immunity to OS reserved filenames**: MAR uses virtual archive paths (`mols/NUL.pkl`), bypassing OS filesystem filename limitations completely.
 - **O(1) memory-mapped random access**: Retrieve any individual molecule in microseconds without reading or decompressing the rest of the archive.
-- **Selective cloud streaming**: Direct HTTP range-request mounting from S3, Cloudflare R2, or Backblaze B2, cutting network egress by up to **99.98%**.
+- **Selective cloud streaming**: Direct HTTP range-request mounting from S3, Cloudflare R2, or Backblaze B2, cutting network egress by up to **99.98%** (see the [Cloud Storage Cost Optimization guide](cloud_storage_costs.md)).
 - **PyTorch `DataLoader` ready**: Multi-worker fork-safe `MarDataset` with GIL-free native decompression.
 
 ---

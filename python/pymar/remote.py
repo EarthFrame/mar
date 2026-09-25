@@ -3,18 +3,75 @@ import io
 import urllib.request
 import urllib.error
 from typing import Dict, List, Optional, Tuple, Any
+
+try:
+    import boto3
+except ImportError:
+    boto3 = None
+
 from . import _mar
 
 class RemoteRangeReader:
     """
-    Client for reading byte ranges from HTTP(S), S3, Cloudflare R2, or Backblaze B2 URLs.
-    Supports range request coalescing and tracking transfer statistics.
+    Client for reading byte ranges from HTTP(S), AWS S3, Cloudflare R2, or Backblaze B2 URLs.
+    Supports S3 boto3 client integration, custom endpoint URLs (R2, VPC endpoints, MinIO),
+    range request coalescing, and tracking transfer statistics.
     """
-    def __init__(self, url: str, headers: Optional[Dict[str, str]] = None):
+    def __init__(
+        self,
+        url: str,
+        headers: Optional[Dict[str, str]] = None,
+        endpoint_url: Optional[str] = None,
+        region_name: Optional[str] = None,
+        aws_access_key_id: Optional[str] = None,
+        aws_secret_access_key: Optional[str] = None,
+        aws_session_token: Optional[str] = None,
+        profile_name: Optional[str] = None,
+        s3_client: Optional[Any] = None,
+        **s3_kwargs
+    ):
         self.url = url
         self.headers = headers or {}
+        self.endpoint_url = endpoint_url
+        self.region_name = region_name
         self.bytes_transferred = 0
         self.read_count = 0
+
+        # Parse s3:// URI
+        self.is_s3 = url.startswith("s3://")
+        self.bucket = ""
+        self.key = ""
+        if self.is_s3:
+            path = url[5:]
+            parts = path.split("/", 1)
+            self.bucket = parts[0]
+            self.key = parts[1] if len(parts) > 1 else ""
+
+        # Initialize S3 client if requested or applicable
+        if s3_client is not None:
+            self.s3_client = s3_client
+        elif self.is_s3 or endpoint_url or aws_access_key_id or region_name:
+            if boto3 is None:
+                raise ImportError(
+                    "boto3 is required for S3 / R2 operations with s3:// URIs or custom endpoints. "
+                    "Install it via `pip install boto3` or `pip install 'pymar[s3]'`."
+                )
+            client_kwargs: Dict[str, Any] = dict(s3_kwargs)
+            if endpoint_url:
+                client_kwargs["endpoint_url"] = endpoint_url
+            if region_name:
+                client_kwargs["region_name"] = region_name
+            if aws_access_key_id:
+                client_kwargs["aws_access_key_id"] = aws_access_key_id
+            if aws_secret_access_key:
+                client_kwargs["aws_secret_access_key"] = aws_secret_access_key
+            if aws_session_token:
+                client_kwargs["aws_session_token"] = aws_session_token
+
+            session = boto3.Session(profile_name=profile_name) if profile_name else boto3
+            self.s3_client = session.client("s3", **client_kwargs)
+        else:
+            self.s3_client = None
 
     def fetch_range(self, start: int, end: int) -> bytes:
         """
@@ -22,7 +79,23 @@ class RemoteRangeReader:
         """
         if start >= end:
             return b""
-        
+
+        if self.s3_client is not None and self.bucket and self.key:
+            try:
+                # S3 Range header is inclusive: bytes=start-(end-1)
+                range_header = f"bytes={start}-{end - 1}"
+                resp = self.s3_client.get_object(
+                    Bucket=self.bucket,
+                    Key=self.key,
+                    Range=range_header
+                )
+                data = resp["Body"].read()
+                self.bytes_transferred += len(data)
+                self.read_count += 1
+                return data
+            except Exception as e:
+                raise RuntimeError(f"S3 range request failed for {self.url} [{start}..{end}): {e}") from e
+
         req = urllib.request.Request(self.url, headers={
             **self.headers,
             "Range": f"bytes={start}-{end - 1}"
@@ -38,11 +111,20 @@ class RemoteRangeReader:
 
     def head(self) -> Dict[str, str]:
         """Perform HEAD request to inspect headers (ETag, Content-Length, etc)."""
+        if self.s3_client is not None and self.bucket and self.key:
+            try:
+                resp = self.s3_client.head_object(Bucket=self.bucket, Key=self.key)
+                etag = resp.get("ETag", "").strip('"')
+                content_length = str(resp.get("ContentLength", 0))
+                return {"ETag": etag, "Content-Length": content_length}
+            except Exception:
+                return {}
+
         req = urllib.request.Request(self.url, headers=self.headers, method="HEAD")
         try:
             with urllib.request.urlopen(req) as resp:
                 return dict(resp.headers)
-        except urllib.error.HTTPError as e:
+        except urllib.error.HTTPError:
             return {}
 
 
@@ -50,10 +132,36 @@ class RemoteArchive:
     """
     Random-access remote MAR archive reader with 2-read index retrieval,
     local ~/.cache validation, and selective block streaming.
+    Supports HTTP(S), S3 URIs (s3://bucket/key), and custom S3 endpoints
+    (Cloudflare R2, AWS VPC endpoints, MinIO).
     """
-    def __init__(self, url: str, headers: Optional[Dict[str, str]] = None, cache_dir: Optional[str] = None):
+    def __init__(
+        self,
+        url: str,
+        headers: Optional[Dict[str, str]] = None,
+        cache_dir: Optional[str] = None,
+        endpoint_url: Optional[str] = None,
+        region_name: Optional[str] = None,
+        aws_access_key_id: Optional[str] = None,
+        aws_secret_access_key: Optional[str] = None,
+        aws_session_token: Optional[str] = None,
+        profile_name: Optional[str] = None,
+        s3_client: Optional[Any] = None,
+        **s3_kwargs
+    ):
         self.url = url
-        self.client = RemoteRangeReader(url, headers)
+        self.client = RemoteRangeReader(
+            url,
+            headers=headers,
+            endpoint_url=endpoint_url,
+            region_name=region_name,
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key,
+            aws_session_token=aws_session_token,
+            profile_name=profile_name,
+            s3_client=s3_client,
+            **s3_kwargs
+        )
         self.cache_mgr = _mar.IndexCacheManager()
         self._reader: Optional[_mar.MarReader] = None
         self._temp_archive_path: Optional[str] = None

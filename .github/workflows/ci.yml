@@ -120,6 +120,9 @@ jobs:
           submodules: recursive
           ref: ${{ inputs.sha || github.sha }}
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Cache apt packages
         if: runner.os == 'Linux'
         uses: actions/cache@v4
@@ -148,11 +151,23 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install pkg-config zstd lz4 libdeflate bzip2 blake3 || true
 
-      - name: Build
+      - name: Build C++
         run: make -j
 
-      - name: Unit tests
+      - name: C++ unit tests
         run: make test
+
+      - name: Rust unit tests
+        run: cargo test --release --manifest-path rust/Cargo.toml
+
+      - name: Build pure Rust CLI
+        run: cargo build --release --manifest-path rust/Cargo.toml --bin mar
+
+      - name: Smoke test Rust CLI
+        run: |
+          TARGET_DIR=$(cargo metadata --format-version 1 --manifest-path rust/Cargo.toml | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+          "${TARGET_DIR}/release/mar" version
+          "${TARGET_DIR}/release/mar" --help
 
   # ---------------------------------------------------------------------------
   # Distribution build — produces the release artifacts
@@ -174,6 +189,9 @@ jobs:
         with:
           submodules: recursive
           ref: ${{ inputs.sha || github.sha }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Build distribution binaries (Linux, musl via Alpine)
         run: |
@@ -222,6 +240,15 @@ jobs:
           # Verify files exist on host
           ls -lh dist/mar-* || (echo "ERROR: Dist files not found on host"; exit 1)
 
+      - name: Build Rust distribution binary (Linux)
+        run: |
+          cargo build --release --manifest-path rust/Cargo.toml --bin mar
+          TARGET_DIR=$(cargo metadata --format-version 1 --manifest-path rust/Cargo.toml | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+          cp "${TARGET_DIR}/release/mar" dist/mar-rust-linux-x86_64
+          chmod +x dist/mar-rust-linux-x86_64
+          dist/mar-rust-linux-x86_64 version
+          ls -lh dist/mar-rust-*
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -255,6 +282,9 @@ jobs:
           submodules: recursive
           ref: ${{ inputs.sha || github.sha }}
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Cache Homebrew downloads
         uses: actions/cache@v4
         with:
@@ -265,7 +295,7 @@ jobs:
       - name: Install dependencies
         run: brew install pkg-config zstd lz4 libdeflate bzip2 blake3 || true
 
-      - name: Build distribution binary
+      - name: Build C++ distribution binary
         run: |
           mkdir -p dist
           make STATIC=1 BUILD=release \
@@ -273,11 +303,29 @@ jobs:
             all-internal
           ls -lh dist/${{ matrix.artifact-name }}
 
+      - name: Build Rust distribution binary (macOS ARM64)
+        run: |
+          cargo build --release --manifest-path rust/Cargo.toml --bin mar
+          TARGET_DIR=$(cargo metadata --format-version 1 --manifest-path rust/Cargo.toml | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+          cp "${TARGET_DIR}/release/mar" dist/mar-rust-macos-arm64
+          chmod +x dist/mar-rust-macos-arm64
+          ls -lh dist/mar-rust-macos-arm64
+
+      - name: Smoke test and verify macOS binaries
+        run: |
+          ./dist/${{ matrix.artifact-name }} version
+          ./dist/mar-rust-macos-arm64 version
+          echo "Running CLI integration tests against macOS Rust binary..."
+          MAR_BIN="${GITHUB_WORKSPACE}/dist/mar-rust-macos-arm64" \
+            ./tests/integration_test.sh
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: mar-binaries-${{ matrix.artifact-name }}
-          path: dist/${{ matrix.artifact-name }}
+          path: |
+            dist/${{ matrix.artifact-name }}
+            dist/mar-rust-macos-arm64
           retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 30 || 1 }}
 
   # ---------------------------------------------------------------------------
@@ -288,12 +336,20 @@ jobs:
   # artifact that would be shipped to users. MAR_BIN overrides the default
   # ./mar path in integration_test.sh.
   #
-  # Linux: the musl binary is fully static — no extra deps needed.
+  # Linux: tests both the C++ musl static binary and the Rust binary.
   # ---------------------------------------------------------------------------
   integration-test:
-    name: Integration Tests (Linux)
+    name: Integration Tests (${{ matrix.target }})
     needs: dist
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: "C++ (musl)"
+            bin_path: "dist/mar-linux-x86_64-musl"
+          - target: "Rust (mar-rust)"
+            bin_path: "dist/mar-rust-linux-x86_64"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -310,16 +366,17 @@ jobs:
       - name: Run integration tests
         run: |
           # Verify the artifact exists before proceeding
-          if [ ! -f "dist/mar-linux-x86_64-musl" ]; then
-            echo "❌ ERROR: Distribution binary not found!"
+          if [ ! -f "${{ matrix.bin_path }}" ]; then
+            echo "❌ ERROR: Distribution binary not found at ${{ matrix.bin_path }}!"
             echo "Contents of dist directory:"
             ls -lh dist/ || echo "dist directory is empty"
             exit 1
           fi
           
-          echo "✅ Found binary: $(ls -lh dist/mar-linux-x86_64-musl)"
-          chmod +x dist/mar-linux-x86_64-musl
-          MAR_BIN="${GITHUB_WORKSPACE}/dist/mar-linux-x86_64-musl" \
+          echo "✅ Found binary: $(ls -lh ${{ matrix.bin_path }})"
+          chmod +x "${{ matrix.bin_path }}"
+          "${{ matrix.bin_path }}" version
+          MAR_BIN="${GITHUB_WORKSPACE}/${{ matrix.bin_path }}" \
             ./tests/integration_test.sh
 
   # ---------------------------------------------------------------------------
@@ -340,6 +397,20 @@ jobs:
           path: all-dist
           pattern: mar-binaries-*
           merge-multiple: true
+
+      - name: Verify release binaries and compute checksums
+        run: |
+          cd all-dist
+          ls -lh
+          chmod +x mar-*
+          if [ -f "mar-rust-linux-x86_64" ]; then
+            ./mar-rust-linux-x86_64 version
+          fi
+          if [ -f "mar-linux-x86_64-musl" ]; then
+            ./mar-linux-x86_64-musl version
+          fi
+          sha256sum mar-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

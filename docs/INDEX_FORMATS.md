@@ -48,6 +48,7 @@ Immediately following the archive name is a 4-byte `u32 section_count`, followed
 | 5  | Email | Email archive indexing |
 | 6  | TimeSeries | Temporal data indexing |
 | 7  | BM25 | Probabilistic lexical retrieval |
+| 8  | Fasta | Random access sequence index for protein/genomic FASTA |
 
 ---
 
@@ -136,3 +137,62 @@ The inverted index (postings lists).
 #### 4. `DOC_LENGTHS` (Type 4)
 An array of `num_docs` document lengths (in terms).
 - Size: `num_docs * sizeof(u32)`
+
+---
+
+## FASTA Random Access Index Format (Type 8)
+
+The FASTA index provides sub-microsecond random access ($O(1)$) and high-throughput streaming iteration over large multi-gigabyte/terabyte protein (e.g., AlphaFold, UniProt, ESM) and genomic sequence archives without requiring full archive decompression.
+
+### Sections
+
+#### 1. `FASTA_PARAMS` (Type 1)
+A 64-byte fixed parameter block describing global index configuration.
+
+| Offset | Size | Type | Name | Description |
+|--------|------|------|------|-------------|
+| 0      | 8    | u64  | record_count | Total sequence records indexed across all files |
+| 8      | 4    | u32  | file_count | Total FASTA files indexed in the archive |
+| 12     | 4    | u32  | hash_slot_count | Capacity of the open-addressing hash table (power-of-two) |
+| 16     | 8    | u64  | seed | Hash seed for XXHash3_64 |
+| 24     | 4    | u32  | flags | Reserved / index configuration flags |
+| 28     | 4    | u32  | name_table_size | Size of the string table in bytes |
+| 32     | 32   | u8[] | reserved | Reserved padding to 64 bytes |
+
+#### 2. `FASTA_FILE_DIR` (Type 2)
+An array of `file_count` entries (24 bytes each) mapping in-archive files to contiguous record ranges.
+
+| Offset | Size | Type | Name | Description |
+|--------|------|------|------|-------------|
+| 0      | 4    | u32  | file_id | Archive file index in MAR `FILE_TABLE` |
+| 4      | 8    | u64  | record_start_idx | 0-based offset into `FASTA_RECORD_TABLE` for this file |
+| 12     | 8    | u64  | record_count | Number of records in this file |
+| 20     | 4    | u32  | filename_offset | Byte offset in `FASTA_NAME_TABLE` for the file name |
+
+#### 3. `FASTA_RECORD_TABLE` (Type 3)
+A dense array of `record_count` entries (36 bytes each) describing each individual FASTA sequence record.
+
+| Offset | Size | Type | Name | Description |
+|--------|------|------|------|-------------|
+| 0      | 4    | u32  | file_id | Archive file index containing this sequence |
+| 4      | 4    | u32  | name_offset | Byte offset in `FASTA_NAME_TABLE` for the accession ID |
+| 8      | 8    | u64  | file_byte_offset | Uncompressed byte offset of `>` in the archive stream |
+| 16     | 4    | u32  | header_len | Header length in bytes (including `>` and newline) |
+| 20     | 4    | u32  | raw_seq_bytes | Raw sequence byte span (including any embedded newlines) |
+| 24     | 8    | u64  | seq_len | Pure sequence length in bases / amino acids |
+| 32     | 2    | u16  | line_len | Bases per line (0 if variable or single-line sequence) |
+| 34     | 2    | u16  | line_blen | Bytes per line including newline delimiter |
+
+#### 4. `FASTA_NAME_TABLE` (Type 4)
+A contiguous, null-delimited UTF-8 string table storing all filenames and sequence accession IDs.
+
+#### 5. `FASTA_HASH_INDEX` (Type 5)
+A power-of-two open-addressing / Robin Hood hash table for $O(1)$ sub-microsecond record lookups.
+Consists of `hash_slot_count` 16-byte slots:
+
+| Offset | Size | Type | Name | Description |
+|--------|------|------|------|-------------|
+| 0      | 8    | u64  | hash64 | XXHash3_64 hash of accession ID (0 = empty slot) |
+| 8      | 4    | u32  | record_idx | Index into `FASTA_RECORD_TABLE` (`UINT32_MAX` = empty slot) |
+| 12     | 4    | u32  | name_offset | Byte offset in `FASTA_NAME_TABLE` for verification |
+

@@ -38,7 +38,7 @@ pub fn madvise_pattern(ptr: *const u8, len: usize, pattern: AccessPattern) {
 
 /// Hints the OS kernel on file caching and readahead behavior for a given file descriptor.
 #[inline]
-pub fn advise_file(file: &File, _offset: u64, _len: u64, pattern: AccessPattern) {
+pub fn advise_file(file: &File, offset: u64, len: u64, pattern: AccessPattern) {
     #[cfg(unix)]
     {
         use std::os::unix::io::AsRawFd;
@@ -56,6 +56,7 @@ pub fn advise_file(file: &File, _offset: u64, _len: u64, pattern: AccessPattern)
             }
             #[cfg(target_os = "macos")]
             {
+                let _ = (offset, len);
                 match pattern {
                     AccessPattern::Sequential => {
                         // F_RDAHEAD: Enable speculative readahead

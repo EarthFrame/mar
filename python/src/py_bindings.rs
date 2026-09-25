@@ -64,6 +64,7 @@ pub enum PyMAIIndexType {
     EMAIL = 5,
     TIMESERIES = 6,
     BM25 = 7,
+    FASTA = 8,
 }
 
 #[pyclass(name = "WriteOptions")]
@@ -404,6 +405,7 @@ impl PyMAIWriter {
             PyMAIIndexType::EMAIL => MAIIndexType::Email,
             PyMAIIndexType::TIMESERIES => MAIIndexType::TimeSeries,
             PyMAIIndexType::BM25 => MAIIndexType::BM25,
+            PyMAIIndexType::FASTA => MAIIndexType::Fasta,
         };
         Self {
             inner: MAIWriter::new(archive_path, it, archive_hash),
@@ -522,6 +524,9 @@ impl PyIndexer {
             PyMAIIndexType::GENOMIC => {
                 build_genomic_index(&reader.inner, &mut writer.inner, &rust_opts).map_err(PyRuntimeError::new_err)
             }
+            PyMAIIndexType::FASTA => {
+                build_fasta_index(&reader.inner, &mut writer.inner, &rust_opts).map_err(PyRuntimeError::new_err)
+            }
             _ => Err(PyRuntimeError::new_err(format!("Unsupported indexer type: {}", self.type_name))),
         }
     }
@@ -610,6 +615,10 @@ fn py_get_indexer(type_name: &str) -> PyResult<PyIndexer> {
             type_name: "genomic".to_string(),
             index_type: PyMAIIndexType::GENOMIC,
         }),
+        "fasta" => Ok(PyIndexer {
+            type_name: "fasta".to_string(),
+            index_type: PyMAIIndexType::FASTA,
+        }),
         _ => Err(PyRuntimeError::new_err(format!("Unknown indexer: {}", type_name))),
     }
 }
@@ -622,6 +631,7 @@ fn py_list_index_types() -> Vec<String> {
         "email".to_string(),
         "timeseries".to_string(),
         "genomic".to_string(),
+        "fasta".to_string(),
         "vector".to_string(),
     ]
 }
@@ -674,6 +684,15 @@ fn py_search(archive_path: &str, index_path: &str, query: &str, opts: &PyIndexOp
         }).collect())
     } else if itype == MAIIndexType::Genomic as u8 {
         let results = search_genomic(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
+        Ok(results.into_iter().map(|r| PySearchResult {
+            file_id: r.file_id,
+            filename: r.filename,
+            score: r.score,
+            content: r.content,
+            metadata: r.metadata,
+        }).collect())
+    } else if itype == MAIIndexType::Fasta as u8 {
+        let results = search_fasta(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
         Ok(results.into_iter().map(|r| PySearchResult {
             file_id: r.file_id,
             filename: r.filename,

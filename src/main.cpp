@@ -1927,7 +1927,7 @@ Create a sidecar index for an archive.
 
 Options:
   -i, --input <archive>      Path to the .mar archive
-  --type <type>              Index type: minhash, vector, genomic, email, timeseries
+  --type <type>              Index type: minhash, vector, genomic, fasta, email, timeseries
   --aux <file>               Auxiliary input file (repeatable)
   --with <key=value>         Type-specific parameter (repeatable)
   -o, --output <file>        Custom output path (default: <archive>.<type>.mai)
@@ -1940,6 +1940,7 @@ Examples:
   mar index -i data.mar --type minhash --with bit_width=16
   mar index -i data.mar --type vector  --with url=http://localhost:7998
   mar index -i data.mar --type genomic
+  mar index -i data.mar --type fasta
   mar index -i data.mar --type timeseries --with ts_col=timestamp --with ts_format=iso8601
 )";
     auto types = IndexRegistry::instance().list_index_types();
@@ -2061,6 +2062,10 @@ Universal --with parameters:
 
 Genomic region extraction example:
   mar search -i ref.mar --index ref.genomic.mai chr1:1000000-2000000 --extract
+
+FASTA accession query and extraction:
+  mar search -i proteins.mar --index proteins.fasta.mai AF-A0A022R2B6-F1 --extract
+  mar search -i multi.mar --index multi.fasta.mai human.fa:AF-P12345-F1 --extract
 
 Vector semantic search example:
   mar search -i docs.mar --index docs.vector.mai "Hamilton case" \

@@ -117,6 +117,51 @@ class MarArchive:
             metadata=r.metadata
         ) for r in results]
 
+    def get_fasta_record(self, index_path: str, query: str, file: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a single FASTA sequence record by ID with sub-millisecond latency.
+
+        Args:
+            index_path: Path to the .fasta.mai index file.
+            query: Record accession ID (e.g., 'AF-A0A022R2B6-F1').
+            file: Optional archive filename to scope search (e.g. 'human.fa').
+
+        Returns:
+            Dictionary with keys 'id', 'filename', 'seq_len', 'file_byte_offset', 'header', and 'sequence'.
+        """
+        params = {}
+        if file:
+            params["file"] = file
+        results = self.search(index_path, query, topk=1, **params)
+        if not results:
+            return None
+        res = results[0]
+        meta = res.metadata
+        offset = int(meta.get("offset", 0))
+        raw_bytes = int(meta.get("raw_bytes", 0))
+        
+        # Read the raw record bytes
+        file_bytes = self.read_file(res.filename)
+        # Parse header line and sequence
+        record_slice = file_bytes[offset:offset + raw_bytes + 2048] # ample slice
+        first_nl = record_slice.find(b"\n")
+        if first_nl == -1:
+            return None
+        header = record_slice[:first_nl].decode("utf-8", errors="replace").lstrip(">").strip()
+        
+        # Collect sequence bases
+        seq_slice = record_slice[first_nl + 1:first_nl + 1 + raw_bytes]
+        seq = "".join(seq_slice.decode("ascii", errors="ignore").split())
+        
+        return {
+            "id": meta.get("id", query),
+            "filename": res.filename,
+            "seq_len": int(meta.get("seq_len", len(seq))),
+            "file_byte_offset": offset,
+            "header": header,
+            "sequence": seq,
+        }
+
 def create_archive(path: str, files: List[str], compression: str = "zstd", **kwargs):
     """Create a new MAR archive from a list of files."""
     opts = _mar.WriteOptions()

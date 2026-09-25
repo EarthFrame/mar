@@ -6,7 +6,7 @@ from pymar import _mar
 from pymar.core import MarArchive, create_archive, index_archive, get_hash, get_version
 from pymar.tools import (
     mar_create, mar_index, mar_list, mar_get, mar_search, 
-    mar_hash, mar_validate, mar_header, mar_version
+    mar_hash, mar_validate, mar_header, mar_version, mar_fasta_get
 )
 
 @pytest.fixture
@@ -298,6 +298,47 @@ def test_mar_index_genomic(tmp_path):
     results = mar_search(path, index_path, "chr1")
     assert len(results) >= 1
     assert "chr1.fa" in results[0]["filename"]
+
+def test_mar_index_fasta_multi_file_and_get(tmp_path):
+    path = str(tmp_path / "proteins.mar")
+    opts = _mar.WriteOptions()
+    opts.multiblock = True
+    opts.block_size = 4096
+    writer = _mar.MarWriter(path, opts)
+    writer.add_memory("human.fasta", b">AF-A0A022R2B6-F1 AlphaFold human\nMKFLVNVALVFMVVYISYIYAAFPSQ\nEKSNEEQKEEEREEEEKK\n>P12345 Human protein\nACDEFGHIKLMNPQRSTVWY\n")
+    writer.add_memory("mouse.fa", b">MOUSE_001 Mouse protein\nMVKVGVNGFGRIGRLVTRAAFNSG\n>AF-A0A022R2B6-F1 Shared isoform\nACDEFGHIKLMNPQRSTVWY\n")
+    writer.finish()
+
+    index_path = str(tmp_path / "proteins.fasta.mai")
+    msg = mar_index(path, "fasta", index_path)
+    assert "Successfully created fasta index" in msg
+    assert os.path.exists(index_path)
+
+    # 1. Search unique record
+    results = mar_search(path, index_path, "P12345")
+    assert len(results) == 1
+    assert results[0]["filename"] == "human.fasta"
+    assert results[0]["metadata"]["id"] == "P12345"
+    assert results[0]["metadata"]["seq_len"] == "20"
+
+    # 2. Get record directly
+    rec = mar_fasta_get(path, index_path, "P12345")
+    assert rec is not None
+    assert rec["id"] == "P12345"
+    assert rec["sequence"] == "ACDEFGHIKLMNPQRSTVWY"
+    assert rec["filename"] == "human.fasta"
+
+    # 3. Disambiguate using file param
+    rec_mouse = mar_fasta_get(path, index_path, "AF-A0A022R2B6-F1", file="mouse.fa")
+    assert rec_mouse is not None
+    assert rec_mouse["filename"] == "mouse.fa"
+    assert rec_mouse["sequence"] == "ACDEFGHIKLMNPQRSTVWY"
+
+    # 4. Qualified query in mar_search
+    results_qual = mar_search(path, index_path, "human.fasta:AF-A0A022R2B6-F1")
+    assert len(results_qual) == 1
+    assert results_qual[0]["filename"] == "human.fasta"
+    assert results_qual[0]["metadata"]["seq_len"] == "44"
 
 if __name__ == "__main__":
     pytest.main([__file__])

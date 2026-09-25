@@ -1,4 +1,5 @@
 use crate::checksum::XXHash3_64;
+use crate::format::EntryType;
 use crate::reader::MarReader;
 use std::collections::HashMap;
 use std::fs::File;
@@ -19,6 +20,7 @@ pub enum MAIIndexType {
     Email = 5,
     TimeSeries = 6,
     BM25 = 7,
+    Fasta = 8,
 }
 
 impl MAIIndexType {
@@ -31,6 +33,7 @@ impl MAIIndexType {
             5 => Some(MAIIndexType::Email),
             6 => Some(MAIIndexType::TimeSeries),
             7 => Some(MAIIndexType::BM25),
+            8 => Some(MAIIndexType::Fasta),
             _ => None,
         }
     }
@@ -1412,6 +1415,580 @@ pub fn search_genomic(
     }
 
     Ok(results)
+}
+
+// ============================================================================
+// FASTA Index & Search Implementation in pure Rust
+// ============================================================================
+
+pub const SEC_FASTA_PARAMS: u32 = 1;
+pub const SEC_FASTA_FILE_DIR: u32 = 2;
+pub const SEC_FASTA_RECORD_TABLE: u32 = 3;
+pub const SEC_FASTA_NAME_TABLE: u32 = 4;
+pub const SEC_FASTA_HASH_INDEX: u32 = 5;
+
+#[repr(C, packed)]
+#[derive(Clone, Copy, Default)]
+pub struct FastaParams {
+    pub record_count: u64,
+    pub file_count: u32,
+    pub hash_slot_count: u32,
+    pub seed: u64,
+    pub flags: u32,
+    pub name_table_size: u32,
+    pub reserved: [u8; 32],
+}
+
+#[repr(C, packed)]
+#[derive(Clone, Copy, Default)]
+pub struct FastaFileEntry {
+    pub file_id: u32,
+    pub record_start_idx: u64,
+    pub record_count: u64,
+    pub filename_offset: u32,
+}
+
+#[repr(C, packed)]
+#[derive(Clone, Copy, Default)]
+pub struct FastaRecordEntry {
+    pub file_id: u32,
+    pub name_offset: u32,
+    pub file_byte_offset: u64,
+    pub header_len: u32,
+    pub raw_seq_bytes: u32,
+    pub seq_len: u64,
+    pub line_len: u16,
+    pub line_blen: u16,
+}
+
+#[repr(C, packed)]
+#[derive(Clone, Copy, Default)]
+pub struct FastaHashSlot {
+    pub hash64: u64,
+    pub record_idx: u32,
+    pub name_offset: u32,
+}
+
+fn is_fasta_ext(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.ends_with(".fa")
+        || lower.ends_with(".fasta")
+        || lower.ends_with(".fna")
+        || lower.ends_with(".faa")
+        || lower.ends_with(".ffn")
+        || lower.ends_with(".frn")
+}
+
+fn hash_fasta_name(name: &[u8], seed: u64) -> u64 {
+    let mut hasher = XXHash3_64::new(seed);
+    hasher.update(name);
+    let h = hasher.finalize();
+    if h == 0 { 1 } else { h }
+}
+
+struct RustFastaStreamParser {
+    stream_offset: u64,
+    has_active: bool,
+    current_name: String,
+    current_offset: u64,
+    current_header_len: u32,
+    current_raw_seq_bytes: u32,
+    current_seq_len: u64,
+    current_line_len: u16,
+    current_line_blen: u16,
+    first_line_seen: bool,
+    carry: Vec<u8>,
+    carry_start_offset: u64,
+    finished_records: Vec<(String, u64, u32, u32, u64, u16, u16)>,
+}
+
+impl RustFastaStreamParser {
+    fn new() -> Self {
+        Self {
+            stream_offset: 0,
+            has_active: false,
+            current_name: String::new(),
+            current_offset: 0,
+            current_header_len: 0,
+            current_raw_seq_bytes: 0,
+            current_seq_len: 0,
+            current_line_len: 0,
+            current_line_blen: 0,
+            first_line_seen: false,
+            carry: Vec::new(),
+            carry_start_offset: 0,
+            finished_records: Vec::new(),
+        }
+    }
+
+    fn process_line(&mut self, line: &[u8], line_offset: u64) {
+        if line.is_empty() {
+            return;
+        }
+        if line[0] == b'>' {
+            if self.has_active {
+                self.finished_records.push((
+                    std::mem::take(&mut self.current_name),
+                    self.current_offset,
+                    self.current_header_len,
+                    self.current_raw_seq_bytes,
+                    self.current_seq_len,
+                    self.current_line_len,
+                    self.current_line_blen,
+                ));
+                self.has_active = false;
+            }
+
+            self.current_offset = line_offset;
+            self.current_header_len = line.len() as u32;
+            self.current_raw_seq_bytes = 0;
+            self.current_seq_len = 0;
+            self.current_line_len = 0;
+            self.current_line_blen = 0;
+            self.first_line_seen = false;
+
+            let mut start = 1;
+            while start < line.len() && (line[start] == b' ' || line[start] == b'\t') {
+                start += 1;
+            }
+            let mut end = start;
+            while end < line.len()
+                && line[end] != b' '
+                && line[end] != b'\t'
+                && line[end] != b'\r'
+                && line[end] != b'\n'
+            {
+                end += 1;
+            }
+            if end > start {
+                self.current_name = String::from_utf8_lossy(&line[start..end]).to_string();
+            }
+            self.has_active = true;
+        } else if self.has_active {
+            self.current_raw_seq_bytes += line.len() as u32;
+            let mut bases = line.len();
+            while bases > 0 && (line[bases - 1] == b'\r' || line[bases - 1] == b'\n') {
+                bases -= 1;
+            }
+            self.current_seq_len += bases as u64;
+
+            if !self.first_line_seen && bases > 0 {
+                self.current_line_len = bases.min(65535) as u16;
+                self.current_line_blen = line.len().min(65535) as u16;
+                self.first_line_seen = true;
+            }
+        }
+    }
+
+    fn finish(&mut self) {
+        if !self.carry.is_empty() {
+            let carry_data = std::mem::take(&mut self.carry);
+            self.process_line(&carry_data, self.carry_start_offset);
+        }
+        if self.has_active {
+            self.finished_records.push((
+                std::mem::take(&mut self.current_name),
+                self.current_offset,
+                self.current_header_len,
+                self.current_raw_seq_bytes,
+                self.current_seq_len,
+                self.current_line_len,
+                self.current_line_blen,
+            ));
+            self.has_active = false;
+        }
+    }
+}
+
+impl crate::async_io::StreamingSink for RustFastaStreamParser {
+    fn write_chunk(&mut self, data: &[u8]) -> std::io::Result<()> {
+        if data.is_empty() {
+            return Ok(());
+        }
+
+        let mut p = 0;
+        let mut remaining = data.len();
+
+        if !self.carry.is_empty() {
+            if let Some(pos) = data.iter().position(|&b| b == b'\n') {
+                let take = pos + 1;
+                self.carry.extend_from_slice(&data[..take]);
+                let carry_data = std::mem::take(&mut self.carry);
+                self.process_line(&carry_data, self.carry_start_offset);
+                p += take;
+                remaining -= take;
+                self.stream_offset += take as u64;
+            } else {
+                self.carry.extend_from_slice(data);
+                self.stream_offset += data.len() as u64;
+                return Ok(());
+            }
+        }
+
+        while remaining > 0 {
+            if let Some(pos) = data[p..].iter().position(|&b| b == b'\n') {
+                let line_len = pos + 1;
+                self.process_line(&data[p..p + line_len], self.stream_offset);
+                p += line_len;
+                self.stream_offset += line_len as u64;
+                remaining -= line_len;
+            } else {
+                self.carry_start_offset = self.stream_offset;
+                self.carry.extend_from_slice(&data[p..]);
+                self.stream_offset += remaining as u64;
+                break;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub fn build_fasta_index(
+    reader: &MarReader,
+    writer: &mut MAIWriter,
+    opts: &IndexOptions,
+) -> Result<(), String> {
+    let file_count = reader.file_count();
+    let seed: u64 = opts.params.get("seed").and_then(|s| s.parse().ok()).unwrap_or(42);
+
+    let mut file_entries = Vec::new();
+    let mut record_entries = Vec::new();
+    let mut record_names = Vec::new();
+    let mut name_table = Vec::new();
+    let mut total_indexed_files = 0u32;
+
+    for fi in 0..file_count {
+        let entry_opt = reader.get_file_entry(fi);
+        if entry_opt.is_none() || entry_opt.as_ref().unwrap().entry_type != EntryType::RegularFile {
+            continue;
+        }
+
+        let fname = reader.get_name(fi).unwrap_or_default();
+        if !is_fasta_ext(&fname) {
+            continue;
+        }
+
+        let record_start_idx = record_entries.len() as u64;
+        let mut parser = RustFastaStreamParser::new();
+        reader.stream_file_by_index(fi, &mut parser)?;
+        parser.finish();
+
+        let count = parser.finished_records.len() as u64;
+        if count == 0 && entry_opt.unwrap().logical_size > 0 {
+            continue;
+        }
+
+        let fname_offset = name_table.len() as u32;
+        name_table.extend_from_slice(fname.as_bytes());
+        name_table.push(0);
+
+        file_entries.push(FastaFileEntry {
+            file_id: fi as u32,
+            record_start_idx,
+            record_count: count,
+            filename_offset: fname_offset,
+        });
+        total_indexed_files += 1;
+
+        for (rec_name, off, hlen, rbytes, slen, llen, lblen) in parser.finished_records {
+            let name_off = name_table.len() as u32;
+            name_table.extend_from_slice(rec_name.as_bytes());
+            name_table.push(0);
+
+            record_entries.push(FastaRecordEntry {
+                file_id: fi as u32,
+                name_offset: name_off,
+                file_byte_offset: off,
+                header_len: hlen,
+                raw_seq_bytes: rbytes,
+                seq_len: slen,
+                line_len: llen,
+                line_blen: lblen,
+            });
+            record_names.push(rec_name);
+        }
+    }
+
+    let total_records = record_entries.len() as u64;
+    let mut slot_count = 16u32;
+    while (slot_count as u64) < (total_records * 10 / 7) + 16 {
+        slot_count <<= 1;
+    }
+
+    let mut hash_slots = vec![FastaHashSlot { hash64: 0, record_idx: u32::MAX, name_offset: 0 }; slot_count as usize];
+    let mask = slot_count - 1;
+
+    for (ri, name) in record_names.iter().enumerate() {
+        let h = hash_fasta_name(name.as_bytes(), seed);
+        let mut slot = (h & (mask as u64)) as u32;
+        let mut dist = 0u32;
+
+        let mut curr = FastaHashSlot {
+            hash64: h,
+            record_idx: ri as u32,
+            name_offset: record_entries[ri].name_offset,
+        };
+
+        loop {
+            let slot_idx = slot as usize;
+            if hash_slots[slot_idx].record_idx == u32::MAX {
+                hash_slots[slot_idx] = curr;
+                break;
+            }
+
+            let existing_slot = (hash_slots[slot_idx].hash64 & (mask as u64)) as u32;
+            let existing_dist = (slot + slot_count - existing_slot) & mask;
+
+            if dist > existing_dist {
+                std::mem::swap(&mut curr, &mut hash_slots[slot_idx]);
+                dist = existing_dist;
+            }
+
+            slot = (slot + 1) & mask;
+            dist += 1;
+        }
+    }
+
+    let params = FastaParams {
+        record_count: total_records as u64,
+        file_count: total_indexed_files,
+        hash_slot_count: slot_count,
+        seed,
+        flags: 0,
+        name_table_size: name_table.len() as u32,
+        reserved: [0u8; 32],
+    };
+
+    let params_bytes = unsafe {
+        std::slice::from_raw_parts(&params as *const FastaParams as *const u8, std::mem::size_of::<FastaParams>())
+    };
+    writer.add_section(SEC_FASTA_PARAMS, params_bytes.to_vec(), 0);
+
+    let file_dir_bytes = unsafe {
+        std::slice::from_raw_parts(
+            file_entries.as_ptr() as *const u8,
+            file_entries.len() * std::mem::size_of::<FastaFileEntry>(),
+        )
+    };
+    writer.add_section(SEC_FASTA_FILE_DIR, file_dir_bytes.to_vec(), 0);
+
+    let record_sec_bytes = unsafe {
+        std::slice::from_raw_parts(
+            record_entries.as_ptr() as *const u8,
+            record_entries.len() * std::mem::size_of::<FastaRecordEntry>(),
+        )
+    };
+    writer.add_section(SEC_FASTA_RECORD_TABLE, record_sec_bytes.to_vec(), 0);
+
+    writer.add_section(SEC_FASTA_NAME_TABLE, name_table, 0);
+
+    let hash_sec_bytes = unsafe {
+        std::slice::from_raw_parts(
+            hash_slots.as_ptr() as *const u8,
+            hash_slots.len() * std::mem::size_of::<FastaHashSlot>(),
+        )
+    };
+    writer.add_section(SEC_FASTA_HASH_INDEX, hash_sec_bytes.to_vec(), 0);
+
+    Ok(())
+}
+
+pub fn search_fasta(
+    archive: &MarReader,
+    index: &MAIReader,
+    query: &str,
+    opts: &IndexOptions,
+) -> Result<Vec<SearchResult>, String> {
+    let params_data = index.read_section(SEC_FASTA_PARAMS);
+    if params_data.len() < std::mem::size_of::<FastaParams>() {
+        return Err("Corrupt FASTA params".to_string());
+    }
+    let params: FastaParams = unsafe { std::ptr::read_unaligned(params_data.as_ptr() as *const FastaParams) };
+
+    let file_dir_data = index.read_section(SEC_FASTA_FILE_DIR);
+    let num_files = params.file_count as usize;
+    let file_dir: &[FastaFileEntry] = if num_files > 0 && file_dir_data.len() >= num_files * std::mem::size_of::<FastaFileEntry>() {
+        unsafe {
+            std::slice::from_raw_parts(file_dir_data.as_ptr() as *const FastaFileEntry, num_files)
+        }
+    } else {
+        &[]
+    };
+
+    let record_data = index.read_section(SEC_FASTA_RECORD_TABLE);
+    let num_records = params.record_count as usize;
+    let records: &[FastaRecordEntry] = if num_records > 0 && record_data.len() >= num_records * std::mem::size_of::<FastaRecordEntry>() {
+        unsafe {
+            std::slice::from_raw_parts(record_data.as_ptr() as *const FastaRecordEntry, num_records)
+        }
+    } else {
+        &[]
+    };
+
+    let name_table = index.read_section(SEC_FASTA_NAME_TABLE);
+    let hash_data = index.read_section(SEC_FASTA_HASH_INDEX);
+    let slot_count = params.hash_slot_count as usize;
+    let hash_slots: &[FastaHashSlot] = if slot_count > 0 && hash_data.len() >= slot_count * std::mem::size_of::<FastaHashSlot>() {
+        unsafe {
+            std::slice::from_raw_parts(hash_data.as_ptr() as *const FastaHashSlot, slot_count)
+        }
+    } else {
+        &[]
+    };
+
+    if records.is_empty() || name_table.is_empty() || hash_slots.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let get_str = |offset: u32| -> &str {
+        let off = offset as usize;
+        if off >= name_table.len() {
+            return "";
+        }
+        let rest = &name_table[off..];
+        if let Some(pos) = rest.iter().position(|&b| b == 0) {
+            std::str::from_utf8(&rest[..pos]).unwrap_or("")
+        } else {
+            std::str::from_utf8(rest).unwrap_or("")
+        }
+    };
+
+    let do_extract = opts.params.get("extract").map(|s| s == "true").unwrap_or(false);
+    let target_file = opts.params.get("file").cloned().unwrap_or_default();
+
+    let mut query_file = target_file;
+    let mut query_id = query.to_string();
+    if let Some(pos) = query.find(':') {
+        if query_file.is_empty() {
+            let potential_file = &query[..pos];
+            for f in file_dir {
+                if get_str(f.filename_offset) == potential_file {
+                    query_file = potential_file.to_string();
+                    query_id = query[pos + 1..].to_string();
+                    break;
+                }
+            }
+        }
+    }
+
+    let mut matched_records = Vec::new();
+
+    if !query_id.is_empty() && query_id != "*" {
+        let h = hash_fasta_name(query_id.as_bytes(), params.seed);
+        let mask = (params.hash_slot_count - 1) as u64;
+        let mut slot = (h & mask) as u32;
+        let mut dist = 0u32;
+
+        loop {
+            let sl = &hash_slots[slot as usize];
+            if sl.record_idx == u32::MAX {
+                break;
+            }
+
+            let ideal_slot = (sl.hash64 & mask) as u32;
+            let probe_dist = (slot + params.hash_slot_count - ideal_slot) & (params.hash_slot_count - 1);
+            if dist > probe_dist {
+                break;
+            }
+
+            if sl.hash64 == h {
+                let cand_name = get_str(sl.name_offset);
+                if query_id == cand_name {
+                    let rec = &records[sl.record_idx as usize];
+                    if query_file.is_empty() {
+                        matched_records.push(sl.record_idx);
+                    } else if let Some(fname) = archive.get_name(rec.file_id as usize) {
+                        if fname == query_file {
+                            matched_records.push(sl.record_idx);
+                        }
+                    }
+                }
+            }
+
+            slot = (slot + 1) & (params.hash_slot_count - 1);
+            dist += 1;
+        }
+    } else if !query_file.is_empty() {
+        for f in file_dir {
+            if get_str(f.filename_offset) == query_file {
+                for ri in 0..f.record_count {
+                    matched_records.push((f.record_start_idx + ri) as u32);
+                }
+                break;
+            }
+        }
+    }
+
+    let mut results = Vec::new();
+    for ri in matched_records {
+        let rec = &records[ri as usize];
+        let rec_name = get_str(rec.name_offset).to_string();
+        let fname = archive.get_name(rec.file_id as usize).unwrap_or_else(|| "(unknown)".to_string());
+
+        let mut metadata = HashMap::new();
+        metadata.insert("id".to_string(), rec_name.clone());
+        let seq_len = rec.seq_len;
+        let offset = rec.file_byte_offset;
+        let raw_bytes = rec.raw_seq_bytes;
+        metadata.insert("seq_len".to_string(), seq_len.to_string());
+        metadata.insert("offset".to_string(), offset.to_string());
+        metadata.insert("raw_bytes".to_string(), raw_bytes.to_string());
+
+        if do_extract {
+            extract_fasta_record(archive, rec);
+        }
+
+        results.push(SearchResult {
+            file_id: rec.file_id as usize,
+            filename: fname,
+            score: 1.0,
+            content: String::new(),
+            metadata,
+        });
+    }
+
+    Ok(results)
+}
+
+fn extract_fasta_record(archive: &MarReader, rec: &FastaRecordEntry) {
+    let start_byte = rec.file_byte_offset;
+    let total_bytes = rec.header_len as u64 + rec.raw_seq_bytes as u64;
+    let end_byte = start_byte + total_bytes;
+
+    let spans = archive.get_file_spans(rec.file_id as usize);
+    if spans.is_empty() {
+        if let Ok(data) = archive.read_file_by_index(rec.file_id as usize) {
+            if (start_byte as usize) < data.len() {
+                let len = (total_bytes as usize).min(data.len() - start_byte as usize);
+                let _ = std::io::stdout().write_all(&data[start_byte as usize..start_byte as usize + len]);
+            }
+        }
+        return;
+    }
+
+    let mut cur_file_offset = 0u64;
+    for span in spans {
+        let span_file_start = cur_file_offset;
+        let span_file_end = cur_file_offset + span.length as u64;
+        cur_file_offset = span_file_end;
+
+        if span_file_end <= start_byte || span_file_start >= end_byte {
+            continue;
+        }
+
+        let overlap_start = span_file_start.max(start_byte);
+        let overlap_end = span_file_end.min(end_byte);
+        let offset_in_span = (overlap_start - span_file_start) as usize;
+        let len_in_span = (overlap_end - overlap_start) as usize;
+
+        if let Ok(block_data) = archive.read_block(span.block_id as usize) {
+            let block_read_pos = span.offset_in_block as usize + offset_in_span;
+            if block_read_pos + len_in_span <= block_data.len() {
+                let _ = std::io::stdout().write_all(&block_data[block_read_pos..block_read_pos + len_in_span]);
+            }
+        }
+    }
 }
 
 
