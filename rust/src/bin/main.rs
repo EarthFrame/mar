@@ -171,7 +171,10 @@ Examples:
   mar slice alphafold.mar -o subset.mar "*.pdb"
   mar slice alphafold.mar -o subset.mar -i "AF-*.pdb" -x "*_relaxed_*.pdb"
   mar slice alphafold.mar -o subset.mar -T pdb_ids.txt
-  mar slice s3://alphafold-db/v4/proteome.mar -o subset.mar -T pdbs.txt"#);
+
+Remote slicing (S3, HTTPS) is supported via the Python CLI:
+  pymar slice s3://alphafold-db/v4/proteome.mar -o subset.mar -T pdbs.txt
+  pymar slice https://cdn.example.com/proteome.mar -o subset.mar -T pdbs.txt"#);
 }
 
 fn print_extract_usage() {
@@ -758,9 +761,10 @@ fn cmd_slice(args: &[String]) -> i32 {
         return EXIT_USAGE;
     }
 
-    // Remote archive delegation to Python (S3, HTTP, HTTPS)
+    // Remote archive check: delegate to Python pymar CLI
     if archive_path.starts_with("s3://") || archive_path.starts_with("http://") || archive_path.starts_with("https://") {
-        return delegate_to_python("slice", args);
+        print_error(&format!("Remote archives (s3://, http://, https://) require the Python CLI: pymar slice {} -o {}", archive_path, output_path), "slice");
+        return EXIT_USAGE;
     }
 
     if Path::new(&output_path).exists() && !force {
@@ -1860,28 +1864,6 @@ fn delegate_to_cpp(cmd_name: &str, args: &[String]) -> i32 {
     }
     eprintln!("mar: error: {} command requires C++ mar binary", cmd_name);
     EXIT_UNAVAILABLE
-}
-
-fn delegate_to_python(cmd_name: &str, args: &[String]) -> i32 {
-    let mut cmd = std::process::Command::new("python3");
-    cmd.arg("-m").arg("pymar").arg(cmd_name);
-    let opts = get_options();
-    if opts.quiet {
-        cmd.arg("-q");
-    }
-    for _ in 0..opts.verbose {
-        cmd.arg("-v");
-    }
-    for arg in args {
-        cmd.arg(arg);
-    }
-    match cmd.status() {
-        Ok(status) => status.code().unwrap_or(EXIT_ERROR),
-        Err(e) => {
-            print_error(&format!("Failed to delegate to pymar (python3 -m pymar): {}", e), cmd_name);
-            EXIT_ERROR
-        }
-    }
 }
 
 fn cmd_index(args: &[String]) -> i32 {

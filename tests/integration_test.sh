@@ -1441,6 +1441,9 @@ test_slice_roundtrip() {
     output=$("$MAR_BIN" list targets.mar)
     assert_output_contains "$output" "src_files/AF-101-model.pdb" "targets.mar contains AF-101"
     assert_output_contains "$output" "src_files/README.txt" "targets.mar contains README.txt"
+
+    # Reject remote URLs in native CLI
+    run_test "slice reject remote url" "$MAR_BIN slice s3://bucket/test.mar -o out.mar" 2
 }
 
 test_indexing_and_search() {

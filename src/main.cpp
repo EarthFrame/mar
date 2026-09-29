@@ -2106,31 +2106,6 @@ public:
     }
 };
 
-static int delegate_to_python(const std::string& cmd_name, int argc, char* argv[]) {
-    std::string cmd = "python3 -m pymar " + cmd_name;
-    if (cli_options.quiet) {
-        cmd += " -q";
-    }
-    for (int i = 0; i < cli_options.verbose; ++i) {
-        cmd += " -v";
-    }
-    for (int i = 0; i < argc; ++i) {
-        cmd += " '";
-        std::string arg = argv[i];
-        for (char c : arg) {
-            if (c == '\'') cmd += "'\\''";
-            else cmd += c;
-        }
-        cmd += "'";
-    }
-    int ret = std::system(cmd.c_str());
-    if (ret == -1) return EXIT_ERROR;
-#if defined(__unix__) || defined(__APPLE__)
-    if (WIFEXITED(ret)) return WEXITSTATUS(ret);
-#endif
-    return (ret == 0) ? EXIT_OK : EXIT_ERROR;
-}
-
 void print_slice_usage() {
     std::cout << R"(Usage: mar slice [options] <archive> [patterns...]
 
@@ -2157,7 +2132,10 @@ Examples:
   mar slice input.mar -o subset.mar "*.pdb"
   mar slice input.mar -o subset.mar -i "AF-**/*.cif" -x "*_predicted_aligned_error*"
   mar slice input.mar -o subset.mar -T targets.txt
-  mar slice s3://bucket/huge.mar -o local.mar -T 2000_proteins.txt
+
+Remote slicing (S3, HTTPS) is supported via the Python CLI:
+  pymar slice s3://bucket/huge.mar -o local.mar -T 2000_proteins.txt
+  pymar slice https://cdn.example.com/huge.mar -o local.mar -T targets.txt
 )";
 }
 
@@ -2294,7 +2272,8 @@ int cmd_slice(int argc, char* argv[]) {
     if (archive_path.rfind("s3://", 0) == 0 ||
         archive_path.rfind("http://", 0) == 0 ||
         archive_path.rfind("https://", 0) == 0) {
-        return delegate_to_python("slice", argc, argv);
+        print_error("Remote archives (s3://, http://, https://) require the Python CLI: pymar slice " + archive_path + " -o " + output_path, "slice");
+        return EXIT_USAGE;
     }
 
     if (std::filesystem::exists(output_path) && !force) {
