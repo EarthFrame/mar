@@ -9,6 +9,7 @@ pub mod remote;
 pub mod async_io;
 pub mod diff;
 pub mod redact;
+pub mod filter;
 
 #[cfg(feature = "extension-module")]
 pub mod py_bindings;

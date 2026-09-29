@@ -234,6 +234,35 @@ class RemoteArchive:
             return []
         return self._reader.get_names()
 
+    @property
+    def names(self) -> List[str]:
+        """List all filenames in the remote archive."""
+        return self.list_files()
+
+    def get_names(self) -> List[str]:
+        """List all filenames in the remote archive."""
+        return self.list_files()
+
+    @property
+    def file_count(self) -> int:
+        """Get the number of files in the remote archive."""
+        if not self._reader:
+            return 0
+        return self._reader.file_count()
+
+    def __len__(self) -> int:
+        return self.file_count
+
+    def close(self):
+        """Close backing file and reader."""
+        self._reader = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     def get_file_info(self, name: str) -> Optional[Any]:
         if not self._reader:
             return None
@@ -286,6 +315,185 @@ class RemoteArchive:
         # Reopen reader to refresh memory-map after block writes
         self._reader = _mar.MarReader(self._temp_archive_path)
         return self._reader.read_file(name)
+
+    def batch_fetch_blocks(self, block_ids: Any, max_workers: int = 16) -> None:
+        """
+        Download multiple blocks concurrently with HTTP range coalescing,
+        writing them into the sparse local backing file and updating the reader.
+        """
+        needed_bids = sorted(list(set(b for b in block_ids if b not in self._block_cache)))
+        if not needed_bids:
+            return
+
+        # Prepare block intervals: (b_id, offset, length)
+        block_spans = []
+        for b_id in needed_bids:
+            if b_id >= len(self._block_offsets):
+                continue
+            offset = self._block_offsets[b_id]
+            info = self._reader.get_block_info(b_id) if hasattr(self._reader, "get_block_info") else None
+            if info and info[1] > 0:
+                stored_size = info[1]
+                block_len = 32 + stored_size
+            else:
+                if b_id + 1 < len(self._block_offsets):
+                    block_len = self._block_offsets[b_id + 1] - offset
+                else:
+                    block_len = 32
+            block_spans.append((b_id, offset, block_len))
+
+        if not block_spans:
+            return
+
+        # Coalesce contiguous or near-contiguous blocks (gap <= 4096 bytes)
+        coalesced: List[Dict[str, Any]] = []
+        for b_id, offset, length in block_spans:
+            if coalesced and offset >= coalesced[-1]["end"] and (offset - coalesced[-1]["end"]) <= 4096:
+                coalesced[-1]["end"] = max(coalesced[-1]["end"], offset + length)
+                coalesced[-1]["blocks"].append((b_id, offset, length))
+            else:
+                coalesced.append({
+                    "start": offset,
+                    "end": offset + length,
+                    "blocks": [(b_id, offset, length)]
+                })
+
+        # Fetch ranges concurrently using ThreadPoolExecutor
+        import concurrent.futures
+        def fetch_chunk(chunk):
+            data = self.client.fetch_range(chunk["start"], chunk["end"])
+            return chunk, data
+
+        workers = min(max_workers, max(1, len(coalesced)))
+        results = []
+        if workers > 1:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [executor.submit(fetch_chunk, c) for c in coalesced]
+                for fut in concurrent.futures.as_completed(futures):
+                    results.append(fut.result())
+        else:
+            for c in coalesced:
+                results.append(fetch_chunk(c))
+
+        # Write data to backing sparse file and update block cache
+        with open(self._temp_archive_path, "r+b") as f:
+            for chunk, data in results:
+                f.seek(chunk["start"])
+                f.write(data)
+                for b_id, b_offset, b_len in chunk["blocks"]:
+                    rel_offset = b_offset - chunk["start"]
+                    if rel_offset + 32 <= len(data):
+                        bhdr = data[rel_offset:rel_offset + 32]
+                        stored_sz = int.from_bytes(bhdr[8:16], "little")
+                        payload_end = rel_offset + 32 + stored_sz
+                        if payload_end <= len(data):
+                            self._block_cache[b_id] = data[rel_offset + 32:payload_end]
+                        else:
+                            self._block_cache[b_id] = data[rel_offset + 32:]
+                    else:
+                        self._block_cache[b_id] = data[rel_offset:]
+
+        # Reopen reader once for all downloaded blocks
+        self._reader = _mar.MarReader(self._temp_archive_path)
+
+    def batch_fetch_files(self, file_names_or_indices: Any, max_workers: int = 16) -> None:
+        """
+        Pre-fetch all compressed blocks required for the given list of files.
+        Dramatically accelerates slicing or reading large batches of files (e.g. 2000 AlphaFold PDBs).
+        """
+        needed_blocks = set()
+        for item in file_names_or_indices:
+            if isinstance(item, str):
+                found = self._reader.find_file(item)
+                if found:
+                    idx = found[0]
+                    needed_blocks.update(self._reader.get_block_ids_for_file(idx))
+            else:
+                needed_blocks.update(self._reader.get_block_ids_for_file(item))
+
+        self.batch_fetch_blocks(needed_blocks, max_workers=max_workers)
+
+    def slice(
+        self,
+        output_path: str,
+        files: Optional[List[str]] = None,
+        patterns: Optional[List[str]] = None,
+        includes: Optional[List[str]] = None,
+        excludes: Optional[List[str]] = None,
+        files_from: Optional[str] = None,
+        exclude_from: Optional[str] = None,
+        compression: str = "zstd",
+        threads: int = 0,
+        force: bool = True,
+        **kwargs
+    ) -> str:
+        """
+        Extract a subset of files from the remote archive into a new local archive.
+        Optimized for large extractions (e.g. 2,000 AlphaFold PDB files) using parallel
+        block pre-fetching and HTTP range coalescing.
+        """
+        from .core import AlgebraicFilter
+
+        af = AlgebraicFilter()
+        if patterns:
+            for p in patterns:
+                af.add_include(p)
+        if files:
+            for f in files:
+                af.add_include(f)
+        if includes:
+            for inc in includes:
+                af.add_include(inc)
+        if excludes:
+            for exc in excludes:
+                af.add_exclude(exc)
+        if files_from:
+            af.load_includes_from_file(files_from)
+        if exclude_from:
+            af.load_excludes_from_file(exclude_from)
+
+        all_names = self.list_files()
+        matched_names = af.filter_names(all_names)
+        if not matched_names:
+            raise ValueError("No files in remote archive matched the specified criteria.")
+
+        # Batch prefetch all needed blocks in parallel
+        worker_count = threads if threads > 0 else 16
+        self.batch_fetch_files(matched_names, max_workers=worker_count)
+
+        # Write to destination archive using MarWriter
+        opts = _mar.WriteOptions()
+        comp_map = {
+            "zstd": _mar.CompressionAlgo.ZSTD,
+            "lz4": _mar.CompressionAlgo.LZ4,
+            "gzip": _mar.CompressionAlgo.GZIP,
+            "bzip2": _mar.CompressionAlgo.BZIP2,
+            "none": _mar.CompressionAlgo.NONE,
+        }
+        if compression in comp_map:
+            opts.compression = comp_map[compression]
+
+        for k, v in kwargs.items():
+            if hasattr(opts, k):
+                setattr(opts, k, v)
+
+        if os.path.exists(output_path) and not force:
+            raise FileExistsError(f"Destination archive already exists: {output_path}")
+
+        writer = _mar.MarWriter(output_path, opts)
+        for name in matched_names:
+            found = self._reader.find_file(name)
+            if not found:
+                continue
+            idx, entry = found
+            if entry.entry_type == _mar.EntryType.REGULAR_FILE:
+                data = self.read_file(name)
+                writer.add_memory(name, data)
+            elif entry.entry_type == _mar.EntryType.DIRECTORY:
+                writer.add_directory_entry(name)
+
+        writer.finish()
+        return output_path
 
     def __getitem__(self, name: str) -> bytes:
         return self.read_file(name)

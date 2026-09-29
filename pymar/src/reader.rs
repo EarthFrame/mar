@@ -40,6 +40,7 @@ pub struct MarReader {
     hash_algo: HashAlgo,
     name_table_format: NameTableFormat,
     block_offsets: Vec<u64>,
+    block_descs: Vec<BlockDesc>,
     block_cache: RwLock<HashMap<u64, Arc<Vec<u8>>>>,
 }
 
@@ -239,6 +240,7 @@ impl MarReader {
         }
 
         let mut block_offsets = Vec::new();
+        let mut block_descs = Vec::new();
         if let Some(bsec) = find_section(section_type::BLOCK_TABLE) {
             let bdata = get_section_data(&bsec)?;
             if bdata.len() >= 4 {
@@ -248,6 +250,7 @@ impl MarReader {
                     if bpos + BLOCK_DESC_SIZE <= bdata.len() {
                         let bd = BlockDesc::read(&bdata[bpos..bpos + BLOCK_DESC_SIZE]);
                         block_offsets.push(bd.block_offset);
+                        block_descs.push(bd);
                         bpos += BLOCK_DESC_SIZE;
                     }
                 }
@@ -267,8 +270,13 @@ impl MarReader {
                 if (offset + BLOCK_HEADER_SIZE as u64) > mmap.len() as u64 {
                     break;
                 }
-                block_offsets.push(offset);
                 let bh = BlockHeader::read(&mmap[offset as usize..offset as usize + BLOCK_HEADER_SIZE])?;
+                block_offsets.push(offset);
+                block_descs.push(BlockDesc {
+                    block_offset: offset,
+                    raw_size: bh.raw_size,
+                    stored_size: bh.stored_size,
+                });
                 offset += BLOCK_HEADER_SIZE as u64 + bh.stored_size;
                 offset = align_up(offset, alignment);
             }
@@ -296,6 +304,7 @@ impl MarReader {
             hash_algo,
             name_table_format,
             block_offsets,
+            block_descs,
             block_cache: RwLock::new(HashMap::new()),
         })
     }
@@ -327,6 +336,14 @@ impl MarReader {
 
     pub fn block_offsets(&self) -> &[u64] {
         &self.block_offsets
+    }
+
+    pub fn block_desc(&self, index: usize) -> Option<BlockDesc> {
+        self.block_descs.get(index).copied()
+    }
+
+    pub fn block_descs(&self) -> &[BlockDesc] {
+        &self.block_descs
     }
 
     pub fn get_block_offset(&self, index: usize) -> u64 {

@@ -69,6 +69,7 @@ When providing these tools to an LLM, consider the following tips in your system
 | Tool | Description |
 | :--- | :--- |
 | `mar_create` | Create a new MAR archive from files/directories. |
+| `mar_slice` | Extract a subset of files from a local or remote archive into a new archive with glob/algebraic filtering. |
 | `mar_index` | Build a sidecar index (MinHash, Vector, etc.) for an archive. |
 | `mar_search` | Perform similarity or semantic search using an index. |
 | `mar_list` | List all filenames in an archive. |
