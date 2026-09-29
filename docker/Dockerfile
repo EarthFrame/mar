@@ -14,6 +14,7 @@ WORKDIR /workspace
 # Copy workspace configuration and Rust source code
 COPY Cargo.toml Cargo.lock* ./
 COPY rust/ ./rust/
+COPY python/ ./python/
 
 ARG TARGETARCH
 
