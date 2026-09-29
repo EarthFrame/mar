@@ -196,6 +196,26 @@ for batch in loader:
 
 ---
 
+## Targeted Subsetting with `mar slice` (Egress Minimization)
+
+When downstream workflows only require a subset of files from a massive remote archive (such as retrieving 2,000 target structures from a 200 GB AlphaFold database on S3), downloading the full archive or executing uncoalesced single-file range reads is wasteful and slow.
+
+The `mar slice` command utilizes parallel range coalescing to merge near-adjacent block requests into unified HTTP range GETs:
+
+```bash
+# Slices out only matching PDB targets directly into a local .mar archive
+mar slice s3://datasets/alphafold_human.mar \
+  -o subset.mar \
+  -T targets_2000.txt \
+  -x "*_predicted_aligned_error*"
+```
+
+- **Egress Reduction**: Slices only the blocks containing the targeted files (e.g. 180 MB instead of 200 GB), reducing bandwidth cost by **99.9%**.
+- **Request Coalescing**: Reduces 4,000 naive range requests down to ~40 coalesced GETs, avoiding S3 rate limits and minimizing API request charges.
+- See the full [MAR Slice Tutorial](slice.md) for detailed benchmarks and walkthroughs.
+
+---
+
 ## Detailed Cost Comparison (100 GB Dataset)
 
 The following table compares the monthly costs for training an ML model over a **100 GB dataset** consisting of 1,000,000 files across 10 spot training instances:

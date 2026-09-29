@@ -14,6 +14,10 @@ For converting, caching, streaming, and querying Boltz-2 / CCD molecular dataset
 
 For slashing egress and API request costs by 97% to 99.98% using MAR with Amazon S3 (private buckets, IAM, and VPC endpoints) and Cloudflare R2 (zero egress fees), see the [Cloud Storage Cost Optimization guide](cloud_storage_costs.md).
 
+## Subsetting Large Datasets with MAR Slice
+
+For slicing massive archives down to target subsets (such as extracting 2,000 AlphaFold PDB files from S3 with parallel block coalescing and algebraic include/exclude rules), see the dedicated [MAR Slice tutorial](slice.md).
+
 ## Quick reference
 
 | Index type | What it does | When to use it |

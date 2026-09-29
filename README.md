@@ -190,6 +190,26 @@ mar get -c archive.mar path/to/file.txt
 mar get -o /tmp archive.mar file1.txt file2.txt
 ```
 
+### Slice an archive (subset extraction)
+
+Extract a subset of files from a source archive into a new, compact `.mar` archive. Works with local archives and remote cloud archives (`s3://` or `http://`) with recursive globs and algebraic include/exclude sets:
+
+```bash
+# Slice by glob pattern
+mar slice input.mar -o subset.mar "*.pdb"
+
+# Algebraic include and exclude rules
+mar slice input.mar -o filtered.mar -i "structures/**" -x "*.json"
+
+# Read file list from file
+mar slice input.mar -o targets.mar -T target_ids.txt
+
+# Remote S3 slicing with batch block coalescing (e.g. 2,000 AlphaFold PDBs)
+mar slice s3://alphafold-db-v4/proteome.mar -o local_targets.mar -T 2000_targets.txt
+```
+
+See [Subsetting Large Datasets with MAR Slice](docs/tutorials/slice.md) for the full tutorial.
+
 ## Indexing and Search
 
 MAR supports sidecar indices (`.mai` files) for advanced search capabilities like structural similarity (MinHash) and semantic search (Vector/HNSW).
