@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any
 from .core import (
     MarArchive,
     create_archive,
+    slice_archive,
     index_archive,
     get_hash,
     get_version,
@@ -26,6 +27,51 @@ def mar_create(path: str, files: List[str], compression: str = "zstd") -> str:
     """
     create_archive(path, files, compression=compression)
     return f"Successfully created archive at {path} with {len(files)} inputs."
+
+def mar_slice(
+    path: str,
+    output_path: str,
+    files: Optional[List[str]] = None,
+    patterns: Optional[List[str]] = None,
+    includes: Optional[List[str]] = None,
+    excludes: Optional[List[str]] = None,
+    files_from: Optional[str] = None,
+    exclude_from: Optional[str] = None,
+    compression: str = "zstd",
+    **kwargs
+) -> str:
+    """
+    Extract a subset of files from a local or remote archive into a new MAR archive.
+
+    Args:
+        path: Path or URL (e.g. s3://bucket/key.mar) of the source archive.
+        output_path: Destination path for the new sliced .mar archive.
+        files: Optional list of file names or patterns to include.
+        patterns: Optional list of positional glob patterns or filenames to include.
+        includes: Optional list of glob patterns to include.
+        excludes: Optional list of glob patterns to exclude.
+        files_from: Optional path to a file containing inclusion patterns (- for stdin).
+        exclude_from: Optional path to a file containing exclusion patterns.
+        compression: Target compression algorithm ('zstd', 'lz4', 'gzip', 'bzip2', 'none').
+        **kwargs: Additional options for archive creation.
+
+    Returns:
+        A success message with the destination path.
+    """
+    if patterns:
+        files = list(files or []) + list(patterns)
+    res = slice_archive(
+        path,
+        output_path,
+        files=files,
+        includes=includes,
+        excludes=excludes,
+        files_from=files_from,
+        exclude_from=exclude_from,
+        compression=compression,
+        **kwargs
+    )
+    return f"Successfully sliced archive to {res}."
 
 def mar_index(path: str, index_type: str, output_path: Optional[str] = None, **params) -> str:
     """

@@ -130,6 +130,43 @@ print(info.size, info.type)
 
 # Validation
 assert archive.validate() is True
+
+# Slicing a subset into a new archive
+archive.slice(
+    output_path="subset.mar",
+    includes=["*.pdb"],
+    excludes=["*_bad.pdb"]
+)
+archive.close()
+```
+
+### High-Scale Subsetting & Remote Slicing (`pymar.mar_slice`)
+
+Extract targeted subsets from local archives or remote cloud buckets (e.g. S3 / R2) with parallel range coalescing:
+
+```python
+import pymar
+
+# Slice 2,000 AlphaFold structures directly from Amazon S3
+pymar.mar_slice(
+    path="s3://alphafold-db-v4/proteomes/human.mar",
+    output_path="targets_subset.mar",
+    files_from="target_accessions.txt",
+    excludes=["*_pae.json"],
+    compression="zstd"
+)
+```
+
+### Command-Line Interface (`pymar slice`)
+
+The Python package includes a built-in CLI for environment where the native binary is not installed:
+
+```bash
+# Slicing via pymar CLI
+pymar slice s3://bucket/huge_dataset.mar -o local_subset.mar -T targets.txt
+
+# Or via python module
+python3 -m pymar slice local.mar -o subset.mar -i "structures/**" -x "*.json"
 ```
 
 ### Low-Level C++ / PyO3 API (`pymar._mar`)

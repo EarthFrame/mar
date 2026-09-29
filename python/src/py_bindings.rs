@@ -386,6 +386,10 @@ impl PyMarReader {
     fn block_offsets(&self) -> Vec<u64> {
         self.inner.block_offsets().to_vec()
     }
+
+    fn get_block_info(&self, index: usize) -> Option<(u64, u64, u64)> {
+        self.inner.block_desc(index).map(|d| (d.block_offset, d.stored_size, d.raw_size))
+    }
 }
 
 #[pyclass(name = "MAIWriter")]

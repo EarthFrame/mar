@@ -25,6 +25,9 @@ dependencies = [
 s3 = ["boto3>=1.26.0"]
 torch = ["torch"]
 
+[project.scripts]
+pymar = "pymar.cli:main"
+
 [tool.maturin]
 features = ["extension-module"]
 python-source = "."
