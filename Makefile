@@ -344,6 +344,10 @@ endif
 		dist-macos-x86_64 \
 		dist-macos-universal \
         dist-all \
+		docker-build \
+		docker-build-amd64 \
+		docker-build-arm64 \
+		docker-build-multiarch \
 		zig-check \
 		native \
 		native-lto \
@@ -937,6 +941,27 @@ brew-formula:
 	@echo "end" >> $(PROJECT_NAME).rb
 	@echo "Created $(PROJECT_NAME).rb. Note: You must update the sha256 after tagging a release."
 
+# Docker targets
+DOCKER_IMAGE ?= mar:$(VERSION)
+DOCKER_FILE ?= docker/Dockerfile
+
+docker-build:
+	@echo "Building Docker image for host platform ($(DOCKER_IMAGE))..."
+	@docker build -f $(DOCKER_FILE) -t $(DOCKER_IMAGE) .
+
+docker-build-amd64:
+	@echo "Building x86_64 (linux/amd64) Docker image ($(DOCKER_IMAGE)-amd64)..."
+	@docker build --platform linux/amd64 -f $(DOCKER_FILE) -t $(DOCKER_IMAGE)-amd64 .
+
+docker-build-arm64:
+	@echo "Building ARM64 (linux/arm64) Docker image ($(DOCKER_IMAGE)-arm64)..."
+	@docker build --platform linux/arm64 -f $(DOCKER_FILE) -t $(DOCKER_IMAGE)-arm64 .
+
+docker-build-multiarch:
+	@echo "Building multi-architecture (linux/amd64, linux/arm64) Docker image ($(DOCKER_IMAGE))..."
+	@docker buildx build --platform linux/amd64,linux/arm64 -f $(DOCKER_FILE) -t $(DOCKER_IMAGE) .
+
+
 
 # Help target - show available build targets
 help:
@@ -976,6 +1001,12 @@ help:
 	@echo "  make deb          - Build Debian package (.deb)"
 	@echo "                      (Use VERSION_RELEASE=n to increment patch/release)"
 	@echo "  make brew-formula - Generate Homebrew formula (mar.rb)"
+	@echo ""
+	@echo "Docker:"
+	@echo "  make docker-build            - Build Docker image for host platform"
+	@echo "  make docker-build-amd64      - Build Docker image for x86_64 (linux/amd64)"
+	@echo "  make docker-build-arm64      - Build Docker image for ARM64 (linux/arm64, Apple Silicon / Linux ARM)"
+	@echo "  make docker-build-multiarch  - Build multi-arch image (linux/amd64 + linux/arm64) using buildx"
 	@echo ""
 	@echo "Advanced:"
 	@echo "  make STATIC=1        - Force static linking"
