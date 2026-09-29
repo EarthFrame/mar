@@ -3,6 +3,10 @@ benchmarks/results.csv
 benchmarks/visuals/
 benchmarks/scratch_*/
 
+# Private documentation and benchmarks
+/private_docs/
+/private_benchmarks/
+
 # Build artifacts
 /build/
 /mar
