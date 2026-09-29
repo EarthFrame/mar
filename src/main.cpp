@@ -27,6 +27,10 @@
 #include <thread>
 #include <vector>
 
+#if defined(__unix__) || defined(__APPLE__)
+#include <sys/wait.h>
+#endif
+
 using namespace mar;
 
 // Tool version (built from constants)
@@ -149,7 +153,8 @@ void print_usage() {
               << "  get      Extract specific files to stdout or directory\n"
               << "  cat      Dump file contents to stdout or as JSON\n"
               << "  diff     Compare two archives and show differences\n"
-              << "  redact   Overwrite file data with zeros and mark redacted\n";
+              << "  redact   Overwrite file data with zeros and mark redacted\n"
+              << "  slice    Extract a subset of files into a new archive\n";
 
     if (is_feature_enabled(FeatureFlag::IndexCommand)) {
         std::cout << "  index    Create a sidecar index for an archive\n";
@@ -1974,6 +1979,408 @@ int cmd_redact(int argc, char* argv[]) {
 }
 
 // ============================================================================
+// Command: slice
+// ============================================================================
+
+static bool glob_match_inner(const char* pat, const char* txt) {
+    while (*pat) {
+        if (pat[0] == '*' && pat[1] == '*') {
+            const char* next = pat + 2;
+            while (*next == '/') next++;
+            if (!*next) return true;
+            for (const char* t = txt; *t; ++t) {
+                if (glob_match_inner(next, t)) return true;
+            }
+            return glob_match_inner(next, "");
+        } else if (*pat == '*') {
+            pat++;
+            while (*pat == '*') pat++;
+            if (!*pat) {
+                return std::strchr(txt, '/') == nullptr;
+            }
+            for (const char* t = txt; *t; ++t) {
+                if (*t == '/') break;
+                if (glob_match_inner(pat, t)) return true;
+            }
+            return glob_match_inner(pat, "");
+        } else if (*pat == '?') {
+            if (!*txt || *txt == '/') return false;
+            pat++;
+            txt++;
+        } else if (*pat == '[') {
+            if (!*txt) return false;
+            pat++;
+            bool negate = false;
+            if (*pat == '!' || *pat == '^') {
+                negate = true;
+                pat++;
+            }
+            bool matched = false;
+            while (*pat && *pat != ']') {
+                if (pat[1] == '-' && pat[2] && pat[2] != ']') {
+                    if (*txt >= pat[0] && *txt <= pat[2]) matched = true;
+                    pat += 3;
+                } else {
+                    if (*txt == *pat) matched = true;
+                    pat++;
+                }
+            }
+            if (*pat == ']') pat++;
+            if (matched == negate) return false;
+            txt++;
+        } else {
+            if (*pat != *txt) return false;
+            pat++;
+            txt++;
+        }
+    }
+    return !*txt;
+}
+
+static bool glob_match(const std::string& pat, const std::string& txt) {
+    if (pat == txt) return true;
+    if (glob_match_inner(pat.c_str(), txt.c_str())) return true;
+    if (pat.find('/') == std::string::npos) {
+        size_t last_slash = txt.find_last_of('/');
+        std::string filename = (last_slash == std::string::npos) ? txt : txt.substr(last_slash + 1);
+        if (glob_match_inner(pat.c_str(), filename.c_str())) return true;
+    }
+    return false;
+}
+
+struct FilterRule {
+    bool is_include;
+    std::string pattern;
+};
+
+class CppAlgebraicFilter {
+public:
+    std::vector<FilterRule> rules;
+    bool has_includes = false;
+
+    void add_include(const std::string& pat) {
+        rules.push_back({true, pat});
+        has_includes = true;
+    }
+
+    void add_exclude(const std::string& pat) {
+        rules.push_back({false, pat});
+    }
+
+    bool load_from_file(const std::string& path, bool is_inc) {
+        std::istream* in = nullptr;
+        std::ifstream fin;
+        if (path == "-") {
+            in = &std::cin;
+        } else {
+            fin.open(path);
+            if (!fin) return false;
+            in = &fin;
+        }
+        std::string line;
+        while (std::getline(*in, line)) {
+            size_t hash_pos = line.find('#');
+            if (hash_pos != std::string::npos) {
+                line = line.substr(0, hash_pos);
+            }
+            size_t first = line.find_first_not_of(" \t\r\n");
+            if (first == std::string::npos) continue;
+            size_t last = line.find_last_not_of(" \t\r\n");
+            std::string trimmed = line.substr(first, last - first + 1);
+            if (trimmed.empty()) continue;
+            if (is_inc) add_include(trimmed);
+            else add_exclude(trimmed);
+        }
+        return true;
+    }
+
+    bool matches(const std::string& name) const {
+        if (rules.empty()) return true;
+        bool candidate = !has_includes;
+        for (const auto& r : rules) {
+            if (glob_match(r.pattern, name)) {
+                candidate = r.is_include;
+            }
+        }
+        return candidate;
+    }
+};
+
+static int delegate_to_python(const std::string& cmd_name, int argc, char* argv[]) {
+    std::string cmd = "python3 -m pymar " + cmd_name;
+    if (cli_options.quiet) {
+        cmd += " -q";
+    }
+    for (int i = 0; i < cli_options.verbose; ++i) {
+        cmd += " -v";
+    }
+    for (int i = 0; i < argc; ++i) {
+        cmd += " '";
+        std::string arg = argv[i];
+        for (char c : arg) {
+            if (c == '\'') cmd += "'\\''";
+            else cmd += c;
+        }
+        cmd += "'";
+    }
+    int ret = std::system(cmd.c_str());
+    if (ret == -1) return EXIT_ERROR;
+#if defined(__unix__) || defined(__APPLE__)
+    if (WIFEXITED(ret)) return WEXITSTATUS(ret);
+#endif
+    return (ret == 0) ? EXIT_OK : EXIT_ERROR;
+}
+
+void print_slice_usage() {
+    std::cout << R"(Usage: mar slice [options] <archive> [patterns...]
+
+Extract a subset of files from an archive into a new archive.
+Supports algebraic include / exclude, globs, and file lists.
+
+Options:
+  -o, --output <file>        Path to destination archive (required)
+  -i, --include <pattern>    Include glob pattern (repeatable)
+  -x, --exclude <pattern>    Exclude glob pattern (repeatable)
+  -T, --files-from <file>    Read file list/patterns to include (- for stdin)
+  --exclude-from <file>      Read file list/patterns to exclude from file
+  -c, --compression <algo>   Compression: none, lz4, zstd (default: match source or zstd), gzip, bzip2
+  --compression-level <n>    Compression level (-1 = default)
+  --checksum <type>          Checksum: xxhash3 (default), xxhash32, blake3, crc32c, none
+  --block-size <size>        Block size, e.g. 64KB, 1MB, 4MB (default: match source or 1MB)
+  -m, --multiblock           Use multiblock mode (default)
+  --single-file              Use single-file-per-block mode
+  -f, --force                Overwrite existing archive
+  -j, --threads <num>        Parallel threads (default: CPU cores)
+  -v, --verbose              Show matching files and progress
+
+Examples:
+  mar slice input.mar -o subset.mar "*.pdb"
+  mar slice input.mar -o subset.mar -i "AF-**/*.cif" -x "*_predicted_aligned_error*"
+  mar slice input.mar -o subset.mar -T targets.txt
+  mar slice s3://bucket/huge.mar -o local.mar -T 2000_proteins.txt
+)";
+}
+
+int cmd_slice(int argc, char* argv[]) {
+    std::string archive_path;
+    std::string output_path;
+    CppAlgebraicFilter filter;
+    std::optional<CompressionAlgo> compression_algo;
+    int compression_level = -1;
+    std::optional<ChecksumType> checksum_type;
+    std::optional<uint64_t> block_size;
+    bool multiblock = true;
+    bool force = false;
+    size_t num_threads = 0;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string arg = argv[i];
+
+        if (arg == "-h" || arg == "--help") {
+            print_slice_usage();
+            return EXIT_OK;
+        } else if (arg == "-o" || arg == "--output") {
+            if (++i >= argc) {
+                print_error("Missing output archive path", "slice");
+                return EXIT_USAGE;
+            }
+            output_path = argv[i];
+        } else if (arg == "-i" || arg == "--include") {
+            if (++i >= argc) {
+                print_error("Missing include pattern", "slice");
+                return EXIT_USAGE;
+            }
+            filter.add_include(argv[i]);
+        } else if (arg == "-x" || arg == "--exclude") {
+            if (++i >= argc) {
+                print_error("Missing exclude pattern", "slice");
+                return EXIT_USAGE;
+            }
+            filter.add_exclude(argv[i]);
+        } else if (arg == "-T" || arg == "--files-from") {
+            if (++i >= argc) {
+                print_error("Missing files-from path", "slice");
+                return EXIT_USAGE;
+            }
+            if (!filter.load_from_file(argv[i], true)) {
+                print_error("Failed to read files-from: " + std::string(argv[i]), "slice");
+                return EXIT_ERROR;
+            }
+        } else if (arg == "--exclude-from") {
+            if (++i >= argc) {
+                print_error("Missing exclude-from path", "slice");
+                return EXIT_USAGE;
+            }
+            if (!filter.load_from_file(argv[i], false)) {
+                print_error("Failed to read exclude-from: " + std::string(argv[i]), "slice");
+                return EXIT_ERROR;
+            }
+        } else if (arg == "-c" || arg == "--compression") {
+            if (++i >= argc) {
+                print_error("Missing compression algorithm", "slice");
+                return EXIT_USAGE;
+            }
+            auto algo = compression_from_string(argv[i]);
+            if (!algo) {
+                print_error("Unknown compression: " + std::string(argv[i]), "slice");
+                return EXIT_USAGE;
+            }
+            compression_algo = *algo;
+        } else if (arg == "--compression-level") {
+            if (++i >= argc) {
+                print_error("Missing compression level", "slice");
+                return EXIT_USAGE;
+            }
+            try {
+                compression_level = std::stoi(argv[i]);
+            } catch (...) {
+                print_error("Invalid compression level: " + std::string(argv[i]), "slice");
+                return EXIT_USAGE;
+            }
+        } else if (arg == "--checksum") {
+            if (++i >= argc) {
+                print_error("Missing checksum type", "slice");
+                return EXIT_USAGE;
+            }
+            auto cs = checksum_from_string(argv[i]);
+            if (!cs) {
+                print_error("Unknown checksum type: " + std::string(argv[i]), "slice");
+                return EXIT_USAGE;
+            }
+            checksum_type = *cs;
+        } else if (arg == "--block-size") {
+            if (++i >= argc) {
+                print_error("Missing block size", "slice");
+                return EXIT_USAGE;
+            }
+            uint64_t sz = 0;
+            if (!parse_size(argv[i], sz)) {
+                print_error("Invalid block size: " + std::string(argv[i]), "slice");
+                return EXIT_USAGE;
+            }
+            block_size = sz;
+        } else if (arg == "-m" || arg == "--multiblock") {
+            multiblock = true;
+        } else if (arg == "--single-file") {
+            multiblock = false;
+        } else if (arg == "-f" || arg == "--force") {
+            force = true;
+        } else if (arg == "-j" || arg == "--threads") {
+            if (++i >= argc) {
+                print_error("Missing thread count", "slice");
+                return EXIT_USAGE;
+            }
+            num_threads = static_cast<size_t>(std::atoi(argv[i]));
+        } else if (arg == "-q" || arg == "--quiet") {
+            cli_options.quiet = true;
+        } else if (arg == "-v" || arg == "--verbose") {
+            cli_options.verbose++;
+        } else if (arg[0] == '-') {
+            print_error("Unknown option: " + arg, "slice");
+            return EXIT_USAGE;
+        } else if (archive_path.empty()) {
+            archive_path = arg;
+        } else {
+            filter.add_include(arg);
+        }
+    }
+
+    if (archive_path.empty() || output_path.empty()) {
+        print_error("Both source archive and destination (-o <output>) are required", "slice");
+        print_slice_usage();
+        return EXIT_USAGE;
+    }
+
+    if (archive_path.rfind("s3://", 0) == 0 ||
+        archive_path.rfind("http://", 0) == 0 ||
+        archive_path.rfind("https://", 0) == 0) {
+        return delegate_to_python("slice", argc, argv);
+    }
+
+    if (std::filesystem::exists(output_path) && !force) {
+        print_error("Output archive already exists: " + output_path + " (use -f/--force to overwrite)", "slice");
+        return EXIT_ERROR;
+    }
+
+    try {
+        MarReader reader(archive_path);
+        const auto& names = reader.get_names();
+
+        std::vector<size_t> matched_indices;
+        for (size_t idx = 0; idx < names.size(); ++idx) {
+            if (filter.matches(names[idx])) {
+                matched_indices.push_back(idx);
+            }
+        }
+
+        if (matched_indices.empty()) {
+            print_error("No files matched the specified filter criteria", "slice");
+            return EXIT_ERROR;
+        }
+
+        WriteOptions opts;
+        opts.multiblock = multiblock;
+        if (compression_algo) {
+            opts.compression = *compression_algo;
+        } else {
+            opts.compression = reader.header().meta_comp_algo;
+        }
+        if (checksum_type) {
+            opts.checksum = *checksum_type;
+        }
+        if (block_size) {
+            opts.block_size = *block_size;
+        }
+        opts.compression_level = compression_level;
+        opts.num_threads = num_threads;
+        opts.include_posix = reader.has_posix_meta();
+
+        MarWriter writer(output_path, opts);
+        uint64_t total_bytes = 0;
+
+        for (size_t idx : matched_indices) {
+            auto entry_opt = reader.get_file_entry(idx);
+            if (!entry_opt) continue;
+            const std::string& name = names[idx];
+
+            if (entry_opt->entry_type == EntryType::RegularFile) {
+                auto data = reader.read_file(idx);
+                total_bytes += data.size();
+                auto posix = reader.get_posix_meta(idx);
+                writer.add_memory(name, data, posix ? posix->mode : DEFAULT_FILE_MODE, posix ? posix->mtime : 0);
+                print_verbose("Sliced file: " + name + " (" + std::to_string(data.size()) + " bytes)");
+            } else if (entry_opt->entry_type == EntryType::Directory) {
+                auto posix = reader.get_posix_meta(idx);
+                writer.add_directory_entry(name, posix ? posix->mode : DEFAULT_DIR_MODE, posix ? posix->mtime : 0);
+                print_verbose("Sliced dir: " + name);
+            } else if (entry_opt->entry_type == EntryType::Symlink) {
+                auto target = reader.get_symlink_target(idx);
+                if (target) {
+                    auto posix = reader.get_posix_meta(idx);
+                    writer.add_symlink(name, *target, posix ? posix->mode : 0120777, posix ? posix->mtime : 0);
+                    print_verbose("Sliced symlink: " + name + " -> " + *target);
+                }
+            }
+        }
+
+        writer.finish();
+
+        print_info("Sliced " + std::to_string(matched_indices.size()) + " entries (" +
+                   std::to_string(total_bytes) + " bytes) from " + archive_path + " -> " + output_path);
+        return EXIT_OK;
+    } catch (const ChecksumError& e) {
+        print_error(e.what(), "slice");
+        return EXIT_INTEGRITY;
+    } catch (const MarError& e) {
+        print_error(e.what(), "slice");
+        return EXIT_ERROR;
+    } catch (const std::exception& e) {
+        print_error(e.what(), "slice");
+        return EXIT_ERROR;
+    }
+}
+
+// ============================================================================
 // Command: index
 // ============================================================================
 
@@ -2454,6 +2861,8 @@ int main(int argc, char* argv[]) {
         return run_with_timing("diff", [=]() { return cmd_diff(cmd_argc, cmd_argv); });
     } else if (command == "redact") {
         return run_with_timing("redact", [=]() { return cmd_redact(cmd_argc, cmd_argv); });
+    } else if (command == "slice") {
+        return run_with_timing("slice", [=]() { return cmd_slice(cmd_argc, cmd_argv); });
     } else if (command == "index") {
         return run_with_timing("index", [=]() { return cmd_index(cmd_argc, cmd_argv); });
     } else if (command == "search") {
