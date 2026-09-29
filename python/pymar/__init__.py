@@ -1,6 +1,7 @@
 from .core import (
     MarArchive,
     create_archive,
+    slice_archive,
     index_archive,
     get_hash,
     get_version,
@@ -12,6 +13,7 @@ from .tar import from_tar, to_tar
 from .torch import MarDataset
 from .tools import (
     mar_create,
+    mar_slice,
     mar_index,
     mar_list,
     mar_get,
