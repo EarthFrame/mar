@@ -1,5 +1,6 @@
 use _mar::checksum::*;
 use _mar::diff::*;
+use _mar::filter::*;
 use _mar::format::*;
 use _mar::mai::*;
 use _mar::reader::MarReader;
@@ -89,6 +90,7 @@ Commands:
   hash     Compute a fast archive hash
   header   Display archive header information
   validate Validate archive integrity and checksums
+  slice    Extract a subset of files into a new archive
   okf      Pack, inspect, and validate OKF knowledge bundles
   version  Display version information
 
@@ -141,6 +143,35 @@ Examples:
   mar create -c lz4 archive.mar ./mydir/
   mar create --checksum xxhash32 fast_archive.mar ./data/
   find . -name "*.txt" | mar create -T - archive.mar"#);
+}
+
+fn print_slice_usage() {
+    println!(r#"Usage: mar slice [options] <archive> [patterns...]
+
+Extract a subset of files from an archive into a new archive.
+Supports algebraic include / exclude, globs, and file lists.
+
+Options:
+  -o, --output <file>        Path to destination archive (required)
+  -i, --include <pattern>    Include glob pattern (repeatable)
+  -x, --exclude <pattern>    Exclude glob pattern (repeatable)
+  -T, --files-from <file>    Read file list/patterns to include (- for stdin)
+  --exclude-from <file>      Read file list/patterns to exclude from file
+  -c, --compression <algo>   Compression: none, lz4, zstd (default: match source or zstd), gzip, bzip2
+  --compression-level <n>    Compression level (-1 = default)
+  --checksum <type>          Checksum: xxhash3 (default), xxhash32, blake3, crc32c, none
+  --block-size <size>        Block size, e.g. 64KB, 1MB, 4MB (default: match source or 1MB)
+  -m, --multiblock           Use multiblock mode (default)
+  --single-file              Use single-file-per-block mode
+  -f, --force                Overwrite existing archive
+  -j, --threads <num>        Parallel threads (default: CPU cores)
+  -v, --verbose              Show matching files and progress
+
+Examples:
+  mar slice input.mar -o subset.mar "*.pdb"
+  mar slice input.mar -o subset.mar -i "AF-**/*.cif" -x "*_predicted_aligned_error*"
+  mar slice input.mar -o subset.mar -T targets.txt
+  mar slice s3://bucket/huge.mar -o local.mar -T 2000_proteins.txt"#);
 }
 
 fn print_extract_usage() {
@@ -567,6 +598,261 @@ fn cmd_create(args: &[String]) -> i32 {
     }
 
     print_info(&format!("Created: {}", archive_path));
+    EXIT_OK
+}
+
+fn cmd_slice(args: &[String]) -> i32 {
+    let mut archive_path = String::new();
+    let mut output_path = String::new();
+    let mut filter = AlgebraicFilter::new();
+    let mut compression_algo: Option<CompressionAlgo> = None;
+    let mut compression_level = -1i32;
+    let mut checksum_type: Option<ChecksumType> = None;
+    let mut block_size: Option<u64> = None;
+    let mut multiblock = true;
+    let mut force = false;
+    let mut num_threads = 0usize;
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg == "-h" || arg == "--help" {
+            print_slice_usage();
+            return EXIT_OK;
+        } else if arg == "-o" || arg == "--output" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Option -o/--output requires an argument", "slice");
+                return EXIT_USAGE;
+            }
+            output_path = args[i].clone();
+        } else if arg == "-i" || arg == "--include" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Option -i/--include requires an argument", "slice");
+                return EXIT_USAGE;
+            }
+            filter.add_include(&args[i]);
+        } else if arg == "-x" || arg == "--exclude" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Option -x/--exclude requires an argument", "slice");
+                return EXIT_USAGE;
+            }
+            filter.add_exclude(&args[i]);
+        } else if arg == "-T" || arg == "--files-from" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Option -T/--files-from requires an argument", "slice");
+                return EXIT_USAGE;
+            }
+            if let Err(e) = filter.load_includes_from_file(&args[i]) {
+                print_error(&e, "slice");
+                return EXIT_ERROR;
+            }
+        } else if arg == "--exclude-from" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Option --exclude-from requires an argument", "slice");
+                return EXIT_USAGE;
+            }
+            if let Err(e) = filter.load_excludes_from_file(&args[i]) {
+                print_error(&e, "slice");
+                return EXIT_ERROR;
+            }
+        } else if arg == "-c" || arg == "--compression" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Option -c/--compression requires an argument", "slice");
+                return EXIT_USAGE;
+            }
+            compression_algo = match args[i].to_lowercase().as_str() {
+                "none" => Some(CompressionAlgo::None),
+                "zstd" => Some(CompressionAlgo::Zstd),
+                "lz4" => Some(CompressionAlgo::Lz4),
+                "gzip" | "gz" => Some(CompressionAlgo::Gzip),
+                "bzip2" | "bz2" => Some(CompressionAlgo::Bzip2),
+                _ => {
+                    print_error(&format!("Unknown compression algorithm: {}", args[i]), "slice");
+                    return EXIT_USAGE;
+                }
+            };
+        } else if arg == "--compression-level" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Option --compression-level requires an argument", "slice");
+                return EXIT_USAGE;
+            }
+            match args[i].parse::<i32>() {
+                Ok(lvl) => compression_level = lvl,
+                Err(_) => {
+                    print_error("Invalid compression level", "slice");
+                    return EXIT_USAGE;
+                }
+            }
+        } else if arg == "--checksum" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Option --checksum requires an argument", "slice");
+                return EXIT_USAGE;
+            }
+            match checksum_from_string(&args[i]) {
+                Some(cs) => checksum_type = Some(cs),
+                None => {
+                    print_error(&format!("Unknown checksum type: {}", args[i]), "slice");
+                    return EXIT_USAGE;
+                }
+            }
+        } else if arg == "--block-size" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Option --block-size requires an argument", "slice");
+                return EXIT_USAGE;
+            }
+            match parse_size(&args[i]) {
+                Some(sz) => {
+                    if sz < MIN_BLOCK_SIZE || sz > MAX_BLOCK_SIZE {
+                        print_error(&format!("Block size out of range (min: 4KB, max: 1GB; got {})", args[i]), "slice");
+                        return EXIT_USAGE;
+                    }
+                    block_size = Some(sz);
+                }
+                None => {
+                    print_error(&format!("Invalid block size: '{}'. Expected bytes or shorthand (e.g. 64KB, 1MB, 4MB)", args[i]), "slice");
+                    return EXIT_USAGE;
+                }
+            }
+        } else if arg == "-m" || arg == "--multiblock" {
+            multiblock = true;
+        } else if arg == "--single-file" {
+            multiblock = false;
+        } else if arg == "-f" || arg == "--force" {
+            force = true;
+        } else if arg == "-j" || arg == "--threads" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Option -j/--threads requires an argument", "slice");
+                return EXIT_USAGE;
+            }
+            match args[i].parse::<usize>() {
+                Ok(t) => num_threads = t,
+                Err(_) => {
+                    print_error("Invalid thread count", "slice");
+                    return EXIT_USAGE;
+                }
+            }
+        } else if arg.starts_with('-') {
+            print_error(&format!("Unknown option: {}", arg), "slice");
+            return EXIT_USAGE;
+        } else if archive_path.is_empty() {
+            archive_path = arg.clone();
+        } else {
+            filter.add_include(arg);
+        }
+        i += 1;
+    }
+
+    if archive_path.is_empty() || output_path.is_empty() {
+        print_error("Both source archive and destination (-o <output>) are required", "slice");
+        print_slice_usage();
+        return EXIT_USAGE;
+    }
+
+    // Remote archive delegation to Python (S3, HTTP, HTTPS)
+    if archive_path.starts_with("s3://") || archive_path.starts_with("http://") || archive_path.starts_with("https://") {
+        return delegate_to_python("slice", args);
+    }
+
+    if Path::new(&output_path).exists() && !force {
+        print_error(&format!("Output archive already exists: {} (use -f/--force to overwrite)", output_path), "slice");
+        return EXIT_ERROR;
+    }
+
+    let reader = match MarReader::open(&archive_path) {
+        Ok(r) => r,
+        Err(e) => {
+            print_error(&e, "slice");
+            return EXIT_ERROR;
+        }
+    };
+
+    let all_names = reader.get_names();
+    let matched = filter.filter_names(all_names);
+    if matched.is_empty() {
+        print_error("No files matched the specified filter criteria", "slice");
+        return EXIT_ERROR;
+    }
+
+    let mut opts = WriteOptions::default();
+    opts.multiblock = multiblock;
+    if let Some(algo) = compression_algo {
+        opts.compression = algo;
+    } else {
+        opts.compression = reader.header().meta_comp_algo;
+    }
+    if let Some(cs) = checksum_type {
+        opts.checksum = cs;
+    }
+    if let Some(bs) = block_size {
+        opts.block_size = bs;
+    }
+    opts.compression_level = compression_level;
+    opts.num_threads = num_threads;
+    opts.include_posix = reader.has_posix_meta();
+
+    let mut writer = MarWriter::new(&output_path, opts);
+    let mut total_bytes = 0u64;
+
+    for (idx, name) in &matched {
+        if let Some(entry) = reader.get_file_entry(*idx) {
+            match entry.entry_type {
+                EntryType::RegularFile => {
+                    match reader.read_file_by_index(*idx) {
+                        Ok(data) => {
+                            total_bytes += data.len() as u64;
+                            let mode = reader.get_posix_meta(*idx).map(|p| p.mode).unwrap_or(DEFAULT_FILE_MODE);
+                            let mtime = reader.get_posix_meta(*idx).map(|p| p.mtime).unwrap_or(0);
+                            writer.add_memory(name, &data, mode, mtime);
+                            print_verbose(&format!("Sliced file: {} ({} bytes)", name, data.len()));
+                        }
+                        Err(e) => {
+                            print_error(&format!("Failed to read file {}: {}", name, e), "slice");
+                            return EXIT_ERROR;
+                        }
+                    }
+                }
+                EntryType::Directory => {
+                    let mode = reader.get_posix_meta(*idx).map(|p| p.mode).unwrap_or(DEFAULT_DIR_MODE);
+                    let mtime = reader.get_posix_meta(*idx).map(|p| p.mtime).unwrap_or(0);
+                    writer.add_directory_entry(name, mode, mtime);
+                    print_verbose(&format!("Sliced dir: {}", name));
+                }
+                EntryType::Symlink => {
+                    if let Some(target) = reader.get_symlink_target(*idx) {
+                        let mode = reader.get_posix_meta(*idx).map(|p| p.mode).unwrap_or(0o120777);
+                        let mtime = reader.get_posix_meta(*idx).map(|p| p.mtime).unwrap_or(0);
+                        writer.add_symlink(name, &target, mode, mtime);
+                        print_verbose(&format!("Sliced symlink: {} -> {}", name, target));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if let Err(e) = writer.finish() {
+        print_error(&e, "slice");
+        return EXIT_ERROR;
+    }
+
+    print_info(&format!(
+        "Sliced {} entries ({} bytes) from {} -> {}",
+        matched.len(),
+        total_bytes,
+        archive_path,
+        output_path
+    ));
+
     EXIT_OK
 }
 
@@ -1576,6 +1862,28 @@ fn delegate_to_cpp(cmd_name: &str, args: &[String]) -> i32 {
     EXIT_UNAVAILABLE
 }
 
+fn delegate_to_python(cmd_name: &str, args: &[String]) -> i32 {
+    let mut cmd = std::process::Command::new("python3");
+    cmd.arg("-m").arg("pymar").arg(cmd_name);
+    let opts = get_options();
+    if opts.quiet {
+        cmd.arg("-q");
+    }
+    for _ in 0..opts.verbose {
+        cmd.arg("-v");
+    }
+    for arg in args {
+        cmd.arg(arg);
+    }
+    match cmd.status() {
+        Ok(status) => status.code().unwrap_or(EXIT_ERROR),
+        Err(e) => {
+            print_error(&format!("Failed to delegate to pymar (python3 -m pymar): {}", e), cmd_name);
+            EXIT_ERROR
+        }
+    }
+}
+
 fn cmd_index(args: &[String]) -> i32 {
     let mut archive_path = String::new();
     let mut type_name = String::new();
@@ -1905,6 +2213,7 @@ fn main() {
         "validate" => cmd_validate(&filtered_args),
         "version" => cmd_version(&filtered_args),
         "redact" => cmd_redact(&filtered_args),
+        "slice" => cmd_slice(&filtered_args),
         "index" => cmd_index(&filtered_args),
         "search" => cmd_search(&filtered_args),
         "okf" => {

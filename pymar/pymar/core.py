@@ -1,7 +1,146 @@
 import os
-from typing import List, Optional, Dict, Any, Union
+import sys
+import fnmatch
+import re
+from typing import List, Optional, Dict, Any, Union, Iterable
 from pydantic import BaseModel, Field
 from . import _mar
+
+def _glob_to_regex(pattern: str) -> str:
+    """Translate glob pattern supporting '**' into a regular expression."""
+    i, n = 0, len(pattern)
+    res = []
+    while i < n:
+        c = pattern[i]
+        if pattern[i:i + 3] == "**/":
+            res.append("(?:.*/)?")
+            i += 3
+        elif pattern[i:i + 2] == "**":
+            res.append(".*")
+            i += 2
+        elif c == "*":
+            res.append("[^/]*")
+            i += 1
+        elif c == "?":
+            res.append("[^/]")
+            i += 1
+        elif c == "[":
+            j = i
+            if j < n and pattern[j] in "!?":
+                j += 1
+            if j < n and pattern[j] == "]":
+                j += 1
+            while j < n and pattern[j] != "]":
+                j += 1
+            if j >= n:
+                res.append("\\[")
+                i += 1
+            else:
+                stuff = pattern[i + 1:j].replace("\\", "\\\\")
+                i = j + 1
+                if stuff and stuff[0] in "!^":
+                    stuff = "^" + stuff[1:]
+                elif stuff and stuff[0] == "^":
+                    stuff = "\\^" + stuff[1:]
+                res.append(f"[{stuff}]")
+        else:
+            res.append(re.escape(c))
+            i += 1
+    return f"^{''.join(res)}$"
+
+def glob_match(pattern: str, text: str) -> bool:
+    """
+    Match text against a glob pattern.
+    If pattern does not contain '/', match against either basename or full path.
+    Supports *, ?, [seq], and ** (recursive directory match).
+    """
+    if not pattern:
+        return False
+
+    # If no '/', check basename match first
+    if "/" not in pattern:
+        basename = text.rsplit("/", 1)[-1]
+        if fnmatch.fnmatchcase(basename, pattern):
+            return True
+
+    if "**" in pattern:
+        regex_pattern = _glob_to_regex(pattern)
+        return bool(re.match(regex_pattern, text))
+
+    return fnmatch.fnmatchcase(text, pattern)
+
+class FilterRule:
+    """Single inclusion or exclusion rule for algebraic archive filtering."""
+    def __init__(self, is_include: bool, pattern: str):
+        self.is_include = is_include
+        self.pattern = pattern
+
+class AlgebraicFilter:
+    """
+    Evaluates sequential include/exclude rules to select subsets of archive files.
+    - If any include rule or file list is specified, default selection is False.
+    - If only exclude rules are specified, default selection is True.
+    - Sequential rules apply in-order: the last matching rule decides inclusion.
+    """
+    def __init__(self):
+        self.rules: List[FilterRule] = []
+        self.has_includes: bool = False
+
+    def add_include(self, pattern: str):
+        pat = pattern.strip()
+        if pat:
+            self.rules.append(FilterRule(True, pat))
+            self.has_includes = True
+
+    def add_exclude(self, pattern: str):
+        pat = pattern.strip()
+        if pat:
+            self.rules.append(FilterRule(False, pat))
+
+    def load_includes_from_file(self, file_path: str) -> int:
+        count = 0
+        lines = sys.stdin if file_path == "-" else open(file_path, "r", encoding="utf-8")
+        try:
+            for line in lines:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    self.add_include(line)
+                    count += 1
+        finally:
+            if file_path != "-":
+                lines.close()
+        return count
+
+    def load_excludes_from_file(self, file_path: str) -> int:
+        count = 0
+        lines = sys.stdin if file_path == "-" else open(file_path, "r", encoding="utf-8")
+        try:
+            for line in lines:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    self.add_exclude(line)
+                    count += 1
+        finally:
+            if file_path != "-":
+                lines.close()
+        return count
+
+    def matches(self, path: str) -> bool:
+        if not self.rules:
+            return True
+
+        matched_status = None
+        for rule in self.rules:
+            if glob_match(rule.pattern, path):
+                matched_status = rule.is_include
+
+        if matched_status is not None:
+            return matched_status
+        return not self.has_includes
+
+    def filter_names(self, names: Iterable[str]) -> List[str]:
+        return [name for name in names if self.matches(name)]
+
 
 class SearchResult(BaseModel):
     file_id: int
@@ -45,6 +184,35 @@ class MarArchive:
         if not self._reader:
             raise RuntimeError("Archive not open for reading")
         return self._reader.get_names()
+
+    @property
+    def names(self) -> List[str]:
+        """List all filenames in the archive."""
+        return self.list_files()
+
+    def get_names(self) -> List[str]:
+        """List all filenames in the archive."""
+        return self.list_files()
+
+    @property
+    def file_count(self) -> int:
+        """Get the number of files in the archive."""
+        if not self._reader:
+            return 0
+        return self._reader.file_count()
+
+    def __len__(self) -> int:
+        return self.file_count
+
+    def close(self):
+        """Close the archive."""
+        self._reader = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
     def get_file_info(self, name: str) -> Optional[FileInfo]:
         """Get information about a specific file."""
@@ -162,6 +330,82 @@ class MarArchive:
             "sequence": seq,
         }
 
+    def slice(
+        self,
+        output_path: str,
+        files: Optional[List[str]] = None,
+        patterns: Optional[List[str]] = None,
+        includes: Optional[List[str]] = None,
+        excludes: Optional[List[str]] = None,
+        files_from: Optional[str] = None,
+        exclude_from: Optional[str] = None,
+        compression: str = "zstd",
+        force: bool = True,
+        **kwargs
+    ) -> str:
+        """
+        Extract a subset of files into a new MAR archive.
+        Supports algebraic include / exclude, globs, and file lists.
+        """
+        if not self._reader:
+            raise RuntimeError("Archive not open for reading")
+
+        af = AlgebraicFilter()
+        if patterns:
+            for p in patterns:
+                af.add_include(p)
+        if files:
+            for f in files:
+                af.add_include(f)
+        if includes:
+            for inc in includes:
+                af.add_include(inc)
+        if excludes:
+            for exc in excludes:
+                af.add_exclude(exc)
+        if files_from:
+            af.load_includes_from_file(files_from)
+        if exclude_from:
+            af.load_excludes_from_file(exclude_from)
+
+        all_names = self.list_files()
+        matched_names = af.filter_names(all_names)
+        if not matched_names:
+            raise ValueError("No files matched the specified criteria.")
+
+        opts = _mar.WriteOptions()
+        comp_map = {
+            "zstd": _mar.CompressionAlgo.ZSTD,
+            "lz4": _mar.CompressionAlgo.LZ4,
+            "gzip": _mar.CompressionAlgo.GZIP,
+            "bzip2": _mar.CompressionAlgo.BZIP2,
+            "none": _mar.CompressionAlgo.NONE,
+        }
+        if compression in comp_map:
+            opts.compression = comp_map[compression]
+
+        for k, v in kwargs.items():
+            if hasattr(opts, k):
+                setattr(opts, k, v)
+
+        if os.path.exists(output_path) and not force:
+            raise FileExistsError(f"Destination archive already exists: {output_path}")
+
+        writer = _mar.MarWriter(output_path, opts)
+        for name in matched_names:
+            found = self._reader.find_file(name)
+            if not found:
+                continue
+            idx, entry = found
+            if entry.entry_type == _mar.EntryType.REGULAR_FILE:
+                data = self.read_file(name)
+                writer.add_memory(name, data)
+            elif entry.entry_type == _mar.EntryType.DIRECTORY:
+                writer.add_directory_entry(name)
+
+        writer.finish()
+        return output_path
+
 def create_archive(path: str, files: List[str], compression: str = "zstd", **kwargs):
     """Create a new MAR archive from a list of files."""
     opts = _mar.WriteOptions()
@@ -187,6 +431,42 @@ def create_archive(path: str, files: List[str], compression: str = "zstd", **kwa
         else:
             writer.add_file(f, os.path.basename(f))
     writer.finish()
+
+def slice_archive(
+    archive_path_or_url: str,
+    output_path: str,
+    files: Optional[List[str]] = None,
+    patterns: Optional[List[str]] = None,
+    includes: Optional[List[str]] = None,
+    excludes: Optional[List[str]] = None,
+    files_from: Optional[str] = None,
+    exclude_from: Optional[str] = None,
+    compression: str = "zstd",
+    force: bool = True,
+    **kwargs
+) -> str:
+    """
+    Slice a local or remote (S3/HTTP) MAR archive into a new archive.
+    """
+    if patterns:
+        files = list(files or []) + list(patterns)
+    if archive_path_or_url.startswith(("http://", "https://", "s3://")):
+        from .remote import RemoteArchive
+        arc = RemoteArchive(archive_path_or_url, **kwargs)
+    else:
+        arc = MarArchive(archive_path_or_url)
+
+    return arc.slice(
+        output_path=output_path,
+        files=files,
+        includes=includes,
+        excludes=excludes,
+        files_from=files_from,
+        exclude_from=exclude_from,
+        compression=compression,
+        force=force,
+        **kwargs
+    )
 
 def index_archive(archive_path: str, index_type: str, output_path: Optional[str] = None, **params):
     """Create a sidecar index for an archive."""
