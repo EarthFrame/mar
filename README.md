@@ -204,8 +204,9 @@ mar slice input.mar -o filtered.mar -i "structures/**" -x "*.json"
 # Read file list from file
 mar slice input.mar -o targets.mar -T target_ids.txt
 
-# Remote S3 slicing with batch block coalescing (e.g. 2,000 AlphaFold PDBs)
-mar slice s3://alphafold-db-v4/proteome.mar -o local_targets.mar -T 2000_targets.txt
+# Remote cloud slicing (S3 / HTTPS) via pymar CLI with batch block coalescing:
+pymar slice s3://alphafold-db-v4/proteome.mar -o local_targets.mar -T 2000_targets.txt
+pymar slice https://cdn.example.com/proteome.mar -o local_targets.mar -T 2000_targets.txt
 ```
 
 See [Subsetting Large Datasets with MAR Slice](docs/tutorials/slice.md) for the full tutorial.
