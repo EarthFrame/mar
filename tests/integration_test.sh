@@ -295,6 +295,12 @@ test_redact_command() {
     run_test "redact help" "$MAR_BIN redact --help"
 }
 
+test_slice_command() {
+    log_info "=== Slice Command Test ==="
+
+    run_test "slice help" "$MAR_BIN slice --help"
+}
+
 test_cat_command() {
     log_info "=== Cat Command Test ==="
     
@@ -1400,6 +1406,43 @@ test_redact_roundtrip() {
     run_test "redact compressed archive should fail" "$MAR_BIN redact -I compressed.mar input/hello.txt" 3
 }
 
+test_slice_roundtrip() {
+    log_info "=== Slice: Algebraic Subsetting Roundtrip ==="
+
+    local workdir="$TEST_DIR/slice"
+    mkdir -p "$workdir/src_files/sub"
+    cd "$workdir"
+
+    echo "Protein Structure 1" > src_files/AF-101-model.pdb
+    echo '{"plddt": 99}' > src_files/AF-101-pae.json
+    echo "Protein Structure 2" > src_files/sub/AF-202-model.pdb
+    echo '{"plddt": 88}' > src_files/sub/AF-202-pae.json
+    echo "README doc" > src_files/README.txt
+
+    run_test "create source archive for slice" "$MAR_BIN create -f src.mar src_files"
+    run_test "validate source archive" "$MAR_BIN validate src.mar"
+
+    # Slice out only pdb files
+    run_test "slice pdbs only" "$MAR_BIN slice src.mar -o pdbs.mar '*.pdb'"
+    run_test "validate pdbs slice" "$MAR_BIN validate pdbs.mar"
+
+    output=$("$MAR_BIN" list pdbs.mar)
+    assert_output_contains "$output" "src_files/AF-101-model.pdb" "sliced archive contains AF-101-model.pdb"
+    assert_output_contains "$output" "src_files/sub/AF-202-model.pdb" "sliced archive contains sub/AF-202-model.pdb"
+
+    # Algebraic include / exclude
+    run_test "slice include AF-* exclude *.json" "$MAR_BIN slice src.mar -o filtered.mar -i 'src_files/AF-*' -x '*.json'"
+    run_test "validate filtered slice" "$MAR_BIN validate filtered.mar"
+
+    # Files-from list
+    printf "src_files/AF-101-model.pdb\nsrc_files/README.txt\n" > targets.txt
+    run_test "slice files-from" "$MAR_BIN slice src.mar -o targets.mar -T targets.txt"
+    run_test "validate targets slice" "$MAR_BIN validate targets.mar"
+    output=$("$MAR_BIN" list targets.mar)
+    assert_output_contains "$output" "src_files/AF-101-model.pdb" "targets.mar contains AF-101"
+    assert_output_contains "$output" "src_files/README.txt" "targets.mar contains README.txt"
+}
+
 test_indexing_and_search() {
     log_info "=== Indexing and Search: MinHash Similarity ==="
 
@@ -2088,6 +2131,7 @@ main() {
     test_list_basic
     test_validate_command
     test_redact_command
+    test_slice_command
     test_cat_command
     test_get_command
     test_header_command
@@ -2144,6 +2188,7 @@ main() {
     test_diff_invalid_paths
     test_diff_format_validation
     test_redact_roundtrip
+    test_slice_roundtrip
     test_okf_pack_inspect
     test_indexing_and_search
     test_vector_search
