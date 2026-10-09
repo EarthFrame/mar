@@ -1,51 +1,82 @@
 #pragma once
 
-#include <mutex>
 #include <string>
-#include <unordered_map>
 
 namespace mar {
 
 /**
- * Platform-specific file descriptor management.
+ * Lightweight RAII wrapper for a POSIX file descriptor.
+ * Non-copyable, movable. Automatically closes the managed fd on destruction.
+ */
+class ScopedFd {
+public:
+    constexpr ScopedFd() noexcept : fd_(-1) {}
+    explicit ScopedFd(int fd) noexcept : fd_(fd) {}
+    ~ScopedFd() { reset(); }
+
+    ScopedFd(const ScopedFd&) = delete;
+    ScopedFd& operator=(const ScopedFd&) = delete;
+
+    ScopedFd(ScopedFd&& other) noexcept : fd_(other.fd_) {
+        other.fd_ = -1;
+    }
+
+    ScopedFd& operator=(ScopedFd&& other) noexcept {
+        if (this != &other) {
+            reset(other.fd_);
+            other.fd_ = -1;
+        }
+        return *this;
+    }
+
+    [[nodiscard]] int get() const noexcept { return fd_; }
+    [[nodiscard]] bool valid() const noexcept { return fd_ >= 0; }
+    explicit operator bool() const noexcept { return fd_ >= 0; }
+
+    int release() noexcept {
+        int old = fd_;
+        fd_ = -1;
+        return old;
+    }
+
+    void reset(int new_fd = -1) noexcept;
+
+private:
+    int fd_;
+};
+
+/**
+ * File descriptor manager for archive operations.
  *
- * On Linux: caches file descriptors for efficient io_uring usage
- * On macOS: uses a small thread-local cache to reduce open/close churn
+ * Provides a uniform, thread-safe, and bounded interface for acquiring and releasing
+ * file descriptors across operating systems (Linux, macOS, BSD, Windows).
+ * Does not keep unbounded caches of open file descriptors, keeping total open
+ * file descriptors proportional to active worker threads O(threads).
  */
 class FileDescriptorManager {
 public:
     FileDescriptorManager() = default;
-    ~FileDescriptorManager();
+    ~FileDescriptorManager() = default;
 
     FileDescriptorManager(const FileDescriptorManager&) = delete;
     FileDescriptorManager& operator=(const FileDescriptorManager&) = delete;
 
     /**
-     * Get a file descriptor for the given path.
-     * On macOS, FDs are cached per-thread and evicted automatically.
-     * On Linux, FDs are cached and closed in destructor.
+     * Open and acquire a file descriptor for reading.
+     * Sets sequential readahead hints where supported.
+     * Returns < 0 on failure (errno is preserved).
      */
     int acquire(const std::string& path);
 
     /**
-     * Release a file descriptor obtained from acquire().
-     * On macOS: no-op (FDs are cached and closed on eviction).
-     * On Linux: no-op (FDs are cached and closed in destructor).
+     * Release/close a file descriptor previously obtained from acquire().
      */
-    void release(int fd, const std::string& path);
+    void release(int fd, const std::string& path = "");
 
     /**
-     * Close all cached file descriptors.
-     * Primarily for Linux where FDs are cached.
+     * Close all cached file descriptors (no-op for stateless manager, kept for API compatibility).
      */
     void close_all();
-
-private:
-#ifndef __APPLE__
-    // Linux: cache file descriptors for io_uring efficiency
-    std::unordered_map<std::string, int> fd_cache_;
-    std::mutex fd_mutex_;
-#endif
 };
 
 }  // namespace mar

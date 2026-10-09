@@ -3243,6 +3243,114 @@ TEST(fasta_index_multi_file_and_extraction) {
     fs::remove_all(test_dir);
 }
 
+#if !defined(_WIN32)
+#include <sys/resource.h>
+TEST(bounded_file_descriptors_under_low_rlimit) {
+    // Save original rlimit
+    struct rlimit orig_lim;
+    ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &orig_lim), 0);
+
+    // Create a directory with 1500 small files (more than 1024 standard ulimit)
+    fs::path temp_dir = fs::temp_directory_path() / "mar_test_fd_bound";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir / "input");
+
+    const size_t num_files = 1500;
+    for (size_t i = 0; i < num_files; ++i) {
+        std::string fname = "file_" + std::to_string(i) + ".txt";
+        std::ofstream out(temp_dir / "input" / fname);
+        out << "Data payload for test file " << i << " with some content\n";
+    }
+
+    // Set a very low file descriptor limit (e.g., 256)
+    struct rlimit low_lim;
+    low_lim.rlim_cur = 256;
+    low_lim.rlim_max = orig_lim.rlim_max;
+    int setlim_res = setrlimit(RLIMIT_NOFILE, &low_lim);
+
+    fs::path archive_path = temp_dir / "output.mar";
+    try {
+        WriteOptions opts;
+        opts.num_threads = 4;
+        opts.dedup_by_hash = true;
+        opts.compute_hashes = true;
+        MarWriter writer(archive_path.string(), opts);
+        writer.add_directory((temp_dir / "input").string());
+        writer.finish();
+
+        // Verify the archive contains all files plus the directory entry (1500 files + 1 dir = 1501)
+        MarReader reader(archive_path.string());
+        ASSERT_EQ(reader.file_count(), num_files + 1);
+    } catch (...) {
+        // Restore rlimit before re-throwing or failing
+        if (setlim_res == 0) {
+            setrlimit(RLIMIT_NOFILE, &orig_lim);
+        }
+        fs::remove_all(temp_dir);
+        throw;
+    }
+
+    // Restore original rlimit
+    if (setlim_res == 0) {
+        setrlimit(RLIMIT_NOFILE, &orig_lim);
+    }
+    fs::remove_all(temp_dir);
+}
+#endif
+
+
+TEST(extract_large_file_unaligned_trailing_span) {
+    // Regression test for large files (>=10MB) where AUTO mode previously triggered O_DIRECT
+    // causing writes of unaligned trailing spans (e.g. not multiple of 4096) to fail with EINVAL,
+    // truncating the extracted file.
+    fs::path temp_dir = fs::temp_directory_path() / "mar_test_unaligned_large";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir / "input");
+
+    // 12 MB + 12345 bytes (unaligned length > 10MB)
+    const size_t test_size = 12 * 1024 * 1024 + 12345;
+    std::vector<u8> test_data(test_size);
+    for (size_t i = 0; i < test_size; ++i) {
+        test_data[i] = static_cast<u8>((i * 31 + 17) & 0xFF);
+    }
+
+    fs::path in_file = temp_dir / "input" / "large_unaligned.bin";
+    {
+        std::ofstream out(in_file, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(test_data.data()), test_data.size());
+    }
+
+    fs::path archive_path = temp_dir / "archive.mar";
+    {
+        WriteOptions opts;
+        opts.num_threads = 4;
+        opts.compression = CompressionAlgo::Zstd;
+        MarWriter writer(archive_path.string(), opts);
+        writer.add_file(in_file.string(), "large_unaligned.bin");
+        writer.finish();
+    }
+
+    fs::path out_dir = temp_dir / "output";
+    {
+        MarReader reader(archive_path.string());
+        reader.extract_all(out_dir.string());
+    }
+
+    fs::path extracted_file = out_dir / "large_unaligned.bin";
+    ASSERT(fs::exists(extracted_file));
+    ASSERT_EQ(fs::file_size(extracted_file), test_size);
+
+    std::vector<u8> extracted_data(test_size);
+    {
+        std::ifstream in(extracted_file, std::ios::binary);
+        in.read(reinterpret_cast<char*>(extracted_data.data()), test_size);
+        ASSERT_EQ(static_cast<size_t>(in.gcount()), test_size);
+    }
+    ASSERT(test_data == extracted_data);
+
+    fs::remove_all(temp_dir);
+}
+
 
 int main() {
     std::cout << "\n=== MAR v0.1.0 Unit Tests ===\n\n";

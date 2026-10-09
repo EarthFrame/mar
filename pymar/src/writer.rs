@@ -5,8 +5,8 @@ use crate::format::*;
 use crate::name_index::*;
 use rayon::prelude::*;
 use std::fs::{self, File};
-use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 #[derive(Debug, Clone)]
 pub struct WriteOptions {
@@ -77,7 +77,11 @@ impl MarWriter {
     pub fn add_file(&mut self, file_path: &str, archive_name: &str) -> Result<(), String> {
         let p = Path::new(file_path);
         let metadata = fs::symlink_metadata(p).map_err(|e| format!("Failed to stat {}: {}", file_path, e))?;
+        self.add_file_with_metadata(file_path, archive_name, &metadata)
+    }
 
+    fn add_file_with_metadata(&mut self, file_path: &str, archive_name: &str, metadata: &fs::Metadata) -> Result<(), String> {
+        let p = Path::new(file_path);
         let arc_name = if archive_name.is_empty() {
             let mut name = file_path.to_string();
             if name.starts_with("./") {
@@ -153,7 +157,8 @@ impl MarWriter {
 
     pub fn add_directory(&mut self, dir_path: &str, prefix: &str) -> Result<(), String> {
         let p = Path::new(dir_path);
-        if !p.is_dir() {
+        let metadata = fs::symlink_metadata(p).map_err(|e| format!("Not a directory: {}: {}", dir_path, e))?;
+        if !metadata.is_dir() {
             return Err(format!("Not a directory: {}", dir_path));
         }
 
@@ -175,16 +180,15 @@ impl MarWriter {
         };
 
         if !base_name.is_empty() {
-            let metadata = fs::metadata(p).ok();
             #[cfg(unix)]
-            let mode = metadata.as_ref().map(|m| {
+            let mode = {
                 use std::os::unix::fs::PermissionsExt;
-                m.permissions().mode()
-            }).unwrap_or(DEFAULT_DIR_MODE);
+                metadata.permissions().mode()
+            };
             #[cfg(not(unix))]
             let mode = DEFAULT_DIR_MODE;
 
-            let mtime = metadata.as_ref().and_then(|m| m.modified().ok())
+            let mtime = metadata.modified().ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
@@ -208,12 +212,23 @@ impl MarWriter {
                 format!("{}/{}", prefix, fname)
             };
 
-            let ft = entry.file_type().map_err(|e| e.to_string())?;
-            if ft.is_dir() {
-                self.add_directory_entry(&arc_name, DEFAULT_DIR_MODE, 0);
+            let metadata = entry.metadata().map_err(|e| e.to_string())?;
+            if metadata.is_dir() {
+                #[cfg(unix)]
+                let mode = {
+                    use std::os::unix::fs::PermissionsExt;
+                    metadata.permissions().mode()
+                };
+                #[cfg(not(unix))]
+                let mode = DEFAULT_DIR_MODE;
+                let mtime = metadata.modified().ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+                self.add_directory_entry(&arc_name, mode, mtime);
                 self.add_directory_recursive(&path.to_string_lossy(), &arc_name)?;
             } else {
-                self.add_file(&path.to_string_lossy(), &arc_name)?;
+                self.add_file_with_metadata(&path.to_string_lossy(), &arc_name, &metadata)?;
             }
         }
         Ok(())
@@ -313,47 +328,73 @@ impl MarWriter {
         }
         self.finished = true;
 
-        // 1. Sort files
+        // 1. Sort files for deterministic layout
         self.files.sort_by(|a, b| a.name.cmp(&b.name));
 
-        // 1b. Compute hashes if requested
-        if self.options.compute_hashes {
+        // Determine parallel thread count
+        let num_threads = if self.options.deterministic {
+            1
+        } else if self.options.num_threads > 0 {
+            self.options.num_threads
+        } else {
+            std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get)
+        };
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .build()
+            .map_err(|e| format!("Failed to build thread pool: {}", e))?;
+
+        // 1b. If dedup_by_hash is enabled, compute hashes upfront in parallel so we can map duplicates
+        if self.options.compute_hashes && self.options.dedup_by_hash {
             for fd in self.files.iter_mut() {
-                if fd.entry.entry_type != EntryType::RegularFile || fd.entry.logical_size == 0 {
-                    continue;
-                }
-                if fd.hash.is_none() {
-                    let mut hasher = crate::checksum::XXHash3_64::new(0);
+                if fd.entry.entry_type == EntryType::RegularFile && fd.entry.logical_size > 0 && fd.hash.is_none() {
                     if let Some(ref c) = fd.content {
+                        let mut hasher = crate::checksum::XXHash3_64::new(0);
                         hasher.update(c);
                         let val = hasher.finalize();
                         let mut h = [0u8; 32];
                         h[..8].copy_from_slice(&val.to_le_bytes());
                         fd.hash = Some(h);
-                    } else if let Some(ref p) = fd.source_path {
-                        if let Ok(mut f) = File::open(p) {
-                            let mut buf = vec![0u8; 65536];
-                            while let Ok(n) = std::io::Read::read(&mut f, &mut buf) {
-                                if n == 0 { break; }
-                                hasher.update(&buf[..n]);
-                            }
-                            let val = hasher.finalize();
-                            let mut h = [0u8; 32];
-                            h[..8].copy_from_slice(&val.to_le_bytes());
-                            fd.hash = Some(h);
-                        }
+                        fd.entry.entry_flags |= entry_flags::HAS_STRONG_HASH;
                     }
                 }
             }
+
+            let files_to_hash: Vec<(usize, String)> = self.files.iter().enumerate()
+                .filter_map(|(i, fd)| {
+                    if fd.entry.entry_type == EntryType::RegularFile && fd.entry.logical_size > 0 && fd.hash.is_none() {
+                        fd.source_path.as_ref().map(|p| (i, p.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            let computed: Vec<(usize, [u8; 32])> = pool.install(|| {
+                files_to_hash.into_par_iter().map(|(idx, path)| {
+                    let mut hasher = crate::checksum::XXHash3_64::new(0);
+                    if let Ok(mut f) = File::open(&path) {
+                        let mut buf = vec![0u8; 1024 * 1024];
+                        while let Ok(n) = std::io::Read::read(&mut f, &mut buf) {
+                            if n == 0 { break; }
+                            hasher.update(&buf[..n]);
+                        }
+                    }
+                    let val = hasher.finalize();
+                    let mut h = [0u8; 32];
+                    h[..8].copy_from_slice(&val.to_le_bytes());
+                    (idx, h)
+                }).collect()
+            });
+
+            for (idx, h) in computed {
+                self.files[idx].hash = Some(h);
+                self.files[idx].entry.entry_flags |= entry_flags::HAS_STRONG_HASH;
+            }
         }
 
-        // 2. Open archive file
-        let mut file = File::create(&self.path).map_err(|e| format!("Failed to create archive: {}", e))?;
-
-        // 3. Estimate blocks
-        let alignment = 1u64 << self.options.align_log2;
-        let mut block_table: Vec<BlockDesc> = Vec::new();
-
+        // 2. Map duplicate files to canonical files when dedup_by_hash is active
         let mut canonical: Vec<usize> = (0..self.files.len()).collect();
         if self.options.dedup_by_hash && self.options.compute_hashes {
             let mut seen: std::collections::HashMap<[u8; 32], usize> = std::collections::HashMap::new();
@@ -376,15 +417,15 @@ impl MarWriter {
             }
         }
 
+        // 3. Generate block tasks and pre-populate file spans
         struct BlockTask {
             file_idx: usize,
             offset: u64,
             length: u64,
-            sequence: u32,
         }
 
         let mut tasks: Vec<BlockTask> = Vec::new();
-        let block_size = self.options.block_size;
+        let block_size = if self.options.multiblock { self.options.block_size } else { u64::MAX };
 
         for (i, fd) in self.files.iter_mut().enumerate() {
             if fd.entry.entry_type != EntryType::RegularFile {
@@ -392,8 +433,9 @@ impl MarWriter {
             }
             let flen = fd.entry.logical_size;
             if flen == 0 {
-                tasks.push(BlockTask { file_idx: i, offset: 0, length: 0, sequence: 0 });
-                fd.spans.resize(1, Span { block_id: 0, offset_in_block: 0, length: 0, sequence_order: 0 });
+                let task_id = tasks.len();
+                tasks.push(BlockTask { file_idx: i, offset: 0, length: 0 });
+                fd.spans.push(Span { block_id: task_id as u32, offset_in_block: 0, length: 0, sequence_order: 0 });
                 continue;
             }
             let mut seq = 0;
@@ -401,124 +443,16 @@ impl MarWriter {
             while off < flen {
                 let len = std::cmp::min(block_size, flen - off);
                 if canonical[i] == i {
-                    tasks.push(BlockTask { file_idx: i, offset: off, length: len, sequence: seq });
+                    let task_id = tasks.len();
+                    tasks.push(BlockTask { file_idx: i, offset: off, length: len });
+                    fd.spans.push(Span { block_id: task_id as u32, offset_in_block: 0, length: len as u32, sequence_order: seq });
                 }
                 off += len;
                 seq += 1;
             }
-            fd.spans.resize(seq as usize, Span { block_id: 0, offset_in_block: 0, length: 0, sequence_order: 0 });
         }
 
-        // Build temporary metadata to estimate header size
-        let temp_meta = self.build_meta_container(&block_table);
-        let header_size_bytes = align_up(FIXED_HEADER_SIZE as u64 + temp_meta.len() as u64, alignment);
-
-        // Advise kernel on sequential write
-        async_io::advise_file(&file, 0, 0, AccessPattern::Sequential);
-
-        // Determine parallel threads (respecting deterministic single-threaded guard)
-        let num_threads = if self.options.deterministic {
-            1
-        } else if self.options.num_threads > 0 {
-            self.options.num_threads
-        } else {
-            std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get)
-        };
-
-        struct CompressedBlockResult {
-            task_id: usize,
-            file_idx: usize,
-            sequence: u32,
-            raw_len: u64,
-            bh: BlockHeader,
-            compressed_data: Vec<u8>,
-        }
-
-        // Parallel compression of chunks
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .build()
-            .map_err(|e| format!("Failed to build thread pool: {}", e))?;
-
-        let compression = self.options.compression;
-        let compression_level = self.options.compression_level;
-        let checksum_type = self.options.checksum;
-
-        let results: Vec<CompressedBlockResult> = pool.install(|| {
-            tasks.par_iter().enumerate().map(|(task_id, task)| -> Result<CompressedBlockResult, String> {
-                let fd = &self.files[task.file_idx];
-                let data = if let Some(ref c) = fd.content {
-                    c[task.offset as usize..(task.offset + task.length) as usize].to_vec()
-                } else if let Some(ref p) = fd.source_path {
-                    let mut f = File::open(p).map_err(|e| e.to_string())?;
-                    f.seek(SeekFrom::Start(task.offset)).map_err(|e| e.to_string())?;
-                    let mut buf = vec![0u8; task.length as usize];
-                    std::io::Read::read_exact(&mut f, &mut buf).map_err(|e| e.to_string())?;
-                    buf
-                } else {
-                    Vec::new()
-                };
-
-                let compressed = compress(&data, compression, compression_level)?;
-                let checksum = compute_fast_checksum(&compressed, checksum_type);
-
-                let bh = BlockHeader {
-                    raw_size: data.len() as u64,
-                    stored_size: compressed.len() as u64,
-                    comp_algo: compression,
-                    fast_checksum_type: checksum_type,
-                    reserved0: 0,
-                    fast_checksum: checksum,
-                    mode_or_perms: fd.posix.mode,
-                    block_flags: 0,
-                };
-
-                Ok(CompressedBlockResult {
-                    task_id,
-                    file_idx: task.file_idx,
-                    sequence: task.sequence,
-                    raw_len: task.length,
-                    bh,
-                    compressed_data: compressed,
-                })
-            }).collect::<Result<Vec<_>, String>>()
-        })?;
-
-        // Positional writing via AsyncEngine / PositionalWriter
-        let writer = PositionalWriter::new(&file);
-        let mut current_offset = header_size_bytes;
-
-        for res in results {
-            let mut bh_buf = [0u8; BLOCK_HEADER_SIZE];
-            res.bh.write(&mut bh_buf);
-
-            writer.write_all_at(current_offset, &bh_buf).map_err(|e| e.to_string())?;
-            writer.write_all_at(current_offset + BLOCK_HEADER_SIZE as u64, &res.compressed_data).map_err(|e| e.to_string())?;
-
-            let total_written = BLOCK_HEADER_SIZE as u64 + res.compressed_data.len() as u64;
-            let padded_written = align_up(total_written, alignment);
-            let pad = (padded_written - total_written) as usize;
-            if pad > 0 {
-                let zeros = vec![0u8; pad];
-                writer.write_all_at(current_offset + total_written, &zeros).map_err(|e| e.to_string())?;
-            }
-
-            self.files[res.file_idx].spans[res.sequence as usize] = Span {
-                block_id: res.task_id as u32,
-                offset_in_block: 0,
-                length: res.raw_len as u32,
-                sequence_order: res.sequence,
-            };
-
-            block_table.push(BlockDesc {
-                block_offset: current_offset,
-                raw_size: res.raw_len,
-                stored_size: res.compressed_data.len() as u64,
-            });
-
-            current_offset += padded_written;
-        }
-
+        // Propagate spans to duplicate files
         if self.options.dedup_by_hash && self.options.compute_hashes {
             for i in 0..self.files.len() {
                 if canonical[i] != i {
@@ -527,8 +461,262 @@ impl MarWriter {
             }
         }
 
-        // Build true metadata
-        let meta = self.build_meta_container(&block_table);
+        // 4. Group consecutive tasks by file to maximize sequential I/O and stream file hashes
+        struct FileTaskRange {
+            start: usize,
+            end: usize,
+            file_idx: usize,
+        }
+
+        let mut ranges: Vec<FileTaskRange> = Vec::new();
+        let mut t_idx = 0;
+        while t_idx < tasks.len() {
+            let start = t_idx;
+            let file_idx = tasks[t_idx].file_idx;
+            while t_idx < tasks.len() && tasks[t_idx].file_idx == file_idx {
+                t_idx += 1;
+            }
+            ranges.push(FileTaskRange { start, end: t_idx, file_idx });
+        }
+
+        // If there are fewer ranges than threads (e.g. archiving 1 huge file),
+        // pre-hash any unsplit file and divide ranges so all worker threads stay active.
+        if !self.options.deterministic && ranges.len() < num_threads && tasks.len() > ranges.len() {
+            if self.options.compute_hashes {
+                for r in &ranges {
+                    let fd = &mut self.files[r.file_idx];
+                    if fd.entry.entry_type == EntryType::RegularFile && fd.entry.logical_size > 0 && fd.hash.is_none() {
+                        let mut hasher = crate::checksum::XXHash3_64::new(0);
+                        if let Some(ref c) = fd.content {
+                            hasher.update(c);
+                        } else if let Some(ref p) = fd.source_path {
+                            if let Ok(mut f) = File::open(p) {
+                                let mut buf = vec![0u8; 1024 * 1024];
+                                while let Ok(n) = std::io::Read::read(&mut f, &mut buf) {
+                                    if n == 0 { break; }
+                                    hasher.update(&buf[..n]);
+                                }
+                            }
+                        }
+                        let val = hasher.finalize();
+                        let mut h = [0u8; 32];
+                        h[..8].copy_from_slice(&val.to_le_bytes());
+                        fd.hash = Some(h);
+                        fd.entry.entry_flags |= entry_flags::HAS_STRONG_HASH;
+                    }
+                }
+            }
+
+            let mut split_ranges = Vec::new();
+            for r in ranges {
+                let chunk_size = (tasks.len() / (num_threads * 4)).max(1);
+                let mut cur = r.start;
+                while cur < r.end {
+                    let next = (cur + chunk_size).min(r.end);
+                    split_ranges.push(FileTaskRange { start: cur, end: next, file_idx: r.file_idx });
+                    cur = next;
+                }
+            }
+            ranges = split_ranges;
+        }
+
+        // 5. Estimate header space accurately using a dummy block table of the exact size
+        let alignment = 1u64 << self.options.align_log2;
+        let dummy_block_table = vec![BlockDesc { block_offset: 0, raw_size: 0, stored_size: 0 }; tasks.len()];
+        let temp_meta = self.build_meta_container(&dummy_block_table, true);
+        let header_size_bytes = align_up(FIXED_HEADER_SIZE as u64 + temp_meta.len() as u64, alignment);
+
+        let file = File::create(&self.path).map_err(|e| format!("Failed to create archive: {}", e))?;
+        async_io::advise_file(&file, 0, 0, AccessPattern::Sequential);
+        async_io::set_direct_caching(&file, true);
+
+        // 6. Parallel streaming compression and direct-to-disk positional writes
+        let current_pos = AtomicU64::new(header_size_bytes);
+        let next_range_id = AtomicUsize::new(0);
+        let has_error = AtomicBool::new(false);
+        let writer = PositionalWriter::new(&file);
+        let compression = self.options.compression;
+        let compression_level = self.options.compression_level;
+        let checksum_type = self.options.checksum;
+
+        struct WorkerOutput {
+            blocks: Vec<(usize, BlockDesc)>,
+            file_hashes: Vec<(usize, [u8; 32])>,
+        }
+
+        let worker_results: Vec<Result<WorkerOutput, String>> = pool.install(|| {
+            (0..num_threads).into_par_iter().map(|_| -> Result<WorkerOutput, String> {
+                let mut local_blocks = Vec::new();
+                let mut local_file_hashes = Vec::new();
+                let mut read_buf = Vec::new();
+                let mut write_buf = Vec::new();
+
+                while !has_error.load(Ordering::Relaxed) {
+                    let range_id = next_range_id.fetch_add(1, Ordering::Relaxed);
+                    if range_id >= ranges.len() {
+                        break;
+                    }
+
+                    let range = &ranges[range_id];
+                    let fd = &self.files[range.file_idx];
+
+                    let mut opened_file = if fd.content.is_none() {
+                        if let Some(ref path) = fd.source_path {
+                            match File::open(path) {
+                                Ok(f) => {
+                                    async_io::advise_file(&f, 0, 0, AccessPattern::Sequential);
+                                    Some(f)
+                                }
+                                Err(e) => {
+                                    has_error.store(true, Ordering::Relaxed);
+                                    return Err(format!("Failed to open {}: {}", path, e));
+                                }
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    let mut hasher = if self.options.compute_hashes && !self.options.dedup_by_hash {
+                        if fd.entry.entry_type == EntryType::RegularFile && fd.entry.logical_size > 0 && fd.hash.is_none() {
+                            Some(crate::checksum::XXHash3_64::new(0))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    for task_id in range.start..range.end {
+                        if has_error.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let task = &tasks[task_id];
+
+                        let task_len = task.length as usize;
+                        if task_len == 0 {
+                            read_buf.clear();
+                        } else {
+                            if read_buf.len() < task_len {
+                                read_buf.resize(task_len, 0);
+                            }
+                            let chunk = &mut read_buf[..task_len];
+
+                            if let Some(ref mut f) = opened_file {
+                                #[cfg(unix)]
+                                {
+                                    use std::os::unix::fs::FileExt;
+                                    if let Err(e) = f.read_exact_at(chunk, task.offset) {
+                                        has_error.store(true, Ordering::Relaxed);
+                                        return Err(format!("Read error in {} at offset {}: {}", fd.name, task.offset, e));
+                                    }
+                                }
+                                #[cfg(not(unix))]
+                                {
+                                    use std::io::{Read, Seek, SeekFrom};
+                                    if let Err(e) = f.seek(SeekFrom::Start(task.offset)) {
+                                        has_error.store(true, Ordering::Relaxed);
+                                        return Err(format!("Seek error in {} at offset {}: {}", fd.name, task.offset, e));
+                                    }
+                                    if let Err(e) = f.read_exact(chunk) {
+                                        has_error.store(true, Ordering::Relaxed);
+                                        return Err(format!("Read error in {}: {}", fd.name, e));
+                                    }
+                                }
+                            } else if let Some(ref c) = fd.content {
+                                let start = task.offset as usize;
+                                let end = (task.offset + task.length) as usize;
+                                chunk.copy_from_slice(&c[start..end]);
+                            }
+                        }
+
+                        let raw_slice = &read_buf[..task_len];
+                        if let Some(ref mut h) = hasher {
+                            if !raw_slice.is_empty() {
+                                h.update(raw_slice);
+                            }
+                        }
+
+                        // Prepare write buffer: reserve BLOCK_HEADER_SIZE at the front,
+                        // compress into write_buf starting after the header.
+                        write_buf.clear();
+                        write_buf.resize(BLOCK_HEADER_SIZE, 0);
+
+                        if let Err(e) = crate::compression::compress_into(raw_slice, compression, compression_level, &mut write_buf) {
+                            has_error.store(true, Ordering::Relaxed);
+                            return Err(e);
+                        }
+
+                        let compressed_len = write_buf.len() - BLOCK_HEADER_SIZE;
+                        let checksum = compute_fast_checksum(&write_buf[BLOCK_HEADER_SIZE..], checksum_type);
+
+                        let block_total = write_buf.len() as u64;
+                        let padded_total = align_up(block_total, alignment);
+                        let block_start = current_pos.fetch_add(padded_total, Ordering::SeqCst);
+
+                        let bh = BlockHeader {
+                            raw_size: task.length,
+                            stored_size: compressed_len as u64,
+                            comp_algo: compression,
+                            fast_checksum_type: checksum_type,
+                            reserved0: 0,
+                            fast_checksum: checksum,
+                            mode_or_perms: fd.posix.mode,
+                            block_flags: 0,
+                        };
+
+                        bh.write(&mut write_buf[..BLOCK_HEADER_SIZE]);
+
+                        // Pad up to alignment in the same buffer for a single coalesced write syscall
+                        let pad = (padded_total - block_total) as usize;
+                        if pad > 0 {
+                            write_buf.resize(write_buf.len() + pad, 0);
+                        }
+
+                        if let Err(e) = writer.write_all_at(block_start, &write_buf) {
+                            has_error.store(true, Ordering::Relaxed);
+                            return Err(format!("Write error (block): {}", e));
+                        }
+
+                        local_blocks.push((task_id, BlockDesc {
+                            block_offset: block_start,
+                            raw_size: task.length,
+                            stored_size: compressed_len as u64,
+                        }));
+                    }
+
+                    if let Some(h) = hasher {
+                        let val = h.finalize();
+                        let mut hash_bytes = [0u8; 32];
+                        hash_bytes[..8].copy_from_slice(&val.to_le_bytes());
+                        local_file_hashes.push((range.file_idx, hash_bytes));
+                    }
+                }
+
+                Ok(WorkerOutput {
+                    blocks: local_blocks,
+                    file_hashes: local_file_hashes,
+                })
+            }).collect::<Vec<Result<WorkerOutput, String>>>()
+        });
+
+        // 7. Collect results from workers into final block table and file hashes
+        let mut block_table = vec![BlockDesc { block_offset: 0, raw_size: 0, stored_size: 0 }; tasks.len()];
+        for res in worker_results {
+            let output = res?;
+            for (task_id, bd) in output.blocks {
+                block_table[task_id] = bd;
+            }
+            for (file_idx, hash_bytes) in output.file_hashes {
+                self.files[file_idx].hash = Some(hash_bytes);
+                self.files[file_idx].entry.entry_flags |= entry_flags::HAS_STRONG_HASH;
+            }
+        }
+
+        // 8. Build final metadata container and write fixed header at start of archive
+        let meta = self.build_meta_container(&block_table, false);
         let mut meta_algo = CompressionAlgo::None;
         let mut meta_stored = meta.clone();
         if self.options.compress_meta && meta.len() > 256 {
@@ -538,6 +726,10 @@ impl MarWriter {
                     meta_algo = CompressionAlgo::Zstd;
                 }
             }
+        }
+
+        if FIXED_HEADER_SIZE as u64 + meta_stored.len() as u64 > header_size_bytes {
+            return Err("Metadata size exceeded estimated header size".to_string());
         }
 
         let mut fh = FixedHeader {
@@ -557,26 +749,29 @@ impl MarWriter {
         };
         fh.header_crc32c = fh.compute_crc32c();
 
-        // Write header and metadata at start
-        file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
         let mut hdr_buf = [0u8; FIXED_HEADER_SIZE];
         fh.write(&mut hdr_buf);
-        file.write_all(&hdr_buf).map_err(|e| e.to_string())?;
-        file.write_all(&meta_stored).map_err(|e| e.to_string())?;
+        writer.write_all_at(0, &hdr_buf).map_err(|e| e.to_string())?;
+        writer.write_all_at(FIXED_HEADER_SIZE as u64, &meta_stored).map_err(|e| e.to_string())?;
 
-        // Zero gap if any
+        // Zero out any gap between metadata and block data
         let used = FIXED_HEADER_SIZE + meta_stored.len();
         if (used as u64) < header_size_bytes {
             let gap = (header_size_bytes - used as u64) as usize;
             let zeros = vec![0u8; gap];
-            file.write_all(&zeros).map_err(|e| e.to_string())?;
+            writer.write_all_at(used as u64, &zeros).map_err(|e| e.to_string())?;
         }
 
-        file.flush().map_err(|e| e.to_string())?;
+        let final_pos = current_pos.load(Ordering::SeqCst);
+        if final_pos > 0 {
+            let _ = file.set_len(final_pos);
+        }
+        file.sync_all().map_err(|e| e.to_string())?;
+
         Ok(())
     }
 
-    fn build_meta_container(&self, block_table: &[BlockDesc]) -> Vec<u8> {
+    fn build_meta_container(&self, block_table: &[BlockDesc], assume_all_hashes: bool) -> Vec<u8> {
         let count = self.files.len();
         let mut names = Vec::with_capacity(count);
         let mut entries = Vec::with_capacity(count);
@@ -593,7 +788,11 @@ impl MarWriter {
             posix_entries.push(fd.posix.clone());
             symlink_targets.push(fd.symlink_target.clone());
             all_spans.push(fd.spans.clone());
-            hashes.push(fd.hash);
+            if assume_all_hashes && self.options.compute_hashes && fd.entry.entry_type == EntryType::RegularFile && fd.entry.logical_size > 0 {
+                hashes.push(Some([0u8; 32]));
+            } else {
+                hashes.push(fd.hash);
+            }
         }
 
         let name_format = self.options.name_table_format.unwrap_or_else(|| recommend_format(&names));

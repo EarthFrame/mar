@@ -9,9 +9,11 @@ use rayon::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+#[cfg(unix)]
+use std::os::unix::fs::FileExt;
 
 static NEXT_READER_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -632,11 +634,11 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
     }
 
     pub fn extract_parallel_strip(&self, output_dir: &str, files: Option<&[String]>, num_threads: usize, strip_components: usize) -> Result<(), String> {
-        // Advise kernel of sequential access
+        // Advise kernel of sequential access to the archive memory map
         self.advise_access(AccessPattern::Sequential);
 
         // 1. Identify target indices in O(1) time per file
-        let mut indices: Vec<usize> = match files {
+        let indices: Vec<usize> = match files {
             Some(f) => {
                 let mut idxs = Vec::with_capacity(f.len());
                 for name in f {
@@ -649,25 +651,15 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
             None => (0..self.files.len()).collect(),
         };
 
-        // Sort indices by block_id and offset_in_block to maximize block cache hits
-        if self.header.index_type == IndexType::Multiblock && self.file_spans.is_some() {
-            let spans_ref = self.file_spans.as_ref().unwrap();
-            indices.sort_by(|&a, &b| {
-                let sa = spans_ref.get_file_spans(a as u32);
-                let sb = spans_ref.get_file_spans(b as u32);
-                if sa.is_empty() || sb.is_empty() {
-                    return a.cmp(&b);
-                }
-                if sa[0].block_id != sb[0].block_id {
-                    sa[0].block_id.cmp(&sb[0].block_id)
-                } else {
-                    sa[0].offset_in_block.cmp(&sb[0].offset_in_block)
-                }
-            });
+        if indices.is_empty() {
+            return Ok(());
         }
 
-        // 2. Pre-create all unique parent directories upfront on the main thread (avoids race conditions)
+        // 2. Pre-create all unique directories upfront on the main thread (avoids race conditions)
+        let mut target_paths: HashMap<usize, PathBuf> = HashMap::with_capacity(indices.len());
         let mut dirs_to_create = std::collections::HashSet::new();
+        dirs_to_create.insert(PathBuf::from(output_dir));
+
         for &idx in &indices {
             let name = &self.names[idx];
             let stripped = match Self::strip_path_components(name, strip_components) {
@@ -677,16 +669,17 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
             let out_path = Path::new(output_dir).join(stripped);
             let entry = &self.files[idx];
             if entry.entry_type == EntryType::Directory {
-                dirs_to_create.insert(out_path);
+                dirs_to_create.insert(out_path.clone());
             } else if let Some(parent) = out_path.parent() {
                 dirs_to_create.insert(parent.to_path_buf());
             }
-        }
-        for dir in dirs_to_create {
-            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            target_paths.insert(idx, out_path);
         }
 
-        // 3. Parallel extract with Rayon
+        for dir in &dirs_to_create {
+            std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create dir {}: {}", dir.display(), e))?;
+        }
+
         let threads = if num_threads > 0 {
             num_threads
         } else {
@@ -698,40 +691,327 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
             .build()
             .map_err(|e| format!("Failed to build thread pool: {}", e))?;
 
-        pool.install(|| {
-            indices.par_iter().try_for_each(|&idx| -> Result<(), String> {
-                let entry = &self.files[idx];
-                if entry.entry_type != EntryType::RegularFile {
-                    return Ok(());
+        // 3. Extraction based on Archive Index Type
+        if self.header.index_type == IndexType::SingleFilePerBlock {
+            // In SingleFilePerBlock, map each regular file to its block index
+            struct SingleFileTask {
+                file_idx: usize,
+                block_idx: usize,
+            }
+            let mut tasks = Vec::new();
+            let mut current_block_idx = 0;
+            for (idx, entry) in self.files.iter().enumerate() {
+                if entry.entry_type == EntryType::RegularFile {
+                    if target_paths.contains_key(&idx) && !entry.is_redacted() && entry.logical_size > 0 {
+                        tasks.push(SingleFileTask {
+                            file_idx: idx,
+                            block_idx: current_block_idx,
+                        });
+                    }
+                    current_block_idx += 1;
                 }
+            }
 
-                let name = &self.names[idx];
-                let stripped = match Self::strip_path_components(name, strip_components) {
-                    Some(s) => s,
-                    None => return Ok(()),
-                };
-                let out_path = Path::new(output_dir).join(stripped);
-
-                let mut out_file = File::create(&out_path).map_err(|e| format!("Failed to create {}: {}", out_path.display(), e))?;
-
-                // Advise kernel of sequential file write
-                async_io::advise_file(&out_file, 0, entry.logical_size, AccessPattern::Sequential);
-
-                // Stream directly into file with O(1) memory
-                self.stream_file_by_index(idx, &mut out_file)?;
-
-                #[cfg(unix)]
-                if let Some(ref meta_vec) = self.posix_meta {
-                    if idx < meta_vec.len() {
-                        use std::os::unix::fs::PermissionsExt;
-                        let mode = meta_vec[idx].mode;
-                        let _ = std::fs::set_permissions(&out_path, std::fs::Permissions::from_mode(mode & 0o777));
+            // Handle empty and redacted files immediately
+            for &idx in &indices {
+                let entry = &self.files[idx];
+                if entry.entry_type == EntryType::RegularFile && (entry.is_redacted() || entry.logical_size == 0) {
+                    if let Some(out_path) = target_paths.get(&idx) {
+                        File::create(out_path).map_err(|e| format!("Failed to create {}: {}", out_path.display(), e))?;
+                        #[cfg(unix)]
+                        if let Some(ref meta_vec) = self.posix_meta {
+                            if idx < meta_vec.len() {
+                                use std::os::unix::fs::PermissionsExt;
+                                let mode = meta_vec[idx].mode;
+                                let _ = std::fs::set_permissions(out_path, std::fs::Permissions::from_mode(mode & 0o777));
+                            }
+                        }
                     }
                 }
+            }
 
-                Ok(())
-            })
-        })?;
+            pool.install(|| {
+                tasks.par_iter().try_for_each(|task| -> Result<(), String> {
+                    let out_path = &target_paths[&task.file_idx];
+                    let entry = &self.files[task.file_idx];
+                    let mut out_file = File::create(out_path)
+                        .map_err(|e| format!("Failed to create {}: {}", out_path.display(), e))?;
+                    async_io::advise_file(&out_file, 0, entry.logical_size, AccessPattern::Sequential);
+
+                    if task.block_idx >= self.block_offsets.len() {
+                        return Err("Invalid block index".to_string());
+                    }
+                    let offset = self.block_offsets[task.block_idx];
+                    if offset as usize + BLOCK_HEADER_SIZE > self.mmap.len() {
+                        return Err("Block header exceeds archive".to_string());
+                    }
+                    let bh = BlockHeader::read(&self.mmap[offset as usize..offset as usize + BLOCK_HEADER_SIZE])?;
+                    let payload_offset = offset as usize + BLOCK_HEADER_SIZE;
+                    let payload_end = payload_offset + bh.stored_size as usize;
+                    if payload_end > self.mmap.len() {
+                        return Err("Block payload exceeds archive".to_string());
+                    }
+                    let payload = &self.mmap[payload_offset..payload_end];
+
+                    if bh.fast_checksum_type != ChecksumType::None {
+                        if !verify_fast_checksum(payload, bh.fast_checksum_type, bh.fast_checksum) {
+                            return Err("Block checksum mismatch".to_string());
+                        }
+                    }
+
+                    if bh.comp_algo == CompressionAlgo::None || bh.raw_size == 0 {
+                        use std::io::Write;
+                        out_file.write_all(payload).map_err(|e| e.to_string())?;
+                    } else {
+                        let mut decomp = Vec::with_capacity(bh.raw_size as usize);
+                        decompress_into(payload, bh.comp_algo, bh.raw_size, &mut decomp)?;
+                        use std::io::Write;
+                        out_file.write_all(&decomp).map_err(|e| e.to_string())?;
+                    }
+
+                    #[cfg(unix)]
+                    if let Some(ref meta_vec) = self.posix_meta {
+                        if task.file_idx < meta_vec.len() {
+                            use std::os::unix::fs::PermissionsExt;
+                            let mode = meta_vec[task.file_idx].mode;
+                            let _ = std::fs::set_permissions(out_path, std::fs::Permissions::from_mode(mode & 0o777));
+                        }
+                    }
+
+                    Ok(())
+                })
+            })?;
+        } else {
+            // Multiblock Archive: Truly Block-Parallel Pipeline (Skew-Invariant)
+            let spans_ref = match self.file_spans {
+                Some(ref s) => s,
+                None => return Err("FILE_SPANS section missing for multiblock archive".to_string()),
+            };
+
+            // Pre-scan target regular files to determine single-span vs multi-span files
+            struct SpanJob {
+                file_idx: usize,
+                offset_in_file: u64,
+                offset_in_block: u32,
+                length: u32,
+                is_single_span: bool,
+            }
+
+            let mut block_to_jobs: HashMap<u32, Vec<SpanJob>> = HashMap::new();
+            let mut multi_span_files: HashMap<usize, Arc<File>> = HashMap::new();
+
+            for &idx in &indices {
+                let entry = &self.files[idx];
+                if entry.entry_type != EntryType::RegularFile {
+                    continue;
+                }
+                let out_path = match target_paths.get(&idx) {
+                    Some(p) => p,
+                    None => continue,
+                };
+
+                if entry.is_redacted() || entry.logical_size == 0 {
+                    File::create(out_path).map_err(|e| format!("Failed to create {}: {}", out_path.display(), e))?;
+                    #[cfg(unix)]
+                    if let Some(ref meta_vec) = self.posix_meta {
+                        if idx < meta_vec.len() {
+                            use std::os::unix::fs::PermissionsExt;
+                            let mode = meta_vec[idx].mode;
+                            let _ = std::fs::set_permissions(out_path, std::fs::Permissions::from_mode(mode & 0o777));
+                        }
+                    }
+                    continue;
+                }
+
+                let file_spans = spans_ref.get_file_spans(idx as u32);
+                if file_spans.is_empty() {
+                    continue;
+                }
+
+                let is_single_span = file_spans.len() == 1;
+                if !is_single_span {
+                    // Pre-create multi-span file and pre-allocate its length
+                    let f = File::create(out_path)
+                        .map_err(|e| format!("Failed to create multi-span file {}: {}", out_path.display(), e))?;
+                    f.set_len(entry.logical_size)
+                        .map_err(|e| format!("Failed to set_len for {}: {}", out_path.display(), e))?;
+                    async_io::advise_file(&f, 0, entry.logical_size, AccessPattern::Sequential);
+                    multi_span_files.insert(idx, Arc::new(f));
+                }
+
+                let mut current_file_offset = 0u64;
+                for span in file_spans {
+                    block_to_jobs.entry(span.block_id).or_default().push(SpanJob {
+                        file_idx: idx,
+                        offset_in_file: current_file_offset,
+                        offset_in_block: span.offset_in_block,
+                        length: span.length,
+                        is_single_span,
+                    });
+                    current_file_offset += span.length as u64;
+                }
+            }
+
+            // Convert into a sorted Vec of BlockTasks to execute in parallel
+            struct BlockTask {
+                block_id: u32,
+                jobs: Vec<SpanJob>,
+            }
+
+            let mut tasks: Vec<BlockTask> = block_to_jobs
+                .into_iter()
+                .map(|(block_id, jobs)| BlockTask { block_id, jobs })
+                .collect();
+            tasks.sort_by_key(|t| t.block_id);
+
+            pool.install(|| {
+                tasks.par_iter().try_for_each(|task| -> Result<(), String> {
+                    let block_id = task.block_id as usize;
+                    if block_id >= self.block_offsets.len() {
+                        return Err(format!("Invalid block_id {} in file spans", block_id));
+                    }
+                    let offset = self.block_offsets[block_id];
+                    if offset as usize + BLOCK_HEADER_SIZE > self.mmap.len() {
+                        return Err("Block header exceeds archive size".to_string());
+                    }
+
+                    let bh = BlockHeader::read(&self.mmap[offset as usize..offset as usize + BLOCK_HEADER_SIZE])?;
+                    let payload_offset = offset as usize + BLOCK_HEADER_SIZE;
+                    let payload_end = payload_offset + bh.stored_size as usize;
+                    if payload_end > self.mmap.len() {
+                        return Err("Block payload exceeds archive size".to_string());
+                    }
+                    let payload = &self.mmap[payload_offset..payload_end];
+
+                    if bh.fast_checksum_type != ChecksumType::None {
+                        if !verify_fast_checksum(payload, bh.fast_checksum_type, bh.fast_checksum) {
+                            return Err("Block checksum mismatch".to_string());
+                        }
+                    }
+
+                    // Thread-local reusable decompression buffer
+                    thread_local! {
+                        static DECOMP_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(1024 * 1024));
+                    }
+
+                    DECOMP_BUF.with(|cell| -> Result<(), String> {
+                        let mut decomp_buf = cell.borrow_mut();
+                        decomp_buf.clear();
+
+                        let block_slice: &[u8] = if bh.comp_algo == CompressionAlgo::None || bh.raw_size == 0 {
+                            payload
+                        } else {
+                            decompress_into(payload, bh.comp_algo, bh.raw_size, &mut decomp_buf)?;
+                            &decomp_buf
+                        };
+
+                        // Process all span jobs residing in this block
+                        for job in &task.jobs {
+                            let start = job.offset_in_block as usize;
+                            let end = start + job.length as usize;
+                            if end > block_slice.len() {
+                                return Err(format!(
+                                    "Span exceeds decompressed block: start={}, length={}, block_len={}",
+                                    start, job.length, block_slice.len()
+                                ));
+                            }
+                            let span_data = &block_slice[start..end];
+
+                            if job.is_single_span {
+                                // Entire file fits in this single span: create, write, apply permissions immediately
+                                let out_path = &target_paths[&job.file_idx];
+                                let mut f = File::create(out_path)
+                                    .map_err(|e| format!("Failed to create {}: {}", out_path.display(), e))?;
+                                async_io::advise_file(&f, 0, job.length as u64, AccessPattern::Sequential);
+                                use std::io::Write;
+                                f.write_all(span_data)
+                                    .map_err(|e| format!("Failed to write {}: {}", out_path.display(), e))?;
+
+                                #[cfg(unix)]
+                                if let Some(ref meta_vec) = self.posix_meta {
+                                    if job.file_idx < meta_vec.len() {
+                                        use std::os::unix::fs::PermissionsExt;
+                                        let mode = meta_vec[job.file_idx].mode;
+                                        let _ = std::fs::set_permissions(out_path, std::fs::Permissions::from_mode(mode & 0o777));
+                                    }
+                                }
+                            } else {
+                                // Multi-span file: concurrent atomic positional write (pwrite) with zero locks
+                                let f = &multi_span_files[&job.file_idx];
+                                #[cfg(unix)]
+                                {
+                                    f.write_all_at(span_data, job.offset_in_file)
+                                        .map_err(|e| format!("pwrite failed for file_idx {}: {}", job.file_idx, e))?;
+                                }
+                                #[cfg(not(unix))]
+                                {
+                                    use std::io::{Seek, SeekFrom, Write};
+                                    // Fallback for non-unix if applicable
+                                    return Err("Non-unix concurrent write not implemented".to_string());
+                                }
+                            }
+                        }
+
+                        Ok(())
+                    })?;
+
+                    Ok(())
+                })
+            })?;
+
+            // Apply POSIX metadata to multi-span files once all blocks are written
+            #[cfg(unix)]
+            if let Some(ref meta_vec) = self.posix_meta {
+                for &idx in multi_span_files.keys() {
+                    if idx < meta_vec.len() {
+                        if let Some(out_path) = target_paths.get(&idx) {
+                            use std::os::unix::fs::PermissionsExt;
+                            let mode = meta_vec[idx].mode;
+                            let _ = std::fs::set_permissions(out_path, std::fs::Permissions::from_mode(mode & 0o777));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Handle Symlinks
+        for &idx in &indices {
+            let entry = &self.files[idx];
+            if entry.entry_type == EntryType::Symlink {
+                if let Some(target) = self.get_symlink_target(idx) {
+                    if let Some(out_path) = target_paths.get(&idx) {
+                        #[cfg(unix)]
+                        {
+                            let _ = std::fs::remove_file(out_path);
+                            let _ = std::os::unix::fs::symlink(target, out_path);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Restore POSIX timestamps in post-pass
+        #[cfg(unix)]
+        if let Some(ref meta_vec) = self.posix_meta {
+            for &idx in &indices {
+                if idx < meta_vec.len() {
+                    if let Some(out_path) = target_paths.get(&idx) {
+                        use std::ffi::CString;
+                        use std::os::unix::ffi::OsStrExt;
+                        let meta = &meta_vec[idx];
+                        if let Ok(c_path) = CString::new(out_path.as_os_str().as_bytes()) {
+                            let times = [
+                                libc::timespec { tv_sec: meta.atime, tv_nsec: 0 },
+                                libc::timespec { tv_sec: meta.mtime, tv_nsec: 0 },
+                            ];
+                            unsafe {
+                                libc::utimensat(libc::AT_FDCWD, c_path.as_ptr(), times.as_ptr(), libc::AT_SYMLINK_NOFOLLOW);
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         Ok(())
     }

@@ -36,6 +36,26 @@ pub fn madvise_pattern(ptr: *const u8, len: usize, pattern: AccessPattern) {
     }
 }
 
+/// Disables OS page cache buffering (O_DIRECT / F_NOCACHE) for large archives or direct I/O.
+#[inline]
+pub fn set_direct_caching(file: &File, disable_cache: bool) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd;
+        let fd = file.as_raw_fd();
+        let _ = (fd, disable_cache);
+        #[cfg(target_os = "macos")]
+        unsafe {
+            // F_NOCACHE: Bypass unified buffer cache on macOS
+            libc::fcntl(fd, libc::F_NOCACHE, if disable_cache { 1 } else { 0 });
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (file, disable_cache);
+    }
+}
+
 /// Hints the OS kernel on file caching and readahead behavior for a given file descriptor.
 #[inline]
 pub fn advise_file(file: &File, offset: u64, len: u64, pattern: AccessPattern) {

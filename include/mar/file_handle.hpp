@@ -479,14 +479,12 @@ public:
         autoDetectSize();
 
         // Decide on Direct I/O (Linux-only feature)
+        // Direct I/O requires aligned buffers and sector-aligned writes.
+        // For writing arbitrary files (e.g. decompression sinks), AUTO should NOT
+        // enable O_DIRECT because writes may have unaligned lengths or offsets.
+        // Direct I/O is only enabled when explicitly requested via IOMode::DIRECT.
 #ifdef MAR_LINUX
-        if (hints.mode == IOMode::AUTO) {
-            // Use Direct I/O only when we *know* the file will be large.
-            // UNKNOWN should never trigger Direct I/O (it breaks small writes).
-            is_direct_io = (hints.expected_size != FileSize::UNKNOWN) && (hints.expected_size >= FileSize::LARGE);
-        } else {
-            is_direct_io = (hints.mode == IOMode::DIRECT);
-        }
+        is_direct_io = (hints.mode == IOMode::DIRECT);
 #else
         is_direct_io = false;
 #endif

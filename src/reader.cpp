@@ -83,17 +83,9 @@ OpenHints hints_for_extraction(u64 file_size) {
         hints.expected_size = FileSize::VERY_LARGE;
     }
 
-    // Platform-specific I/O mode selection
-    //
-    // Linux: Use AUTO mode - io_uring + page cache work well together
-    // macOS: Use BUFFERED mode - F_NOCACHE kills performance on multiblock archives
-    //        because blocks are re-read many times, and F_NOCACHE bypasses OS caching
-    //        that would otherwise accelerate repeated block reads.
-#ifdef __APPLE__
-    hints.mode = IOMode::BUFFERED;  // Critical: let OS cache work on macOS
-#else
-    hints.mode = IOMode::AUTO;  // Linux io_uring + page cache are fast
-#endif
+    // Extracted files are written via page cache on all platforms to ensure
+    // unaligned trailing spans and streaming writes succeed reliably without sector alignment constraints.
+    hints.mode = IOMode::BUFFERED;
 
     return hints;
 }
@@ -264,7 +256,7 @@ MarReader::MarReader(const std::string& path) {
             // Multiblock: find max block_id
             for (const auto& span : file_spans_->spans) {
                 if (span.block_id >= block_count) {
-                    block_count = span.block_id + 1;
+                    block_count = static_cast<size_t>(span.block_id) + 1;
                 }
             }
         }
@@ -681,9 +673,17 @@ void MarReader::extract_all(const std::string& output_dir, size_t strip_componen
                 auto hints = hints_for_extraction(entry.logical_size);
 
                 FileHandle out;
-                if (out.openWrite(output_path.string().c_str(), hints)) {
-                    DescriptorCompressionSink sink(out.getFd());
-                    extract_file_to_sink(i, sink);
+                if (!out.openWrite(output_path.string().c_str(), hints)) {
+                    throw IOError("Failed to open output file: " + output_path.string());
+                }
+                if (entry.logical_size > 0) {
+                    if (ftruncate(out.getFd(), static_cast<off_t>(entry.logical_size)) != 0) {
+                        // Non-fatal if filesystem doesn't support ftruncate
+                    }
+                }
+                DescriptorCompressionSink sink(out.getFd());
+                if (!extract_file_to_sink(i, sink)) {
+                    throw MarError("Extraction failed for " + output_path.string());
                 }
                 break;
             }
@@ -740,6 +740,11 @@ void MarReader::extract_file(size_t index, const std::string& output_dir) {
             FileHandle out;
             if (!out.openWrite(output_path.string().c_str(), hints)) {
                 throw IOError("Failed to open output file: " + output_path.string());
+            }
+            if (entry.logical_size > 0) {
+                if (ftruncate(out.getFd(), static_cast<off_t>(entry.logical_size)) != 0) {
+                    // Non-fatal if filesystem doesn't support ftruncate
+                }
             }
 
             DescriptorCompressionSink sink(out.getFd());
@@ -936,12 +941,21 @@ void MarReader::extract_indices_parallel(const std::vector<size_t>& indices, con
                     auto hints = hints_for_extraction(entry.logical_size);
 
                     FileHandle out;
-                    if (!out.openWrite(output.output_path.string().c_str(), hints))
-                        continue;
+                    if (!out.openWrite(output.output_path.string().c_str(), hints)) {
+                        throw IOError("Failed to open output file: " + output.output_path.string());
+                    }
+
+                    if (entry.logical_size > 0) {
+                        if (ftruncate(out.getFd(), static_cast<off_t>(entry.logical_size)) != 0) {
+                            // Non-fatal if filesystem doesn't support ftruncate, but log or proceed
+                        }
+                    }
 
                     // Stream extraction - constant memory usage
                     DescriptorCompressionSink sink(out.getFd());
-                    extract_file_to_sink(output.index, sink);
+                    if (!extract_file_to_sink(output.index, sink)) {
+                        throw MarError("Extraction failed for " + output.output_path.string());
+                    }
 
                     // Apply metadata immediately while we have the FD
                     if (posix_meta_ && output.index < posix_meta_->size()) {
@@ -978,12 +992,21 @@ void MarReader::extract_indices_parallel(const std::vector<size_t>& indices, con
             auto hints = hints_for_extraction(entry.logical_size);
 
             FileHandle out;
-            if (!out.openWrite(output_path.string().c_str(), hints))
-                continue;
+            if (!out.openWrite(output_path.string().c_str(), hints)) {
+                throw IOError("Failed to open output file: " + output_path.string());
+            }
+
+            if (entry.logical_size > 0) {
+                if (ftruncate(out.getFd(), static_cast<off_t>(entry.logical_size)) != 0) {
+                    // Non-fatal if filesystem doesn't support ftruncate
+                }
+            }
 
             // Stream extraction - constant memory usage
             DescriptorCompressionSink sink(out.getFd());
-            extract_file_to_sink(output.index, sink);
+            if (!extract_file_to_sink(output.index, sink)) {
+                throw MarError("Extraction failed for " + output_path.string());
+            }
 
             // Apply metadata immediately
             if (posix_meta_ && output.index < posix_meta_->size()) {

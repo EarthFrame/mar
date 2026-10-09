@@ -2156,26 +2156,49 @@ fn main() {
 
     let mut cli_opts = CliOptions::default();
     let mut cmd_name = String::new();
-    let mut filtered_args = Vec::new();
+    let mut cmd_start = -1isize;
 
-    let mut i = 1;
-    while i < args.len() {
-        let arg = &args[i];
+    for (i, arg) in args.iter().enumerate().skip(1) {
+        if cmd_start < 0 {
+            if arg == "-h" || arg == "--help" {
+                print_usage();
+                process::exit(EXIT_OK);
+            }
+            if arg == "--version" {
+                println!("{}", TOOL_VERSION);
+                process::exit(EXIT_OK);
+            }
+        }
+
         if arg == "-q" || arg == "--quiet" {
             cli_opts.quiet = true;
         } else if arg == "-v" || arg == "--verbose" {
             cli_opts.verbose += 1;
         } else if arg == "--stopwatch" {
             cli_opts.stopwatch = true;
-        } else if cmd_name.is_empty() && !arg.starts_with('-') {
+        } else if cmd_start < 0 {
             cmd_name = arg.clone();
-        } else {
-            filtered_args.push(arg.clone());
+            cmd_start = i as isize;
         }
-        i += 1;
     }
 
     set_options(cli_opts);
+
+    if cmd_name.is_empty() {
+        print_usage();
+        process::exit(EXIT_USAGE);
+    }
+
+    let mut filtered_args = Vec::new();
+    for (i, arg) in args.iter().enumerate().skip(1) {
+        if (i as isize) <= cmd_start {
+            continue;
+        }
+        if arg == "--stopwatch" || arg == "-q" || arg == "--quiet" || arg == "-v" || arg == "--verbose" {
+            continue;
+        }
+        filtered_args.push(arg.clone());
+    }
 
     if cmd_name.is_empty() {
         print_usage();

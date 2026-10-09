@@ -555,18 +555,13 @@ std::vector<u8> MarWriter::compress_block(const std::vector<u8>& data, BlockHead
 // Stream compress a file directly (more efficient for large files)
 std::vector<u8> MarWriter::compress_file_range(const std::string& file_path, u64 offset, u64 length,
                                                BlockHeader& header) {
-    int fd = fd_manager_.acquire(file_path);
-    if (fd < 0)
-        throw IOError("Failed to open file for reading: " + file_path);
-    std::vector<u8> compressed;
-    try {
-        compress_file_range_fd(fd, file_path, offset, length, compressed, header);
-    } catch (...) {
-        fd_manager_.release(fd, file_path);
-        throw;
+    ScopedFd fd(fd_manager_.acquire(file_path));
+    if (!fd.valid()) {
+        int err = errno;
+        throw IOError("Failed to open file for reading: " + file_path + " (" + std::strerror(err) + ")");
     }
-
-    fd_manager_.release(fd, file_path);
+    std::vector<u8> compressed;
+    compress_file_range_fd(fd.get(), file_path, offset, length, compressed, header);
     return compressed;
 }
 
@@ -789,9 +784,12 @@ void MarWriter::finish() {
                 if (fd_ref.hash.has_value())
                     return;
 
-                int fd = fd_manager_.acquire(fd_ref.source_path);
-                if (fd < 0)
-                    return;
+                ScopedFd fd(fd_manager_.acquire(fd_ref.source_path));
+                if (!fd.valid()) {
+                    int err = errno;
+                    throw IOError("Failed to open file for reading: " + fd_ref.source_path + " (" +
+                                  std::strerror(err) + ")");
+                }
 
                 mar::xxhash3::XXHash3_64 hasher(0);
                 // Use smaller buffer for small files, larger for big files
@@ -803,7 +801,7 @@ void MarWriter::finish() {
                     size_t to_read = std::min((size_t)(fd_ref.entry.logical_size - total_read), buf_size);
                     // NOLINT(bugprone-narrowing-conversions) - offset is always non-negative and within valid archive
                     // bounds
-                    ssize_t n = ::pread(fd, buf_ptr, to_read, static_cast<off_t>(total_read));
+                    ssize_t n = ::pread(fd.get(), buf_ptr, to_read, static_cast<off_t>(total_read));
                     if (n <= 0)
                         break;
                     hasher.update(buf_ptr, (size_t)n);
@@ -811,7 +809,7 @@ void MarWriter::finish() {
                 }
 
                 ThreadLocalBufferPool::release(buf_ptr);
-                fd_manager_.release(fd, fd_ref.source_path);
+                fd.reset();
 
                 u64 digest = hasher.finalize();
                 fd_ref.hash = xxhash3_256_from_u64(digest);
@@ -934,7 +932,7 @@ void MarWriter::finish() {
 
     for (size_t t = 0; t < num_threads; ++t) {
         futures.push_back(pool.enqueue([this, &tasks, &ranges, &next_range_id, &current_pos, &archive, alignment]() {
-            int cached_fd = -1;
+            ScopedFd cached_fd;
             std::string cached_path;
             std::vector<u8> compressed;
             while (true) {
@@ -962,18 +960,17 @@ void MarWriter::finish() {
                     u8* compressed_ptr = nullptr;
                     size_t compressed_size = 0;
                     if (!task.is_memory) {
-                        if (cached_fd < 0 || cached_path != fd.source_path) {
-                            if (cached_fd >= 0) {
-                                fd_manager_.release(cached_fd, cached_path);
-                            }
-                            cached_fd = fd_manager_.acquire(fd.source_path);
-                            if (cached_fd < 0) {
-                                throw IOError("Failed to open file for reading: " + fd.source_path);
+                        if (!cached_fd.valid() || cached_path != fd.source_path) {
+                            cached_fd.reset(fd_manager_.acquire(fd.source_path));
+                            if (!cached_fd.valid()) {
+                                int err = errno;
+                                throw IOError("Failed to open file for reading: " + fd.source_path + " (" +
+                                              std::strerror(err) + ")");
                             }
                             cached_path = fd.source_path;
                         }
-                        compress_file_range_fd(cached_fd, fd.source_path, task.offset, task.length, compressed, bh,
-                                               hash_callback);
+                        compress_file_range_fd(cached_fd.get(), fd.source_path, task.offset, task.length, compressed,
+                                               bh, hash_callback);
                         compressed_ptr = compressed.data();
                         compressed_size = compressed.size();
                     } else {
@@ -1011,9 +1008,7 @@ void MarWriter::finish() {
                     block_table_[task_id] = {block_start, task.length, (u64)compressed_size};
                 }
             }
-            if (cached_fd >= 0) {
-                fd_manager_.release(cached_fd, cached_path);
-            }
+            cached_fd.reset();
         }));
     }
 
