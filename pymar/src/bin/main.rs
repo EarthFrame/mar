@@ -14,7 +14,7 @@ use std::path::Path;
 use std::process;
 use std::time::Instant;
 
-const TOOL_VERSION: &str = "0.2.0";
+const TOOL_VERSION: &str = "0.3.0";
 const MAR_SPEC_VERSION: &str = "0.1.1";
 
 const EXIT_OK: i32 = 0;

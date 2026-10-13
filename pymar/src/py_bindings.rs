@@ -543,9 +543,10 @@ pub struct PyIndexCacheManager {
 #[pymethods]
 impl PyIndexCacheManager {
     #[new]
-    fn new() -> Self {
+    #[pyo3(signature = (cache_dir=None))]
+    fn new(cache_dir: Option<String>) -> Self {
         Self {
-            inner: IndexCacheManager::new(),
+            inner: IndexCacheManager::with_cache_dir(cache_dir.map(std::path::PathBuf::from)),
         }
     }
 

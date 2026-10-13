@@ -732,6 +732,9 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
 
             pool.install(|| {
                 tasks.par_iter().try_for_each(|task| -> Result<(), String> {
+                    if crate::is_interrupted() {
+                        return Err("Operation cancelled by user".to_string());
+                    }
                     let out_path = &target_paths[&task.file_idx];
                     let entry = &self.files[task.file_idx];
                     let mut out_file = File::create(out_path)
@@ -866,6 +869,9 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
 
             pool.install(|| {
                 tasks.par_iter().try_for_each(|task| -> Result<(), String> {
+                    if crate::is_interrupted() {
+                        return Err("Operation cancelled by user".to_string());
+                    }
                     let block_id = task.block_id as usize;
                     if block_id >= self.block_offsets.len() {
                         return Err(format!("Invalid block_id {} in file spans", block_id));

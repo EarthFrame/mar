@@ -70,8 +70,11 @@ sudo pacman -S gcc cmake zstd lz4 bzip2 zlib libdeflate
 # Install system dependencies (macOS/Linux)
 make system-deps
 
-# Build the tool
+# Build the tool (defaults to pure Rust CLI binary: ./mar)
 make
+
+# Build C++ reference binary (./mar-cpp)
+make cpp
 
 # Build using Clang instead of GCC
 make CXX=clang++

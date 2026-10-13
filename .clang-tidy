@@ -1,7 +1,7 @@
 ---
 # Only report findings in our own source and headers, not in deps/ or
 # system headers. The regex is matched against the full file path.
-HeaderFilterRegex: '^.*(src|include/mar)/.*'
+HeaderFilterRegex: '^.*(cpp/src|cpp/include/mar|src|include/mar)/.*'
 
 # Format source edits using the project .clang-format when --fix is used.
 FormatStyle: file

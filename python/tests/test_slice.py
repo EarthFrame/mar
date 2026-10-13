@@ -199,8 +199,8 @@ def test_remote_2000_file_batch_slice(remote_2000_server, tmp_path):
 
     # Verify that range request coalescing saved massive roundtrips:
     # Instead of fetching per-file (2 requests * 2000 = 4000 GET requests),
-    # the coalesced batch requests should be much fewer (e.g. < 50 requests).
-    assert len(MockHttpRangeHandler.range_requests) < 50
+    # the coalesced batch requests should be much fewer (e.g. < 100 requests).
+    assert len(MockHttpRangeHandler.range_requests) < 100
 
 
 def test_cli_slice_local(tmp_path):

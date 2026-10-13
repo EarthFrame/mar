@@ -1,19 +1,29 @@
 # MAR C++ Reference Implementation
 
-Authoritative reference implementation of the MAR (Multi-format Archival) format v0.1.1 (tool v0.2.0).
+Authoritative reference implementation of the MAR (Multi-format Archival) format v0.1.1 (tool v0.3.0).
 
 ## Layout
 
 - `include/mar/`: Public C++ headers (`format.hpp`, `reader.hpp`, `writer.hpp`, etc.)
 - `src/`: C++ implementation files
-- `tests/`: Test suite (`test_main.cpp`, `integration_test.sh`)
+- `tests/`: C++ unit test suite (`test_main.cpp`)
 
 ## Build
 
+From this directory:
 ```bash
-# Build release binary (./mar)
+# Build C++ reference binary (../mar-cpp)
 make
 
-# Run C++ test suite
+# Run C++ unit test suite
 make test
+```
+
+From the repository root:
+```bash
+# Build C++ reference binary (./mar-cpp)
+make cpp
+
+# Run C++ unit test suite
+make test-cpp
 ```

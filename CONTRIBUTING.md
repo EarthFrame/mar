@@ -109,12 +109,12 @@ make lint-fix
 
 CI produces Linux release binaries by building inside an **Alpine 3.20 Docker container**. Alpine uses musl natively, so `STATIC=1` produces a fully static binary with no glibc dependency — no zig required.
 
-To reproduce the CI build locally (requires Docker):
+To reproduce the C++ static build locally (requires Docker):
 
 ```bash
 mkdir -p dist
 docker run --rm -v "$(pwd):/work" -w /work alpine:3.20 sh -c "
-  apk add --no-cache build-base linux-headers pkgconf cmake \
+  apk add --no-cache build-base linux-headers pkgconf cmake git \
     zstd-dev zstd-static lz4-dev lz4-static \
     bzip2-dev bzip2-static zlib-dev zlib-static \
     libdeflate-dev libdeflate-static liburing-dev
@@ -246,9 +246,10 @@ existing implementation on older hardware.
 ## Repo Layout
 
 ```
-src/              Library and CLI source files
-include/mar/      Public headers
-tests/            Unit tests (test_main.cpp) and integration tests (integration_test.sh)
+cpp/              C++ reference implementation (cpp/src, cpp/include/mar, cpp/tests)
+rust/             Pure Rust engine and CLI binary (default mar binary)
+python/           Python bindings (pymar) and tests
+tests/            CLI integration tests (integration_test.sh) and test fixtures
 deps/             Vendored third-party libraries (BLAKE3, hnswlib, nlohmann/json, etc.)
 docs/             Tutorials, release notes, and progress notes
 scripts/          Helper scripts (perf checks, test data generation)

@@ -9,8 +9,10 @@ benchmarks/scratch_*/
 
 # Build artifacts
 /build/
+cpp/build/
 /mar
 /mar-rust
+/mar-cpp
 /test_mar
 /test_nar
 /dist/
@@ -38,7 +40,8 @@ casp15/
 okf/okf/
 okf/how-the-open-knowledge-format-can-improve-data-sharing
 
-# Specifically include include/mar
+# Specifically include cpp/include/mar
+!cpp/include/mar/
 !include/mar/
 
 # Archives

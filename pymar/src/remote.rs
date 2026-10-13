@@ -8,6 +8,27 @@ pub struct IndexCacheManager {
 
 impl IndexCacheManager {
     pub fn new() -> Self {
+        Self::with_cache_dir(None)
+    }
+
+    pub fn with_cache_dir(custom_cache_dir: Option<PathBuf>) -> Self {
+        let cache_dir = if let Some(dir) = custom_cache_dir {
+            dir
+        } else if let Ok(val) = std::env::var("MAR_CACHE_DIR") {
+            if !val.trim().is_empty() {
+                PathBuf::from(val.trim())
+            } else {
+                Self::default_cache_dir()
+            }
+        } else {
+            Self::default_cache_dir()
+        };
+
+        let _ = fs::create_dir_all(&cache_dir);
+        Self { cache_dir }
+    }
+
+    fn default_cache_dir() -> PathBuf {
         let base = match std::env::var("XDG_CACHE_HOME") {
             Ok(val) if !val.is_empty() => PathBuf::from(val),
             _ => match std::env::var("HOME") {
@@ -15,16 +36,14 @@ impl IndexCacheManager {
                 _ => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(".cache"),
             },
         };
-        let cache_dir = base.join("mar").join("indices");
-        let _ = fs::create_dir_all(&cache_dir);
-        Self { cache_dir }
+        base.join("earthframe").join("mar")
     }
 
     fn cache_path(&self, uri: &str) -> PathBuf {
         let mut hasher = crc32fast::Hasher::new();
         hasher.update(uri.as_bytes());
         let hash = hasher.finalize();
-        self.cache_dir.join(format!("{:08x}.idx", hash))
+        self.cache_dir.join(format!("{:08x}.hdr", hash))
     }
 
     pub fn get(&self, uri: &str, validator: &str) -> Option<Vec<u8>> {

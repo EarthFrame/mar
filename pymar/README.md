@@ -7,10 +7,10 @@ High-performance Rust engine and Python package for the **MAR** archive format, 
 ## Key Features
 
 - **Blazingly Fast Rust Core**: Complete implementation of the MAR specification using PyO3 and Maturin with zero-dependency static compilation.
-- **100% Test & Format Parity**: Full binary format compatibility (v0.1.1 spec, v0.2.0 tool) and 100% pass rate on all legacy and modern test suites.
+- **100% Test & Format Parity**: Full binary format compatibility (v0.1.1 spec, v0.3.0 tool) and 100% pass rate on all legacy and modern test suites.
 - **Cloud Egress Optimization (S3, Cloudflare R2, Backblaze B2)**:
   - **Two-Read Remote Index Retrieval**: Fetches a 48-byte `FixedHeader` followed by the metadata container range, mounting remote 100 GB+ archives in milliseconds.
-  - **User-Wide Local Index Cache**: Persists verified index structures to `~/.cache/mar/indices/` (respecting `$XDG_CACHE_HOME`), reducing subsequent opens to 0 network calls.
+  - **User-Wide Local Index Cache**: Persists verified index structures to `~/.cache/earthframe/mar/` (respecting `$MAR_CACHE_DIR` and `$XDG_CACHE_HOME`), reducing subsequent opens to 0 network calls.
   - **Selective Block Streaming**: Files are fetched on-demand using HTTP byte-range requests for only the target compressed blocks, saving 99%+ of data egress costs.
 - **Molecular ML & Boltz-2 Support**:
   - Direct replacement for uncompressed `mols.tar` in Boltz-2 / CCD workflows.
@@ -71,7 +71,7 @@ content = archive.read_file("molecules/ATP.pkl")
 When opening a remote archive `pymar.open("https://.../dataset.mar")`:
 1. **Read 1 (48 bytes)**: Downloads `Range: bytes=0-47` to parse the `FixedHeader`, checking `magic_number` and validating `header_crc32c`.
 2. **Read 2 (Metadata section)**: Downloads `Range: bytes=[meta_offset..meta_offset + meta_stored_size)`. Decompresses the section directory and table mappings.
-3. **Cache Storage**: The validated index is saved to `~/.cache/mar/indices/<hash>.idx`. Future runs open the archive with **0 network requests**.
+3. **Cache Storage**: The validated index header is saved to `~/.cache/earthframe/mar/<hash>.hdr` (configurable via `cache_dir` parameter, `$MAR_CACHE_DIR`, or `$XDG_CACHE_HOME`). Future runs open the archive with **0 network requests**.
 
 ### Egress Savings Calculation
 

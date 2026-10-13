@@ -48,8 +48,8 @@ def is_system_header(file_path):
     # Skip third-party dependencies that are bundled
     if 'xxhash3.h' in file_path:
         return True
-    # Also check if it's NOT in src/ or include/mar/
-    if 'src/' not in file_path and 'include/mar/' not in file_path:
+    # Also check if it's NOT in cpp/src/, cpp/include/mar/, src/, or include/mar/
+    if not any(k in file_path for k in ['cpp/src/', 'cpp/include/mar/', 'src/', 'include/mar/']):
         return True
     return False
 

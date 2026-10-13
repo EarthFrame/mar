@@ -5,7 +5,7 @@ use mar_core::format::*;
 use mar_core::mai::*;
 use mar_core::reader::MarReader;
 use mar_core::redact::redact_archive;
-use mar_core::writer::{MarWriter, WriteOptions};
+use mar_core::writer::{BlockMode, MarWriter, WriteOptions};
 
 use std::env;
 use std::fs::{self, File};
@@ -14,7 +14,7 @@ use std::path::Path;
 use std::process;
 use std::time::Instant;
 
-const TOOL_VERSION: &str = "0.2.0";
+const TOOL_VERSION: &str = "0.3.0";
 const MAR_SPEC_VERSION: &str = "0.1.1";
 
 const EXIT_OK: i32 = 0;
@@ -112,8 +112,10 @@ Options:
   -c, --compression <algo>   Compression: none, lz4, zstd (default), gzip, bzip2
   --compression-level <n>    Codec level (-1 = default). Valid ranges depend on --compression
   --checksum <type>          Checksum: xxhash3 (default), xxhash32, blake3, crc32c, none
-  -m, --multiblock           Use multiblock mode (default)
-  --single-file              Use single-file-per-block mode
+  --block-mode <mode>        Block mode: single, multi, shared (default: shared)
+  -m, --multiblock           Use multiblock mode (alias for --block-mode multi)
+  --pack-files               Pack small files into shared blocks (alias for --block-mode shared)
+  --single-file              Use single-file-per-block mode (alias for --block-mode single)
   --block-size <size>        Target block size, e.g. 64KB, 1MB, 4MB (default: 1MB)
   --name-format <fmt>        Name table: auto (default), raw, front-coded, trie
   -f, --force                Overwrite existing archive
@@ -161,7 +163,10 @@ Options:
   --compression-level <n>    Compression level (-1 = default)
   --checksum <type>          Checksum: xxhash3 (default), xxhash32, blake3, crc32c, none
   --block-size <size>        Block size, e.g. 64KB, 1MB, 4MB (default: match source or 1MB)
-  -m, --multiblock           Use multiblock mode (default)
+  --block-mode <mode>        Block mode: single, multi, shared (default: shared)
+  -m, --multiblock           Use multiblock mode (alias for --block-mode multi)
+  --pack-files               Pack small files into shared blocks (alias for --block-mode shared)
+  --single-file              Use single-file-per-block mode (alias for --block-mode single)
   --single-file              Use single-file-per-block mode
   -f, --force                Overwrite existing archive
   -j, --threads <num>        Parallel threads (default: CPU cores)
@@ -432,9 +437,38 @@ fn cmd_create(args: &[String]) -> i32 {
                 return EXIT_USAGE;
             }
             opts.compression_level = args[i].parse().unwrap_or(-1);
+        } else if arg == "--block-mode" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Missing block mode", "create");
+                return EXIT_USAGE;
+            }
+            match args[i].to_lowercase().as_str() {
+                "single" => {
+                    opts.block_mode = BlockMode::Single;
+                    opts.multiblock = false;
+                }
+                "multi" => {
+                    opts.block_mode = BlockMode::Multi;
+                    opts.multiblock = true;
+                }
+                "shared" => {
+                    opts.block_mode = BlockMode::Shared;
+                    opts.multiblock = true;
+                }
+                _ => {
+                    print_error(&format!("Invalid block mode: '{}'. Expected single, multi, or shared", args[i]), "create");
+                    return EXIT_USAGE;
+                }
+            }
         } else if arg == "-m" || arg == "--multiblock" {
+            opts.block_mode = BlockMode::Multi;
+            opts.multiblock = true;
+        } else if arg == "--pack-files" {
+            opts.block_mode = BlockMode::Shared;
             opts.multiblock = true;
         } else if arg == "--single-file" {
+            opts.block_mode = BlockMode::Single;
             opts.multiblock = false;
         } else if arg == "--block-size" {
             i += 1;
@@ -596,8 +630,19 @@ fn cmd_create(args: &[String]) -> i32 {
     }
 
     if let Err(e) = writer.finish() {
+        if mar_core::is_interrupted() {
+            print_error("Interrupted", "create");
+            let _ = fs::remove_file(&archive_path);
+            return 130;
+        }
         print_error(&e, "create");
         return EXIT_ERROR;
+    }
+
+    if mar_core::is_interrupted() {
+        print_error("Interrupted", "create");
+        let _ = fs::remove_file(&archive_path);
+        return 130;
     }
 
     print_info(&format!("Created: {}", archive_path));
@@ -612,6 +657,7 @@ fn cmd_slice(args: &[String]) -> i32 {
     let mut compression_level = -1i32;
     let mut checksum_type: Option<ChecksumType> = None;
     let mut block_size: Option<u64> = None;
+    let mut block_mode = BlockMode::Shared;
     let mut multiblock = true;
     let mut force = false;
     let mut num_threads = 0usize;
@@ -725,9 +771,38 @@ fn cmd_slice(args: &[String]) -> i32 {
                     return EXIT_USAGE;
                 }
             }
+        } else if arg == "--block-mode" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Option --block-mode requires an argument", "slice");
+                return EXIT_USAGE;
+            }
+            match args[i].to_lowercase().as_str() {
+                "single" => {
+                    block_mode = BlockMode::Single;
+                    multiblock = false;
+                }
+                "multi" => {
+                    block_mode = BlockMode::Multi;
+                    multiblock = true;
+                }
+                "shared" => {
+                    block_mode = BlockMode::Shared;
+                    multiblock = true;
+                }
+                _ => {
+                    print_error(&format!("Invalid block mode: '{}'. Expected single, multi, or shared", args[i]), "slice");
+                    return EXIT_USAGE;
+                }
+            }
         } else if arg == "-m" || arg == "--multiblock" {
+            block_mode = BlockMode::Multi;
+            multiblock = true;
+        } else if arg == "--pack-files" {
+            block_mode = BlockMode::Shared;
             multiblock = true;
         } else if arg == "--single-file" {
+            block_mode = BlockMode::Single;
             multiblock = false;
         } else if arg == "-f" || arg == "--force" {
             force = true;
@@ -788,6 +863,7 @@ fn cmd_slice(args: &[String]) -> i32 {
     }
 
     let mut opts = WriteOptions::default();
+    opts.block_mode = block_mode;
     opts.multiblock = multiblock;
     if let Some(algo) = compression_algo {
         opts.compression = algo;
@@ -845,8 +921,19 @@ fn cmd_slice(args: &[String]) -> i32 {
     }
 
     if let Err(e) = writer.finish() {
+        if mar_core::is_interrupted() {
+            print_error("Interrupted", "slice");
+            let _ = fs::remove_file(&output_path);
+            return 130;
+        }
         print_error(&e, "slice");
         return EXIT_ERROR;
+    }
+
+    if mar_core::is_interrupted() {
+        print_error("Interrupted", "slice");
+        let _ = fs::remove_file(&output_path);
+        return 130;
     }
 
     print_info(&format!(
@@ -990,6 +1077,10 @@ fn cmd_extract(args: &[String]) -> i32 {
         };
 
         if let Err(e) = reader.extract_parallel_strip(&output_dir, patterns_opt, num_threads, strip_components) {
+            if mar_core::is_interrupted() {
+                print_error("Interrupted", "extract");
+                return 130;
+            }
             print_error(&e, "extract");
             return EXIT_ERROR;
         }
@@ -2137,10 +2228,21 @@ fn json_escape(s: &str) -> String {
     out
 }
 
+extern "C" fn sigint_handler(_sig: libc::c_int) {
+    mar_core::set_interrupted();
+    let msg = b"\nOperation interrupted by user (Ctrl+C). Cleaning up...\n";
+    unsafe {
+        libc::write(libc::STDERR_FILENO, msg.as_ptr() as *const libc::c_void, msg.len());
+        // Re-set default handler so a second Ctrl-C kills immediately if desired
+        libc::signal(libc::SIGINT, libc::SIG_DFL);
+    }
+}
+
 fn main() {
     #[cfg(unix)]
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+        libc::signal(libc::SIGINT, sigint_handler as *const () as libc::sighandler_t);
     }
 
     let args: Vec<String> = env::args().collect();
@@ -2229,6 +2331,10 @@ fn main() {
             EXIT_USAGE
         }
     };
+
+    if mar_core::is_interrupted() {
+        process::exit(130);
+    }
 
     if cli_opts.stopwatch {
         let dur = start.elapsed();

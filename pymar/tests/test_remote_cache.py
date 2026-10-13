@@ -79,6 +79,11 @@ def http_server(tmp_path_factory):
     yield f"http://127.0.0.1:{port}/sample.mar"
     server.shutdown()
 
+@pytest.fixture(autouse=True)
+def setup_test_cache(tmp_path, monkeypatch):
+    test_cache = str(tmp_path / "global_test_cache")
+    monkeypatch.setenv("MAR_CACHE_DIR", test_cache)
+
 def test_remote_two_read_index_retrieval(http_server):
     RangeRequestHandler.requested_ranges.clear()
 
@@ -113,3 +118,91 @@ def test_remote_selective_block_streaming(http_server):
     content2_again = remote["doc2.txt"]
     assert content2 == content2_again
     assert remote.client.read_count == cached_reads
+
+
+def test_cache_dir_configuration(tmp_path, monkeypatch):
+    from pymar import get_cache_dir
+
+    # 1. Default fallback: ~/.cache/earthframe/mar
+    monkeypatch.delenv("MAR_CACHE_DIR", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    expected_default = os.path.expanduser("~/.cache/earthframe/mar")
+    assert get_cache_dir() == expected_default
+
+    # 2. XDG_CACHE_HOME fallback
+    xdg_dir = str(tmp_path / "xdg_cache")
+    monkeypatch.setenv("XDG_CACHE_HOME", xdg_dir)
+    assert get_cache_dir() == os.path.join(xdg_dir, "earthframe", "mar")
+
+    # 3. MAR_CACHE_DIR environment variable override
+    env_dir = str(tmp_path / "custom_env_cache")
+    monkeypatch.setenv("MAR_CACHE_DIR", env_dir)
+    assert get_cache_dir() == env_dir
+
+    # 4. Explicit parameter overrides environment variable
+    explicit_dir = str(tmp_path / "explicit_cache")
+    assert get_cache_dir(explicit_dir) == explicit_dir
+
+    # 5. IndexCacheManager respects explicit and env config
+    from pymar import _mar
+    mgr_explicit = _mar.IndexCacheManager(explicit_dir)
+    assert mgr_explicit.cache_dir() == explicit_dir
+
+    mgr_env = _mar.IndexCacheManager()
+    assert mgr_env.cache_dir() == env_dir
+
+
+def test_hdr_cache_and_archive_destinations(http_server, tmp_path, monkeypatch):
+    """
+    Verify:
+    1. The cache directory contains ONLY .hdr files (only 2-read index metadata, no .mar archives or data blocks).
+    2. MAR archives are written to specified directory or current working directory.
+    3. download() / materialize() fetches all blocks into the archive.
+    """
+    cache_dir = str(tmp_path / "hdr_cache")
+    archive_out_dir = str(tmp_path / "archives")
+    os.makedirs(archive_out_dir, exist_ok=True)
+
+    # 1. Open remote archive with specific archive_dir
+    remote = pymar.RemoteArchive(http_server, cache_dir=cache_dir, archive_dir=archive_out_dir)
+    assert os.path.dirname(remote.archive_path) == os.path.abspath(archive_out_dir)
+    assert os.path.basename(remote.archive_path) == "sample.mar"
+    assert os.path.exists(remote.archive_path)
+
+    # Read a file to populate block data into archive
+    data = remote.read_file("doc1.txt")
+    assert b"First file content" in data
+
+    # Verify cache directory contains ONLY .hdr files and NO .mar archives
+    cache_files = os.listdir(cache_dir)
+    assert len(cache_files) > 0
+    for f in cache_files:
+        assert f.endswith(".hdr"), f"Found non-.hdr file in cache: {f}"
+        assert not f.endswith(".mar"), f"Found .mar file in cache: {f}"
+
+    # 2. Open with custom archive_path
+    custom_archive_file = str(tmp_path / "custom_named.mar")
+    remote2 = pymar.RemoteArchive(http_server, cache_dir=cache_dir, archive_path=custom_archive_file)
+    assert remote2.archive_path == os.path.abspath(custom_archive_file)
+    assert os.path.exists(custom_archive_file)
+    remote2.download()
+    assert os.path.exists(custom_archive_file)
+    assert os.path.getsize(custom_archive_file) > 0
+    # Validate the materialized archive integrity
+    assert pymar.mar_validate(custom_archive_file)
+
+    # 3. Default to current working directory if neither is specified
+    work_dir = str(tmp_path / "cwd_work")
+    os.makedirs(work_dir, exist_ok=True)
+    monkeypatch.chdir(work_dir)
+
+    remote3 = pymar.open(http_server, cache_dir=cache_dir)
+    assert remote3.archive_path == os.path.join(work_dir, "sample.mar")
+    assert os.path.exists(os.path.join(work_dir, "sample.mar"))
+
+    # Verify that cache dir still strictly has only .hdr files
+    for f in os.listdir(cache_dir):
+        assert f.endswith(".hdr"), f"Found non-.hdr file in cache: {f}"
+        assert not f.endswith(".mar"), f"Found .mar file in cache: {f}"
+
+

@@ -6,12 +6,13 @@ MAR_SPEC_MAJOR ?= 0
 MAR_SPEC_MINOR ?= 1
 MAR_SPEC_PATCH ?= 1
 
-TOOL_VERSION_MAJOR ?= 0
-TOOL_VERSION_MINOR ?= 2
-TOOL_VERSION_PATCH ?= 0
+VERSION_FILE ?= VERSION
+VERSION ?= $(shell cat $(VERSION_FILE) 2>/dev/null || echo "0.3.0")
+TOOL_VERSION_MAJOR ?= $(shell echo $(VERSION) | cut -d. -f1)
+TOOL_VERSION_MINOR ?= $(shell echo $(VERSION) | cut -d. -f2)
+TOOL_VERSION_PATCH ?= $(shell echo $(VERSION) | cut -d. -f3)
 VERSION_RELEASE ?= 1
 
-VERSION = $(TOOL_VERSION_MAJOR).$(TOOL_VERSION_MINOR).$(TOOL_VERSION_PATCH)
 PKG_VERSION = $(VERSION)-$(VERSION_RELEASE)
 
 # Installation paths
@@ -87,38 +88,39 @@ EXTRA_LDFLAGS ?=
 
 # Architecture-specific flags (for distribution builds)
 ARCH_FLAGS ?=
-TARGET_NAME ?= mar
+TARGET_NAME ?= mar-cpp
 
 # Include paths
-INCLUDES = -I./include -isystem ./deps -isystem ./deps/simde -isystem ./deps/hnswlib
+INCLUDES = -I./cpp/include -isystem ./deps -isystem ./deps/simde -isystem ./deps/hnswlib
 
-# Source files
-SRCS = src/format.cpp src/checksum.cpp src/compression.cpp src/compression_gzip.cpp \
-       src/compression_zstd.cpp src/compression_lz4.cpp src/compression_bzip2.cpp \
-       src/sections.cpp src/name_index.cpp src/reader.cpp src/writer.cpp \
-       src/file_descriptor_manager.cpp src/async_io.cpp src/thread_pool.cpp src/redact.cpp src/diff.cpp \
-       src/index_registry.cpp src/index_minhash.cpp src/index_vector.cpp src/index_bm25.cpp src/index_genomic.cpp \
-       src/index_fasta.cpp \
-       src/index_email.cpp src/index_timeseries.cpp src/embed_server.cpp \
-       src/okf_yaml.cpp src/okf_document.cpp src/okf_links.cpp src/okf_bundle.cpp src/okf_validate.cpp \
-       src/okf_cache.cpp src/okf_computation.cpp src/okf_lint.cpp src/okf_diff.cpp src/okf_index_gen.cpp \
-       src/okf_cli.cpp
-MAIN_SRC = src/main.cpp
-TEST_SRC = tests/test_main.cpp
+# Source files (C++ reference implementation in cpp/)
+CPP_DIR = cpp
+SRCS = $(CPP_DIR)/src/format.cpp $(CPP_DIR)/src/checksum.cpp $(CPP_DIR)/src/compression.cpp $(CPP_DIR)/src/compression_gzip.cpp \
+       $(CPP_DIR)/src/compression_zstd.cpp $(CPP_DIR)/src/compression_lz4.cpp $(CPP_DIR)/src/compression_bzip2.cpp \
+       $(CPP_DIR)/src/sections.cpp $(CPP_DIR)/src/name_index.cpp $(CPP_DIR)/src/reader.cpp $(CPP_DIR)/src/writer.cpp \
+       $(CPP_DIR)/src/file_descriptor_manager.cpp $(CPP_DIR)/src/async_io.cpp $(CPP_DIR)/src/thread_pool.cpp $(CPP_DIR)/src/redact.cpp $(CPP_DIR)/src/diff.cpp \
+       $(CPP_DIR)/src/index_registry.cpp $(CPP_DIR)/src/index_minhash.cpp $(CPP_DIR)/src/index_vector.cpp $(CPP_DIR)/src/index_bm25.cpp $(CPP_DIR)/src/index_genomic.cpp \
+       $(CPP_DIR)/src/index_fasta.cpp \
+       $(CPP_DIR)/src/index_email.cpp $(CPP_DIR)/src/index_timeseries.cpp $(CPP_DIR)/src/embed_server.cpp \
+       $(CPP_DIR)/src/okf_yaml.cpp $(CPP_DIR)/src/okf_document.cpp $(CPP_DIR)/src/okf_links.cpp $(CPP_DIR)/src/okf_bundle.cpp $(CPP_DIR)/src/okf_validate.cpp \
+       $(CPP_DIR)/src/okf_cache.cpp $(CPP_DIR)/src/okf_computation.cpp $(CPP_DIR)/src/okf_lint.cpp $(CPP_DIR)/src/okf_diff.cpp $(CPP_DIR)/src/okf_index_gen.cpp \
+       $(CPP_DIR)/src/okf_cli.cpp
+MAIN_SRC = $(CPP_DIR)/src/main.cpp
+TEST_SRC = $(CPP_DIR)/tests/test_main.cpp
 
 # Source files subject to lint checks.
 # Excludes vendored/generated headers (xxhash3.h, deps/).
-LINT_SRCS := $(wildcard src/*.cpp) $(wildcard include/mar/*.hpp) tests/test_main.cpp
+LINT_SRCS := $(wildcard $(CPP_DIR)/src/*.cpp) $(wildcard $(CPP_DIR)/include/mar/*.hpp) $(wildcard $(CPP_DIR)/include/mar/**/*.hpp) $(TEST_SRC)
 
 # Object files
 BUILD_DIR = build
 DIST_DIR = dist
-OBJS = $(SRCS:src/%.cpp=$(BUILD_DIR)/%.o)
+OBJS = $(SRCS:$(CPP_DIR)/src/%.cpp=$(BUILD_DIR)/%.o)
 MAIN_OBJ = $(BUILD_DIR)/main.o
 TEST_OBJ = $(BUILD_DIR)/test_main.o
 
 # Output
-TARGET = $(TARGET_NAME)
+CPP_TARGET = $(TARGET_NAME)
 TEST_TARGET = test_mar
 
 # Detect available libraries
@@ -331,8 +333,9 @@ else
 endif
 
 # Phony targets
-.PHONY: all clean test install check-deps check-dev-deps drop-cache static release \
+.PHONY: all clean mar cpp test test-rust test-cpp install uninstall check-deps check-dev-deps drop-cache static release \
         deps debug system-deps dev-deps lint lint-fix format mar-rust cpp rust python test-all \
+        integration-test integration-test-cpp \
         dist-linux-x86_64 \
 		dist-linux-x86_64-sse42 \
 		dist-linux-x86_64-avx2 \
@@ -353,12 +356,36 @@ endif
 		native-lto \
 		help \
 		deb \
-		brew-formula
+		brew-formula \
+		bump-version
 
-# Default target
-all-internal: $(BUILD_DIR) $(BLAKE3_DEP) $(LIBDEFLATE_DEP) $(TARGET)
+# Default target: build Rust CLI as primary 'mar' binary
+all: mar
 
-all: all-internal
+# Pure Rust CLI (default mar binary)
+mar:
+	@echo "Building pure Rust CLI (mar)..."
+	@cargo build --release --manifest-path rust/Cargo.toml --bin mar
+	@TARGET_DIR=$$(cargo metadata --format-version 1 --manifest-path rust/Cargo.toml | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p'); \
+	if [ -f "$$TARGET_DIR/release/mar" ]; then \
+		cp "$$TARGET_DIR/release/mar" ./mar; \
+	elif [ -f rust/target/release/mar ]; then \
+		cp rust/target/release/mar ./mar; \
+	elif [ -n "$$CARGO_TARGET_DIR" ] && [ -f "$$CARGO_TARGET_DIR/release/mar" ]; then \
+		cp "$$CARGO_TARGET_DIR/release/mar" ./mar; \
+	fi
+	@cp -f ./mar ./mar-rust 2>/dev/null || true
+	@echo "mar (Rust) built successfully: ./mar"
+
+mar-rust: mar
+
+rust: mar
+
+# C++ binary build
+all-internal: $(BUILD_DIR) $(BLAKE3_DEP) $(LIBDEFLATE_DEP) $(CPP_TARGET)
+
+cpp: $(BUILD_DIR) $(BLAKE3_DEP) $(LIBDEFLATE_DEP) $(CPP_TARGET)
+	@echo "mar-cpp (C++) built successfully: ./$(CPP_TARGET)"
 
 # Build local BLAKE3
 $(LOCAL_BLAKE3_LIB):
@@ -372,26 +399,9 @@ $(LOCAL_LIBDEFLATE_LIB):
 	@cd $(LOCAL_LIBDEFLATE_DIR)/build && cmake .. -DLIBDEFLATE_BUILD_SHARED_LIB=OFF && make
 	@cp $(LOCAL_LIBDEFLATE_DIR)/build/libdeflate.a $(LOCAL_LIBDEFLATE_LIB)
 
-cpp: $(TARGET)
-
-rust: mar-rust
-
-mar-rust:
-	@echo "Building pure Rust CLI (mar-rust)..."
-	@cargo build --release --manifest-path rust/Cargo.toml --bin mar
-	@TARGET_DIR=$$(cargo metadata --format-version 1 --manifest-path rust/Cargo.toml | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p'); \
-	if [ -f "$$TARGET_DIR/release/mar" ]; then \
-		cp "$$TARGET_DIR/release/mar" ./mar-rust; \
-	elif [ -f rust/target/release/mar ]; then \
-		cp rust/target/release/mar ./mar-rust; \
-	elif [ -n "$$CARGO_TARGET_DIR" ] && [ -f "$$CARGO_TARGET_DIR/release/mar" ]; then \
-		cp "$$CARGO_TARGET_DIR/release/mar" ./mar-rust; \
-	fi
-	@echo "mar-rust built successfully: ./mar-rust"
-
 python:
 	@echo "Building Python extension (_mar)..."
-	@cargo build --release --manifest-path python/Cargo.toml
+	@PYO3_PYTHON=$$(which python3 2>/dev/null || echo python3) cargo build --release --manifest-path python/Cargo.toml
 	@TARGET_DIR=$$(cargo metadata --format-version 1 --manifest-path python/Cargo.toml | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p'); \
 	DYLIB_PATH=""; \
 	if [ -f "$$TARGET_DIR/release/lib_mar.dylib" ]; then \
@@ -409,12 +419,7 @@ python:
 		echo "Python extension built: python/pymar/_mar.so"; \
 	fi
 
-test-all: test
-	@echo "\n=== Running Rust Tests ==="
-	@cargo test --manifest-path rust/Cargo.toml
-	@echo "\n=== Running Rust CLI Integration Tests ==="
-	@$(MAKE) mar-rust
-	@MAR_BIN="$$(pwd)/mar-rust" ./tests/integration_test.sh
+test-all: test test-cpp integration-test
 	@echo "\n=== Running Python Tests ==="
 	@PYTHONPATH=python:python/pymar python3 -m pytest python/tests
 
@@ -429,14 +434,14 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 # Compile object files
-$(BUILD_DIR)/%.o: src/%.cpp | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: $(CPP_DIR)/src/%.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-$(BUILD_DIR)/test_main.o: tests/test_main.cpp | $(BUILD_DIR)
+$(BUILD_DIR)/test_main.o: $(CPP_DIR)/tests/test_main.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-# Link main binary
-$(TARGET): $(OBJS) $(MAIN_OBJ) $(BLAKE3_DEP) $(LIBDEFLATE_DEP)
+# Link C++ binary
+$(CPP_TARGET): $(OBJS) $(MAIN_OBJ) $(BLAKE3_DEP) $(LIBDEFLATE_DEP)
 	$(CXX) $(CXXFLAGS) $(OBJS) $(MAIN_OBJ) $(BLAKE3_DEP) $(LIBDEFLATE_DEP) -o $@ $(LDFLAGS)
 
 # Link test binary
@@ -591,13 +596,27 @@ pgo-use:
 	$(MAKE) BUILD=pgo-use clean all-internal
 
 # Run tests
-test: $(TEST_TARGET)
+test: test-rust
+
+test-rust: mar
+	@echo "=== Running Rust Tests ==="
+	@cargo test --release --manifest-path rust/Cargo.toml
+	@echo "=== Running Rust CLI Smoke Test ==="
+	@./mar version
+	@./mar --help >/dev/null
+
+test-cpp: $(TEST_TARGET)
+	@echo "=== Running C++ Unit Tests ==="
 	./$(TEST_TARGET)
 
 # Integration test
-integration-test: $(TARGET)
-	@echo "Running integration tests..."
-	@./tests/integration_test.sh
+integration-test: mar
+	@echo "Running integration tests on mar (Rust)..."
+	@MAR_BIN="$$(pwd)/mar" ./tests/integration_test.sh
+
+integration-test-cpp: cpp
+	@echo "Running integration tests on mar-cpp (C++)..."
+	@MAR_BIN="$$(pwd)/mar-cpp" ./tests/integration_test.sh
 
 # =============================================================================
 # Lint & Static Analysis
@@ -672,7 +691,7 @@ format:
 # Performance smoke test - quick regression detection
 # Generates previous_run.txt for performance tracking
 # Warns if performance changes by more than 5% (configurable via PERF_THRESHOLD)
-perf-smoke: $(TARGET)
+perf-smoke: mar
 	@echo "Running performance smoke test..."
 	@PERF_DIR=.perf PERF_THRESHOLD=$(PERF_THRESHOLD) THREADS=$(THREADS) bash scripts/perf_smoke_test.sh
 
@@ -686,17 +705,19 @@ check-deps:
 	@echo "BZIP2: $(if $(BZIP2_FOUND),found,NOT FOUND - limited functionality)"
 	@echo "BLAKE3: $(if $(BLAKE3_FOUND),found,using builtin reference implementation)"
 
-# Install
-install: $(TARGET)
+# Install (defaults to installing the Rust mar binary)
+install: mar
 	install -d $(DESTDIR)$(BINDIR)
-	install -m 755 $(TARGET) $(DESTDIR)$(BINDIR)/
+	install -m 755 mar $(DESTDIR)$(BINDIR)/
 
 uninstall:
-	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
+	rm -f $(DESTDIR)$(BINDIR)/mar $(DESTDIR)$(BINDIR)/mar-cpp
 
 # Clean
 clean:
-	rm -rf $(BUILD_DIR) $(DIST_DIR) $(TARGET) $(TEST_TARGET) mar-* 2>/dev/null || true
+	rm -rf $(BUILD_DIR) $(DIST_DIR) mar mar-rust mar-cpp $(TEST_TARGET) python/pymar/_mar.so pymar/pymar/_mar.so 2>/dev/null || true
+	cargo clean --manifest-path rust/Cargo.toml
+	cargo clean --manifest-path python/Cargo.toml
 
 # Print variables for debugging
 print-%:
@@ -942,24 +963,43 @@ brew-formula:
 	@echo "Created $(PROJECT_NAME).rb. Note: You must update the sha256 after tagging a release."
 
 # Docker targets
-DOCKER_IMAGE ?= mar:$(VERSION)
+DOCKER_REPO ?= earthframe/mar
+DOCKER_TAG ?= $(VERSION)
+DOCKER_IMAGE ?= $(DOCKER_REPO):$(DOCKER_TAG)
+DOCKER_IMAGE_LATEST ?= $(DOCKER_REPO):latest
 DOCKER_FILE ?= docker/Dockerfile
 
+# Detect host platform for Docker builds (linux/amd64, linux/arm64)
+DETECTED_DOCKER_ARCH := $(shell uname -m)
+ifeq ($(DETECTED_DOCKER_ARCH),x86_64)
+    DOCKER_PLATFORM ?= linux/amd64
+else ifeq ($(DETECTED_DOCKER_ARCH),aarch64)
+    DOCKER_PLATFORM ?= linux/arm64
+else ifeq ($(DETECTED_DOCKER_ARCH),arm64)
+    DOCKER_PLATFORM ?= linux/arm64
+else
+    DOCKER_PLATFORM ?= linux/amd64
+endif
+
 docker-build:
-	@echo "Building Docker image for host platform ($(DOCKER_IMAGE))..."
-	@docker build -f $(DOCKER_FILE) -t $(DOCKER_IMAGE) .
+	@echo "Building Docker image for $(DOCKER_PLATFORM) ($(DOCKER_IMAGE) and $(DOCKER_IMAGE_LATEST))..."
+	@docker build --platform $(DOCKER_PLATFORM) --build-arg VERSION=$(VERSION) -f $(DOCKER_FILE) -t $(DOCKER_IMAGE) -t $(DOCKER_IMAGE_LATEST) --load .
 
 docker-build-amd64:
-	@echo "Building x86_64 (linux/amd64) Docker image ($(DOCKER_IMAGE)-amd64)..."
-	@docker build --platform linux/amd64 -f $(DOCKER_FILE) -t $(DOCKER_IMAGE)-amd64 .
+	@echo "Building x86_64 (linux/amd64) Docker image ($(DOCKER_IMAGE)-amd64 and $(DOCKER_IMAGE_LATEST)-amd64)..."
+	@docker build --platform linux/amd64 --build-arg VERSION=$(VERSION) -f $(DOCKER_FILE) -t $(DOCKER_IMAGE)-amd64 -t $(DOCKER_IMAGE_LATEST)-amd64 --load .
 
 docker-build-arm64:
-	@echo "Building ARM64 (linux/arm64) Docker image ($(DOCKER_IMAGE)-arm64)..."
-	@docker build --platform linux/arm64 -f $(DOCKER_FILE) -t $(DOCKER_IMAGE)-arm64 .
+	@echo "Building ARM64 (linux/arm64) Docker image ($(DOCKER_IMAGE)-arm64 and $(DOCKER_IMAGE_LATEST)-arm64)..."
+	@docker build --platform linux/arm64 --build-arg VERSION=$(VERSION) -f $(DOCKER_FILE) -t $(DOCKER_IMAGE)-arm64 -t $(DOCKER_IMAGE_LATEST)-arm64 --load .
 
 docker-build-multiarch:
-	@echo "Building multi-architecture (linux/amd64, linux/arm64) Docker image ($(DOCKER_IMAGE))..."
-	@docker buildx build --platform linux/amd64,linux/arm64 -f $(DOCKER_FILE) -t $(DOCKER_IMAGE) .
+	@echo "Building multi-architecture (linux/amd64, linux/arm64) Docker image ($(DOCKER_IMAGE) and $(DOCKER_IMAGE_LATEST))..."
+	@docker buildx build --platform linux/amd64,linux/arm64 --build-arg VERSION=$(VERSION) -f $(DOCKER_FILE) -t $(DOCKER_IMAGE) -t $(DOCKER_IMAGE_LATEST) .
+
+bump-version:
+	@if [ -z "$(TO)" ]; then echo "Error: specify TO=X.Y.Z (e.g. make bump-version TO=0.3.0)"; exit 1; fi
+	@./scripts/bump_version.sh $(TO)
 
 
 
@@ -968,16 +1008,17 @@ help:
 	@echo "MAR Archive Tool - Build Targets"
 	@echo ""
 	@echo "Standard Builds:"
-	@echo "  make              - Build release binary (optimized)"
-	@echo "  make cpp          - Alias for C++ release binary"
-	@echo "  make rust         - Build pure Rust release CLI (mar-rust)"
+	@echo "  make              - Build pure Rust release CLI binary (mar, default)"
+	@echo "  make rust         - Build pure Rust release CLI binary (mar / mar-rust)"
+	@echo "  make cpp          - Build C++ reference release binary (mar-cpp)"
 	@echo "  make python       - Build Python native extension (_mar.so)"
 	@echo "  make CXX=clang++  - Build using Clang instead of GCC"
-	@echo "  make debug        - Build with debug symbols"
-	@echo "  make static       - Build static binary"
-	@echo "  make release      - Build optimized static binary"
-	@echo "  make test         - Build and run C++ tests"
-	@echo "  make test-all     - Run C++, Rust, and Python tests"
+	@echo "  make debug        - Build C++ with debug symbols"
+	@echo "  make static       - Build C++ static binary"
+	@echo "  make release      - Build C++ optimized static binary"
+	@echo "  make test         - Build and run Rust tests"
+	@echo "  make test-cpp     - Build and run C++ tests"
+	@echo "  make test-all     - Run Rust, C++, and Python tests"
 	@echo ""
 	@echo "Distribution Builds (Portable):"
 	@echo "  make dist-all                      - Build all for current platform"
@@ -1003,10 +1044,13 @@ help:
 	@echo "  make brew-formula - Generate Homebrew formula (mar.rb)"
 	@echo ""
 	@echo "Docker:"
-	@echo "  make docker-build            - Build Docker image for host platform"
+	@echo "  make docker-build            - Build Docker image (earthframe/mar:<version> and earthframe/mar:latest)"
 	@echo "  make docker-build-amd64      - Build Docker image for x86_64 (linux/amd64)"
 	@echo "  make docker-build-arm64      - Build Docker image for ARM64 (linux/arm64, Apple Silicon / Linux ARM)"
 	@echo "  make docker-build-multiarch  - Build multi-arch image (linux/amd64 + linux/arm64) using buildx"
+	@echo ""
+	@echo "Versioning:"
+	@echo "  make bump-version TO=X.Y.Z   - Update version across all codebases, configs, and containers"
 	@echo ""
 	@echo "Advanced:"
 	@echo "  make STATIC=1        - Force static linking"

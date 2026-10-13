@@ -508,6 +508,24 @@ def get_tool_version() -> str:
     """Get MAR tool version."""
     return _mar.TOOL_VERSION
 
+def get_cache_dir(custom_cache_dir: Optional[str] = None) -> str:
+    """
+    Get the active cache directory for MAR archives and remote indices.
+    Defaults to ~/.cache/earthframe/mar/ (or $XDG_CACHE_HOME/earthframe/mar/),
+    overridden by MAR_CACHE_DIR environment variable or an explicit custom_cache_dir.
+    """
+    if custom_cache_dir:
+        return os.path.abspath(os.path.expanduser(custom_cache_dir))
+    env_dir = os.environ.get("MAR_CACHE_DIR")
+    if env_dir and env_dir.strip():
+        return os.path.abspath(os.path.expanduser(env_dir.strip()))
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    if xdg and xdg.strip():
+        base = os.path.abspath(os.path.expanduser(xdg.strip()))
+    else:
+        base = os.path.expanduser("~/.cache")
+    return os.path.join(base, "earthframe", "mar")
+
 def get_hash(path: str, algo: str = "xxhash64") -> str:
     """Compute archive hash."""
     return _mar.hash_file(path, algo)

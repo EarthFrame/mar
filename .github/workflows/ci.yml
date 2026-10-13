@@ -151,23 +151,23 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install pkg-config zstd lz4 libdeflate bzip2 blake3 || true
 
-      - name: Build C++
-        run: make -j
-
-      - name: C++ unit tests
-        run: make test
+      - name: Build Rust binary (default)
+        run: make mar
 
       - name: Rust unit tests
         run: cargo test --release --manifest-path rust/Cargo.toml
 
-      - name: Build pure Rust CLI
-        run: cargo build --release --manifest-path rust/Cargo.toml --bin mar
-
-      - name: Smoke test Rust CLI
+      - name: Rust CLI integration tests
         run: |
-          TARGET_DIR=$(cargo metadata --format-version 1 --manifest-path rust/Cargo.toml | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
-          "${TARGET_DIR}/release/mar" version
-          "${TARGET_DIR}/release/mar" --help
+          ./mar version
+          ./mar --help
+          MAR_BIN="${GITHUB_WORKSPACE}/mar" ./tests/integration_test.sh
+
+      - name: Build C++ reference implementation
+        run: make cpp -j
+
+      - name: C++ unit tests
+        run: make test-cpp
 
   # ---------------------------------------------------------------------------
   # Distribution build — produces the release artifacts
@@ -244,10 +244,11 @@ jobs:
         run: |
           cargo build --release --manifest-path rust/Cargo.toml --bin mar
           TARGET_DIR=$(cargo metadata --format-version 1 --manifest-path rust/Cargo.toml | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+          cp "${TARGET_DIR}/release/mar" dist/mar-linux-x86_64
           cp "${TARGET_DIR}/release/mar" dist/mar-rust-linux-x86_64
-          chmod +x dist/mar-rust-linux-x86_64
-          dist/mar-rust-linux-x86_64 version
-          ls -lh dist/mar-rust-*
+          chmod +x dist/mar-linux-x86_64 dist/mar-rust-linux-x86_64
+          dist/mar-linux-x86_64 version
+          ls -lh dist/mar-*
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -299,24 +300,25 @@ jobs:
         run: |
           mkdir -p dist
           make STATIC=1 BUILD=release \
-            TARGET_NAME=dist/${{ matrix.artifact-name }} \
+            TARGET_NAME=dist/${{ matrix.artifact-name }}-cpp \
             all-internal
-          ls -lh dist/${{ matrix.artifact-name }}
+          ls -lh dist/${{ matrix.artifact-name }}-cpp
 
-      - name: Build Rust distribution binary (macOS ARM64)
+      - name: Build Rust distribution binary (macOS ARM64, default)
         run: |
           cargo build --release --manifest-path rust/Cargo.toml --bin mar
           TARGET_DIR=$(cargo metadata --format-version 1 --manifest-path rust/Cargo.toml | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+          cp "${TARGET_DIR}/release/mar" dist/${{ matrix.artifact-name }}
           cp "${TARGET_DIR}/release/mar" dist/mar-rust-macos-arm64
-          chmod +x dist/mar-rust-macos-arm64
-          ls -lh dist/mar-rust-macos-arm64
+          chmod +x dist/${{ matrix.artifact-name }} dist/mar-rust-macos-arm64
+          ls -lh dist/mar-*
 
       - name: Smoke test and verify macOS binaries
         run: |
           ./dist/${{ matrix.artifact-name }} version
-          ./dist/mar-rust-macos-arm64 version
+          ./dist/${{ matrix.artifact-name }}-cpp version
           echo "Running CLI integration tests against macOS Rust binary..."
-          MAR_BIN="${GITHUB_WORKSPACE}/dist/mar-rust-macos-arm64" \
+          MAR_BIN="${GITHUB_WORKSPACE}/dist/${{ matrix.artifact-name }}" \
             ./tests/integration_test.sh
 
       - name: Upload artifact
@@ -326,6 +328,7 @@ jobs:
           path: |
             dist/${{ matrix.artifact-name }}
             dist/mar-rust-macos-arm64
+            dist/${{ matrix.artifact-name }}-cpp
           retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 30 || 1 }}
 
   # ---------------------------------------------------------------------------
@@ -346,10 +349,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - target: "Rust (default)"
+            bin_path: "dist/mar-rust-linux-x86_64"
           - target: "C++ (musl)"
             bin_path: "dist/mar-linux-x86_64-musl"
-          - target: "Rust (mar-rust)"
-            bin_path: "dist/mar-rust-linux-x86_64"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -405,6 +408,9 @@ jobs:
           chmod +x mar-*
           if [ -f "mar-rust-linux-x86_64" ]; then
             ./mar-rust-linux-x86_64 version
+          fi
+          if [ -f "mar-linux-x86_64" ]; then
+            ./mar-linux-x86_64 version
           fi
           if [ -f "mar-linux-x86_64-musl" ]; then
             ./mar-linux-x86_64-musl version

@@ -49,8 +49,8 @@ class Pybind11BuildExt(build_ext):
 
 # Define the extension module
 mar_root_rel = ".."
-src_dir = os.path.join(mar_root_rel, "src")
-include_dir = os.path.join(mar_root_rel, "include")
+src_dir = os.path.join(mar_root_rel, "cpp", "src")
+include_dir = os.path.join(mar_root_rel, "cpp", "include")
 deps_dir = os.path.join(mar_root_rel, "deps")
 
 sources = [

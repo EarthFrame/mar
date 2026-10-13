@@ -2,14 +2,14 @@
 
 Quick takeaways (median of repeats):
 
-- **numpy-2.4.1**: create speedup (mar zstd vs tar none): **6.48×**
-- **numpy-2.4.1**: create speedup (mar zstd vs tar gzip): **7.34×**
-- **numpy-2.4.1**: extract speedup (mar zstd vs tar none): **4.53×**
-- **numpy-2.4.1**: extract speedup (mar zstd vs tar gzip): **4.64×**
-- **webster**: create speedup (mar zstd vs tar none): **0.58×**
-- **webster**: create speedup (mar zstd vs tar gzip): **2.58×**
-- **webster**: extract speedup (mar zstd vs tar none): **0.72×**
-- **webster**: extract speedup (mar zstd vs tar gzip): **0.74×**
+- **numpy-2.4.1**: create speedup (mar zstd vs tar none): **2.72×**
+- **numpy-2.4.1**: create speedup (mar zstd vs tar gzip): **4.10×**
+- **numpy-2.4.1**: extract speedup (mar zstd vs tar none): **1.82×**
+- **numpy-2.4.1**: extract speedup (mar zstd vs tar gzip): **2.25×**
+- **webster**: create speedup (mar zstd vs tar none): **0.82×**
+- **webster**: create speedup (mar zstd vs tar gzip): **11.27×**
+- **webster**: extract speedup (mar zstd vs tar none): **1.29×**
+- **webster**: extract speedup (mar zstd vs tar gzip): **3.50×**
 
 Notes:
 - TAR “get” is simulated with `tar -xOf` and is not true random access.

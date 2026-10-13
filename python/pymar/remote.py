@@ -10,6 +10,7 @@ except ImportError:
     boto3 = None
 
 from . import _mar
+from .core import get_cache_dir
 
 class RemoteRangeReader:
     """
@@ -138,6 +139,9 @@ class RemoteArchive:
     def __init__(
         self,
         url: str,
+        archive_path: Optional[str] = None,
+        archive_dir: Optional[str] = None,
+        persist: bool = True,
         headers: Optional[Dict[str, str]] = None,
         cache_dir: Optional[str] = None,
         endpoint_url: Optional[str] = None,
@@ -150,6 +154,24 @@ class RemoteArchive:
         **s3_kwargs
     ):
         self.url = url
+        self.persist = persist
+        self._temp_archive_path: Optional[str] = None
+        self._reader: Optional[_mar.MarReader] = None
+        self._block_cache: Dict[int, bytes] = {}
+        self._block_offsets: List[int] = []
+        self._block_sizes: List[int] = []
+
+        # Resolve destination path for the MAR archive
+        if archive_path is not None:
+            self.archive_path = os.path.abspath(os.path.expanduser(archive_path))
+        else:
+            default_name = self._extract_filename(url)
+            if archive_dir is not None:
+                target_dir = os.path.abspath(os.path.expanduser(archive_dir))
+            else:
+                target_dir = os.getcwd()
+            self.archive_path = os.path.join(target_dir, default_name)
+
         self.client = RemoteRangeReader(
             url,
             headers=headers,
@@ -162,13 +184,23 @@ class RemoteArchive:
             s3_client=s3_client,
             **s3_kwargs
         )
-        self.cache_mgr = _mar.IndexCacheManager()
-        self._reader: Optional[_mar.MarReader] = None
-        self._temp_archive_path: Optional[str] = None
-        self._block_cache: Dict[int, bytes] = {}
-        self._block_offsets: List[int] = []
-        self._block_sizes: List[int] = []
+        self.cache_dir = get_cache_dir(cache_dir)
+        try:
+            os.makedirs(self.cache_dir, exist_ok=True)
+        except OSError:
+            pass
+        self.cache_mgr = _mar.IndexCacheManager(self.cache_dir)
         self._init_archive()
+
+    @staticmethod
+    def _extract_filename(url: str) -> str:
+        clean_url = url.split("?")[0].split("#")[0]
+        basename = os.path.basename(clean_url.rstrip("/"))
+        if not basename or basename == ".":
+            return "archive.mar"
+        if not basename.endswith(".mar"):
+            basename = f"{basename}.mar"
+        return basename
 
     def _init_archive(self):
         # 1. Inspect remote file or check cache
@@ -213,17 +245,26 @@ class RemoteArchive:
 
     def _load_from_payload(self, header_bytes: bytes, meta_offset: int, meta_container: bytes):
         import tempfile
-        # Create a sparse/header-stub file so MarReader can open and parse all sections
-        tf = tempfile.NamedTemporaryFile(suffix=".mar", delete=False)
-        self._temp_archive_path = tf.name
-        
-        # Write header
-        tf.write(header_bytes)
-        # Pad to meta_offset and write metadata
-        tf.seek(meta_offset)
-        tf.write(meta_container)
-        tf.flush()
-        tf.close()
+        if self.persist:
+            if os.path.dirname(self.archive_path):
+                os.makedirs(os.path.dirname(self.archive_path), exist_ok=True)
+            self._temp_archive_path = self.archive_path
+            # Open and write header + metadata container
+            mode = "r+b" if os.path.exists(self._temp_archive_path) else "w+b"
+            with open(self._temp_archive_path, mode) as f:
+                f.seek(0)
+                f.write(header_bytes)
+                f.seek(meta_offset)
+                f.write(meta_container)
+                f.flush()
+        else:
+            tf = tempfile.NamedTemporaryFile(suffix=".mar", delete=False)
+            self._temp_archive_path = tf.name
+            tf.write(header_bytes)
+            tf.seek(meta_offset)
+            tf.write(meta_container)
+            tf.flush()
+            tf.close()
 
         # Open with MarReader to parse all section directories, names, spans
         self._reader = _mar.MarReader(self._temp_archive_path)
@@ -501,8 +542,38 @@ class RemoteArchive:
     def __contains__(self, name: str) -> bool:
         return self._reader.find_file(name) is not None if self._reader else False
 
+    def download(self, output_path: Optional[str] = None, directory: Optional[str] = None, max_workers: int = 16) -> str:
+        """
+        Download and materialize the complete remote MAR archive to a local file.
+        If output_path is provided, writes to output_path.
+        If directory is provided, writes to directory/<archive_name>.
+        Otherwise, writes to self.archive_path (specified directory or current working directory).
+        """
+        target_path = self.archive_path
+        if output_path is not None:
+            target_path = os.path.abspath(os.path.expanduser(output_path))
+        elif directory is not None:
+            target_path = os.path.join(os.path.abspath(os.path.expanduser(directory)), self._extract_filename(self.url))
+
+        # Ensure all blocks are fetched
+        total_blocks = len(self._block_offsets)
+        if total_blocks > 0:
+            self.batch_fetch_blocks(list(range(total_blocks)), max_workers=max_workers)
+
+        if target_path != self._temp_archive_path:
+            import shutil
+            if os.path.dirname(target_path):
+                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            shutil.copyfile(self._temp_archive_path, target_path)
+
+        return target_path
+
+    def materialize(self, max_workers: int = 16) -> str:
+        """Materialize all blocks in the local archive file."""
+        return self.download(max_workers=max_workers)
+
     def __del__(self):
-        if self._temp_archive_path and os.path.exists(self._temp_archive_path):
+        if not self.persist and self._temp_archive_path and os.path.exists(self._temp_archive_path):
             try:
                 os.remove(self._temp_archive_path)
             except Exception:

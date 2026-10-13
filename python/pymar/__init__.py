@@ -6,7 +6,8 @@ from .core import (
     get_hash,
     get_version,
     get_spec_version,
-    get_tool_version
+    get_tool_version,
+    get_cache_dir
 )
 from .remote import RemoteArchive, RemoteRangeReader
 from .tar import from_tar, to_tar

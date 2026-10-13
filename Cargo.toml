@@ -3,4 +3,5 @@ members = [
     "rust",
     "python",
 ]
+default-members = ["rust"]
 resolver = "2"
