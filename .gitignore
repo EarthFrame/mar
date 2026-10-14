@@ -73,3 +73,6 @@ deps/BLAKE3/c/dependencies/CTestTestfile.cmake
 deps/BLAKE3/c/dependencies/Makefile
 deps/BLAKE3/c/dependencies/cmake_install.cmake
 deps/BLAKE3/c/libblake3.pc
+
+## Virtualenv
+venv/
