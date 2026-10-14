@@ -8,10 +8,10 @@
 #include "mar/feature_flags.hpp"
 #include "mar/index_registry.hpp"
 #include "mar/mar.hpp"
+#include "mar/okf/cli.hpp"
 #include "mar/redact.hpp"
 #include "mar/stopwatch.hpp"
 #include "mar/writer.hpp"
-#include "mar/okf/cli.hpp"
 #include "mar/xxhash3.h"
 
 #include <algorithm>
@@ -93,9 +93,11 @@ void print_verbose(const std::string& msg) {
 }
 
 static bool parse_size(const std::string& str, uint64_t& out_bytes) {
-    if (str.empty()) return false;
+    if (str.empty())
+        return false;
     size_t start = str.find_first_not_of(" \t\r\n");
-    if (start == std::string::npos) return false;
+    if (start == std::string::npos)
+        return false;
     size_t end = str.find_last_not_of(" \t\r\n");
     std::string s = str.substr(start, end - start + 1);
 
@@ -103,7 +105,8 @@ static bool parse_size(const std::string& str, uint64_t& out_bytes) {
     while (num_end < s.size() && (std::isdigit(static_cast<unsigned char>(s[num_end])) || s[num_end] == '.')) {
         num_end++;
     }
-    if (num_end == 0) return false;
+    if (num_end == 0)
+        return false;
 
     std::string num_part = s.substr(0, num_end);
     std::string unit_part = s.substr(num_end);
@@ -133,7 +136,8 @@ static bool parse_size(const std::string& str, uint64_t& out_bytes) {
     try {
         if (num_part.find('.') != std::string::npos) {
             double d = std::stod(num_part);
-            if (d < 0.0) return false;
+            if (d < 0.0)
+                return false;
             out_bytes = static_cast<uint64_t>(d * multiplier);
         } else {
             out_bytes = std::stoull(num_part) * multiplier;
@@ -461,7 +465,9 @@ int cmd_create(int argc, char* argv[]) {
             }
             uint64_t sz = 0;
             if (!parse_size(argv[i], sz)) {
-                print_error("Invalid block size: '" + std::string(argv[i]) + "'. Expected bytes or shorthand (e.g. 64KB, 1MB, 4MB)", "create");
+                print_error("Invalid block size: '" + std::string(argv[i]) +
+                                "'. Expected bytes or shorthand (e.g. 64KB, 1MB, 4MB)",
+                            "create");
                 return EXIT_USAGE;
             }
             if (sz < MIN_BLOCK_SIZE || sz > MAX_BLOCK_SIZE) {
@@ -969,11 +975,15 @@ int cmd_list(int argc, char* argv[]) {
         } else if (show_table) {
             // Show header if requested
             if (show_header) {
-                std::cout << std::left << std::setw(40) << "NAME" << " ";
+                std::cout << std::left << std::setw(40) << "NAME"
+                          << " ";
                 std::cout << "MODE       ";
-                std::cout << std::setw(5) << "UID" << " ";
-                std::cout << std::setw(5) << "GID" << " ";
-                std::cout << std::setw(10) << "SIZE" << " ";
+                std::cout << std::setw(5) << "UID"
+                          << " ";
+                std::cout << std::setw(5) << "GID"
+                          << " ";
+                std::cout << std::setw(10) << "SIZE"
+                          << " ";
                 if (show_checksum && reader.has_hashes()) {
                     std::string hash_col = "CHECKSUM (";
                     hash_col += hash_algo_name(reader.get_hash_algo());
@@ -1987,9 +1997,11 @@ static bool glob_match_inner(const char* pat, const char* txt) {
         if (pat[0] == '*' && pat[1] == '*') {
             const char* next = pat + 2;
             while (*next == '/') next++;
-            if (!*next) return true;
+            if (!*next)
+                return true;
             for (const char* t = txt; *t; ++t) {
-                if (glob_match_inner(next, t)) return true;
+                if (glob_match_inner(next, t))
+                    return true;
             }
             return glob_match_inner(next, "");
         } else if (*pat == '*') {
@@ -1999,16 +2011,20 @@ static bool glob_match_inner(const char* pat, const char* txt) {
                 return std::strchr(txt, '/') == nullptr;
             }
             for (const char* t = txt; *t; ++t) {
-                if (*t == '/') break;
-                if (glob_match_inner(pat, t)) return true;
+                if (*t == '/')
+                    break;
+                if (glob_match_inner(pat, t))
+                    return true;
             }
             return glob_match_inner(pat, "");
         } else if (*pat == '?') {
-            if (!*txt || *txt == '/') return false;
+            if (!*txt || *txt == '/')
+                return false;
             pat++;
             txt++;
         } else if (*pat == '[') {
-            if (!*txt) return false;
+            if (!*txt)
+                return false;
             pat++;
             bool negate = false;
             if (*pat == '!' || *pat == '^') {
@@ -2018,18 +2034,23 @@ static bool glob_match_inner(const char* pat, const char* txt) {
             bool matched = false;
             while (*pat && *pat != ']') {
                 if (pat[1] == '-' && pat[2] && pat[2] != ']') {
-                    if (*txt >= pat[0] && *txt <= pat[2]) matched = true;
+                    if (*txt >= pat[0] && *txt <= pat[2])
+                        matched = true;
                     pat += 3;
                 } else {
-                    if (*txt == *pat) matched = true;
+                    if (*txt == *pat)
+                        matched = true;
                     pat++;
                 }
             }
-            if (*pat == ']') pat++;
-            if (matched == negate) return false;
+            if (*pat == ']')
+                pat++;
+            if (matched == negate)
+                return false;
             txt++;
         } else {
-            if (*pat != *txt) return false;
+            if (*pat != *txt)
+                return false;
             pat++;
             txt++;
         }
@@ -2038,12 +2059,15 @@ static bool glob_match_inner(const char* pat, const char* txt) {
 }
 
 static bool glob_match(const std::string& pat, const std::string& txt) {
-    if (pat == txt) return true;
-    if (glob_match_inner(pat.c_str(), txt.c_str())) return true;
+    if (pat == txt)
+        return true;
+    if (glob_match_inner(pat.c_str(), txt.c_str()))
+        return true;
     if (pat.find('/') == std::string::npos) {
         size_t last_slash = txt.find_last_of('/');
         std::string filename = (last_slash == std::string::npos) ? txt : txt.substr(last_slash + 1);
-        if (glob_match_inner(pat.c_str(), filename.c_str())) return true;
+        if (glob_match_inner(pat.c_str(), filename.c_str()))
+            return true;
     }
     return false;
 }
@@ -2063,9 +2087,7 @@ public:
         has_includes = true;
     }
 
-    void add_exclude(const std::string& pat) {
-        rules.push_back({false, pat});
-    }
+    void add_exclude(const std::string& pat) { rules.push_back({false, pat}); }
 
     bool load_from_file(const std::string& path, bool is_inc) {
         std::istream* in = nullptr;
@@ -2074,7 +2096,8 @@ public:
             in = &std::cin;
         } else {
             fin.open(path);
-            if (!fin) return false;
+            if (!fin)
+                return false;
             in = &fin;
         }
         std::string line;
@@ -2084,18 +2107,23 @@ public:
                 line = line.substr(0, hash_pos);
             }
             size_t first = line.find_first_not_of(" \t\r\n");
-            if (first == std::string::npos) continue;
+            if (first == std::string::npos)
+                continue;
             size_t last = line.find_last_not_of(" \t\r\n");
             std::string trimmed = line.substr(first, last - first + 1);
-            if (trimmed.empty()) continue;
-            if (is_inc) add_include(trimmed);
-            else add_exclude(trimmed);
+            if (trimmed.empty())
+                continue;
+            if (is_inc)
+                add_include(trimmed);
+            else
+                add_exclude(trimmed);
         }
         return true;
     }
 
     bool matches(const std::string& name) const {
-        if (rules.empty()) return true;
+        if (rules.empty())
+            return true;
         bool candidate = !has_includes;
         for (const auto& r : rules) {
             if (glob_match(r.pattern, name)) {
@@ -2269,10 +2297,11 @@ int cmd_slice(int argc, char* argv[]) {
         return EXIT_USAGE;
     }
 
-    if (archive_path.rfind("s3://", 0) == 0 ||
-        archive_path.rfind("http://", 0) == 0 ||
+    if (archive_path.rfind("s3://", 0) == 0 || archive_path.rfind("http://", 0) == 0 ||
         archive_path.rfind("https://", 0) == 0) {
-        print_error("Remote archives (s3://, http://, https://) require the Python CLI: pymar slice " + archive_path + " -o " + output_path, "slice");
+        print_error("Remote archives (s3://, http://, https://) require the Python CLI: pymar slice " + archive_path +
+                        " -o " + output_path,
+                    "slice");
         return EXIT_USAGE;
     }
 
@@ -2319,7 +2348,8 @@ int cmd_slice(int argc, char* argv[]) {
 
         for (size_t idx : matched_indices) {
             auto entry_opt = reader.get_file_entry(idx);
-            if (!entry_opt) continue;
+            if (!entry_opt)
+                continue;
             const std::string& name = names[idx];
 
             if (entry_opt->entry_type == EntryType::RegularFile) {
@@ -2344,8 +2374,8 @@ int cmd_slice(int argc, char* argv[]) {
 
         writer.finish();
 
-        print_info("Sliced " + std::to_string(matched_indices.size()) + " entries (" +
-                   std::to_string(total_bytes) + " bytes) from " + archive_path + " -> " + output_path);
+        print_info("Sliced " + std::to_string(matched_indices.size()) + " entries (" + std::to_string(total_bytes) +
+                   " bytes) from " + archive_path + " -> " + output_path);
         return EXIT_OK;
     } catch (const ChecksumError& e) {
         print_error(e.what(), "slice");
@@ -2658,11 +2688,15 @@ int cmd_search(int argc, char* argv[]) {
             }
 
             if (has_content) {
-                std::cout << std::left << std::setw(4) << "RANK" << "  " << std::setw(8) << "SCORE" << "  "
-                          << std::setw(40) << "FILE" << "  "
+                std::cout << std::left << std::setw(4) << "RANK"
+                          << "  " << std::setw(8) << "SCORE"
+                          << "  " << std::setw(40) << "FILE"
+                          << "  "
                           << "SNIPPET\n";
             } else {
-                std::cout << std::left << std::setw(4) << "RANK" << "  " << std::setw(8) << "SCORE" << "  "
+                std::cout << std::left << std::setw(4) << "RANK"
+                          << "  " << std::setw(8) << "SCORE"
+                          << "  "
                           << "FILE\n";
             }
 

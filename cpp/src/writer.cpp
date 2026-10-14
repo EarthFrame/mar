@@ -787,8 +787,8 @@ void MarWriter::finish() {
                 ScopedFd fd(fd_manager_.acquire(fd_ref.source_path));
                 if (!fd.valid()) {
                     int err = errno;
-                    throw IOError("Failed to open file for reading: " + fd_ref.source_path + " (" +
-                                  std::strerror(err) + ")");
+                    throw IOError("Failed to open file for reading: " + fd_ref.source_path + " (" + std::strerror(err) +
+                                  ")");
                 }
 
                 mar::xxhash3::XXHash3_64 hasher(0);

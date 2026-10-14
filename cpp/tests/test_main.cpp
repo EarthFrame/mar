@@ -2789,7 +2789,7 @@ TEST(vector_index_build_no_server) {
 
         MAIWriter writer(archive_path.string(), MAIIndexType::Vector, 0x1234);
         IndexOptions opts;
-        opts.params["url"] = "http://localhost:12345"; // Port that likely has no server
+        opts.params["url"] = "http://localhost:12345";  // Port that likely has no server
 
         // This should throw because the server is not reachable
         bool threw = false;
@@ -2798,7 +2798,7 @@ TEST(vector_index_build_no_server) {
         } catch (const std::exception& e) {
             threw = true;
             std::string msg = e.what();
-            ASSERT(msg.find("Failed to probe embed server") != std::string::npos || 
+            ASSERT(msg.find("Failed to probe embed server") != std::string::npos ||
                    msg.find("Server provider requires") != std::string::npos);
         }
         ASSERT(threw);
@@ -3040,8 +3040,7 @@ TEST(embed_provider_factory_huggingface_provider_with_key) {
         provider = make_embed_provider(opts);
         ASSERT(provider->model_name() == "sentence-transformers/all-mpnet-base-v2");
     } catch (const std::exception& e) {
-        std::cerr << "❌ embed_provider_factory_huggingface_provider_with_key failed: " << e.what()
-                  << "\n";
+        std::cerr << "❌ embed_provider_factory_huggingface_provider_with_key failed: " << e.what() << "\n";
         tests_passed--;
     }
 }
@@ -3088,8 +3087,8 @@ TEST(embed_provider_factory_default_server_provider) {
 TEST(okf_yaml_flow_mapping) {
     using namespace mar::okf;
     YamlError err;
-    Value root = Value::parse("type: Metric\ntitle: Revenue\ngenerated: { by: human:alice, at: 2026-06-25T09:00:00Z }",
-                              &err);
+    Value root =
+        Value::parse("type: Metric\ntitle: Revenue\ngenerated: { by: human:alice, at: 2026-06-25T09:00:00Z }", &err);
     ASSERT(err.message.empty());
     const auto* map = root.as_mapping();
     ASSERT(map != nullptr);

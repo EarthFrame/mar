@@ -320,7 +320,9 @@ public:
     FileHandle()
         : fd(-1), file_size(0), aligned_buffer(nullptr), buffer_capacity(0), owns_buffer(false), is_direct_io(false) {}
 
-    ~FileHandle() { close(); }
+    ~FileHandle() {
+        close();
+    }
 
     // No copy
     FileHandle(const FileHandle&) = delete;
@@ -570,14 +572,22 @@ public:
     }
 
     // Read operations
-    ssize_t read(void* buf, size_t count) { return ::read(fd, buf, count); }
+    ssize_t read(void* buf, size_t count) {
+        return ::read(fd, buf, count);
+    }
 
-    ssize_t pread(void* buf, size_t count, off_t offset) { return ::pread(fd, buf, count, offset); }
+    ssize_t pread(void* buf, size_t count, off_t offset) {
+        return ::pread(fd, buf, count, offset);
+    }
 
     // Write operations
-    ssize_t write(const void* buf, size_t count) { return ::write(fd, buf, count); }
+    ssize_t write(const void* buf, size_t count) {
+        return ::write(fd, buf, count);
+    }
 
-    ssize_t pwrite(const void* buf, size_t count, off_t offset) { return ::pwrite(fd, buf, count, offset); }
+    ssize_t pwrite(const void* buf, size_t count, off_t offset) {
+        return ::pwrite(fd, buf, count, offset);
+    }
 
     // High-level pwrite entire buffer
     ssize_t pwriteFull(const void* buf, size_t size, off_t offset) {
@@ -698,13 +708,27 @@ public:
     }
 
     // Getters
-    int getFd() const { return fd; }
-    size_t size() const { return file_size; }
-    void* buffer() { return aligned_buffer; }
-    size_t bufferSize() const { return buffer_capacity; }
-    bool isDirectIO() const { return is_direct_io; }
-    bool isOpen() const { return fd >= 0; }
-    const OpenHints& getHints() const { return hints; }
+    int getFd() const {
+        return fd;
+    }
+    size_t size() const {
+        return file_size;
+    }
+    void* buffer() {
+        return aligned_buffer;
+    }
+    size_t bufferSize() const {
+        return buffer_capacity;
+    }
+    bool isDirectIO() const {
+        return is_direct_io;
+    }
+    bool isOpen() const {
+        return fd >= 0;
+    }
+    const OpenHints& getHints() const {
+        return hints;
+    }
 
     // Allow external buffer management
     void useExternalBuffer(void* buf, size_t size, bool is_aligned = false) {
@@ -974,7 +998,9 @@ public:
     }
 
     /// @brief Get pointer to mapped data
-    const void* data() const { return is_mapped_ ? mapped_addr_ : nullptr; }
+    const void* data() const {
+        return is_mapped_ ? mapped_addr_ : nullptr;
+    }
 
     /// @brief Get pointer to mapped data at offset
     const void* data(size_t offset) const {
@@ -984,10 +1010,14 @@ public:
     }
 
     /// @brief Get file size
-    size_t size() const { return mapped_size_; }
+    size_t size() const {
+        return mapped_size_;
+    }
 
     /// @brief Check if file is mapped
-    bool isOpen() const { return is_mapped_; }
+    bool isOpen() const {
+        return is_mapped_;
+    }
 
     /**
      * @brief Advise kernel to prefetch a region

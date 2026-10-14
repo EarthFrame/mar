@@ -17,9 +17,7 @@ public:
     ScopedFd(const ScopedFd&) = delete;
     ScopedFd& operator=(const ScopedFd&) = delete;
 
-    ScopedFd(ScopedFd&& other) noexcept : fd_(other.fd_) {
-        other.fd_ = -1;
-    }
+    ScopedFd(ScopedFd&& other) noexcept : fd_(other.fd_) { other.fd_ = -1; }
 
     ScopedFd& operator=(ScopedFd&& other) noexcept {
         if (this != &other) {

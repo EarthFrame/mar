@@ -131,12 +131,16 @@ public:
      *
      * @return true if using io_uring or kqueue, false for sync fallback
      */
-    bool isAsync() const { return backend_ != Backend::SYNC; }
+    bool isAsync() const {
+        return backend_ != Backend::SYNC;
+    }
 
     /**
      * Get active backend.
      */
-    Backend getBackend() const { return backend_; }
+    Backend getBackend() const {
+        return backend_;
+    }
 
     /**
      * Get backend name as string (for logging/debugging).
