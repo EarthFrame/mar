@@ -271,13 +271,6 @@ impl MarWriter {
     }
 
     pub fn add_memory(&mut self, name: &str, content: &[u8], mode: u32, mtime: i64) {
-        let entry = FileEntry {
-            name_id: 0,
-            entry_type: EntryType::RegularFile,
-            reserved0: 0,
-            entry_flags: 0,
-            logical_size: content.len() as u64,
-        };
         let posix = PosixEntry {
             uid: 0,
             gid: 0,
@@ -285,6 +278,17 @@ impl MarWriter {
             mtime,
             atime: 0,
             ctime: 0,
+        };
+        self.add_memory_posix(name, content, posix);
+    }
+
+    pub fn add_memory_posix(&mut self, name: &str, content: &[u8], posix: PosixEntry) {
+        let entry = FileEntry {
+            name_id: 0,
+            entry_type: EntryType::RegularFile,
+            reserved0: 0,
+            entry_flags: 0,
+            logical_size: content.len() as u64,
         };
         self.files.push(FileData {
             name: name.to_string(),
@@ -299,13 +303,6 @@ impl MarWriter {
     }
 
     pub fn add_directory_entry(&mut self, name: &str, mode: u32, mtime: i64) {
-        let entry = FileEntry {
-            name_id: 0,
-            entry_type: EntryType::Directory,
-            reserved0: 0,
-            entry_flags: 0,
-            logical_size: 0,
-        };
         let posix = PosixEntry {
             uid: 0,
             gid: 0,
@@ -313,6 +310,17 @@ impl MarWriter {
             mtime,
             atime: 0,
             ctime: 0,
+        };
+        self.add_directory_entry_posix(name, posix);
+    }
+
+    pub fn add_directory_entry_posix(&mut self, name: &str, posix: PosixEntry) {
+        let entry = FileEntry {
+            name_id: 0,
+            entry_type: EntryType::Directory,
+            reserved0: 0,
+            entry_flags: 0,
+            logical_size: 0,
         };
         self.files.push(FileData {
             name: name.to_string(),
@@ -327,13 +335,6 @@ impl MarWriter {
     }
 
     pub fn add_symlink(&mut self, name: &str, target: &str, mode: u32, mtime: i64) {
-        let entry = FileEntry {
-            name_id: 0,
-            entry_type: EntryType::Symlink,
-            reserved0: 0,
-            entry_flags: 0,
-            logical_size: 0,
-        };
         let posix = PosixEntry {
             uid: 0,
             gid: 0,
@@ -341,6 +342,17 @@ impl MarWriter {
             mtime,
             atime: 0,
             ctime: 0,
+        };
+        self.add_symlink_posix(name, target, posix);
+    }
+
+    pub fn add_symlink_posix(&mut self, name: &str, target: &str, posix: PosixEntry) {
+        let entry = FileEntry {
+            name_id: 0,
+            entry_type: EntryType::Symlink,
+            reserved0: 0,
+            entry_flags: 0,
+            logical_size: 0,
         };
         self.files.push(FileData {
             name: name.to_string(),
@@ -463,7 +475,28 @@ impl MarWriter {
         let block_size = if self.options.multiblock { self.options.block_size } else { u64::MAX };
 
         match self.options.block_mode {
-            BlockMode::Shared => {
+        BlockMode::Shared => {
+            // Uncompressed archives (compression == None) use single-file-per-block
+            // to support safe in-place / out-of-place block-level redaction without
+            // corrupting adjacent files packed into shared blocks.
+            if self.options.compression == CompressionAlgo::None {
+                for (i, fd) in self.files.iter_mut().enumerate() {
+                    if fd.entry.entry_type != EntryType::RegularFile {
+                        continue;
+                    }
+                    let flen = fd.entry.logical_size;
+                    let task_id = tasks.len();
+                    tasks.push(BlockTask {
+                        work: TaskWork::SingleFile { file_idx: i, offset: 0, length: flen },
+                    });
+                    fd.spans.push(Span {
+                        block_id: task_id as u32,
+                        offset_in_block: 0,
+                        length: flen as u32,
+                        sequence_order: 0,
+                    });
+                }
+            } else {
                 let mut current_packed_files: Vec<usize> = Vec::new();
                 let mut current_packed_size = 0u64;
 
@@ -573,6 +606,7 @@ impl MarWriter {
                     }
                 }
             }
+        }
             BlockMode::Multi | BlockMode::Single => {
                 for (i, fd) in self.files.iter_mut().enumerate() {
                     if fd.entry.entry_type != EntryType::RegularFile {

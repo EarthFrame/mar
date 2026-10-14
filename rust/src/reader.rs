@@ -1032,12 +1032,10 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
         self.advise_access(AccessPattern::Sequential);
 
         let mut redacted_blocks = std::collections::HashSet::new();
-        if let Some(ref spans_ref) = self.file_spans {
-            for (i, entry) in self.files.iter().enumerate() {
-                if entry.entry_type == EntryType::RegularFile && entry.is_redacted() {
-                    for s in spans_ref.get_file_spans(i as u32) {
-                        redacted_blocks.insert(s.block_id);
-                    }
+        for (i, entry) in self.files.iter().enumerate() {
+            if entry.entry_type == EntryType::RegularFile && entry.is_redacted() {
+                for b in self.get_block_ids_for_file(i) {
+                    redacted_blocks.insert(b);
                 }
             }
         }

@@ -242,11 +242,10 @@ run_test_or_skip_if_unsupported() {
         return 0
     fi
 
-    # Optional compression backends vary by platform/build flags.
-    # If a backend isn't present, treat it as a skip.
-    if echo "$output" | grep -Eqi "not available|unsupported|bzip2|BZIP2|requires C\+\+ mar binary"; then
+    # If an enterprise feature isn't present, treat it as a skip.
+    if echo "$output" | grep -Eqi "not available|unsupported|bzip2|BZIP2|requires C\+\+ mar binary|requires the MAR Enterprise Extension|requires the MAR Indexing Extension"; then
         TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
-        local reason=$(echo "$output" | grep -Ei "not available|unsupported|bzip2|BZIP2|requires C\+\+ mar binary" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        local reason=$(echo "$output" | grep -Ei "not available|unsupported|bzip2|BZIP2|requires C\+\+ mar binary|requires the MAR Enterprise Extension|requires the MAR Indexing Extension" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         log_warn "$name (skipped: ${reason:-backend not available})"
         SKIP_REASONS+=("$name: ${reason:-backend not available}")
         $VERBOSE && echo "  Output: $output" || true
@@ -1452,6 +1451,14 @@ test_indexing_and_search() {
     local workdir="$TEST_DIR/indexing"
     mkdir -p "$workdir"
     cd "$workdir"
+
+    # Check if 'mar index' is available or delegates to enterprise extension
+    local check_out
+    check_out=$("$MAR_BIN" index --help 2>&1 || true)
+    if echo "$check_out" | grep -q "requires the MAR Enterprise Extension"; then
+        log_warn "indexing and search (skipped: 'mar index' requires the MAR Enterprise Extension)"
+        return 0
+    fi
 
     # 1. Setup data
     mkdir -p input

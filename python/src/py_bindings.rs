@@ -5,7 +5,7 @@ use mar_core::format::*;
 use mar_core::mai::*;
 use mar_core::reader::MarReader;
 use mar_core::remote::IndexCacheManager;
-use mar_core::writer::{MarWriter, WriteOptions};
+use mar_core::writer::{BlockMode, MarWriter, WriteOptions};
 use pyo3::exceptions::{PyFileNotFoundError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -135,6 +135,7 @@ impl From<PyWriteOptions> for WriteOptions {
                 PyChecksumType::XXHASH3 => ChecksumType::XXHash3,
             },
             multiblock: o.multiblock,
+            block_mode: if o.multiblock { BlockMode::Shared } else { BlockMode::Single },
             block_size: o.block_size,
             compress_meta: o.compress_meta,
             deterministic: o.deterministic,

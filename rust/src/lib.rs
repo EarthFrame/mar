@@ -8,6 +8,7 @@ pub mod mai;
 pub mod remote;
 pub mod async_io;
 pub mod diff;
+pub mod delta;
 pub mod redact;
 pub mod filter;
 

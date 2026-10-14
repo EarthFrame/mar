@@ -1,8 +1,8 @@
 use mar_core::checksum::*;
+use mar_core::delta::*;
 use mar_core::diff::*;
 use mar_core::filter::*;
 use mar_core::format::*;
-use mar_core::mai::*;
 use mar_core::reader::MarReader;
 use mar_core::redact::redact_archive;
 use mar_core::writer::{BlockMode, MarWriter, WriteOptions};
@@ -18,6 +18,7 @@ const TOOL_VERSION: &str = "0.3.0";
 const MAR_SPEC_VERSION: &str = "0.1.1";
 
 const EXIT_OK: i32 = 0;
+#[allow(dead_code)]
 const EXIT_NO_RESULTS: i32 = 1;
 const EXIT_USAGE: i32 = 2;
 const EXIT_ERROR: i32 = 3;
@@ -85,13 +86,14 @@ Commands:
   get      Extract specific files to stdout or directory
   cat      Dump file contents to stdout or as JSON
   diff     Compare two archives and show differences
+  delta    Create a delta archive between two archives or an archive and a directory
   redact   Overwrite file data with zeros and mark redacted
   index    Create a sidecar index for an archive
   search   Search an archive using a sidecar index
   hash     Compute a fast archive hash
   header   Display archive header information
   validate Validate archive integrity and checksums
-  okf      Pack, inspect, and validate OKF knowledge bundles
+  okf      Pack, inspect, and validate OKF knowledge bundles (Enterprise)
   version  Display version information
 
 Common options:
@@ -292,6 +294,39 @@ Examples:
   mar diff -v old.mar new.mar"#);
 }
 
+fn print_delta_usage() {
+    println!(r#"Usage: mar delta [options] <source.mar> <target.mar|dir> -o <delta.mar>
+
+Create a delta archive between two archives or between an archive and a directory.
+
+Options:
+  -o, --output <path>        Output delta archive path (required)
+  --join <mode>              Join mode: right, left, outer (default: right)
+  -c, --compression <algo>   Compression: none, lz4, zstd (default), gzip, bzip2
+  --compression-level <n>    Codec level (-1 = default)
+  --checksum <type>          Checksum: xxhash3 (default), xxhash32, blake3, crc32c, none
+  --block-mode <mode>        Block mode: single, multi, shared (default: shared)
+  -m, --multiblock           Use multiblock mode (alias for --block-mode multi)
+  --pack-files               Pack small files into shared blocks (alias for --block-mode shared)
+  --single-file              Use single-file-per-block mode (alias for --block-mode single)
+  --block-size <size>        Target block size, e.g. 64KB, 1MB, 4MB (default: 1MB)
+  -f, --force                Overwrite output archive if it exists
+  -j, --threads <num>        Parallel threads (default: CPU cores)
+  --no-posix                 Do not store POSIX metadata (mode, mtime)
+  --prefix <str>             Custom prefix for directory target entries
+  -v, --verbose              Show detailed progress
+
+Join modes:
+  right                      Target perspective: Added + Modified in target (default; ideal for backups)
+  left                       Source perspective: Deleted + Modified in source
+  outer                      Symmetric difference: Added + Modified in target, plus Deleted in source
+
+Examples:
+  mar delta base.mar current.mar -o patch.mar
+  mar delta base.mar ./current_dir/ -o patch.mar
+  mar delta --join outer base.mar current.mar -o diff.mar"#);
+}
+
 fn print_header_usage() {
     println!(r#"Usage: mar header [options] <archive>
 
@@ -341,46 +376,6 @@ Notes:
 Examples:
   mar redact -o out.mar in.mar secrets.txt keys.pem
   printf "a\nb\n" | mar redact -I -T - in.mar"#);
-}
-
-fn print_index_usage() {
-    println!(r#"Usage: mar index [options] -i <archive> --type <type>
-
-Create a sidecar index for an archive.
-
-Options:
-  -i, --input <archive>      Path to the .mar archive
-  --type <type>              Index type: minhash, bm25, email, timeseries, genomic, fasta
-  --aux <file>               Auxiliary input file (repeatable)
-  --with <key=value>         Type-specific parameter (repeatable)
-  -o, --output <file>        Custom output path (default: <archive>.<type>.mai)
-  --align <log2>             Section alignment as 2^n bytes (default: 0)
-
-Common --with parameters:
-  threads=N                  Parallel build threads (default: CPU cores)
-
-Available types: minhash, bm25, email, timeseries, genomic, fasta
-Use 'mar index --type <type> --help' for type-specific options."#);
-}
-
-fn print_search_usage() {
-    println!(r#"Usage: mar search [options] -i <archive> --index <index.mai> [query]
-
-Search an archive using a sidecar index.
-
-Options:
-  -i, --input <archive>      Path to the .mar archive
-  --index <index.mai>        Path to the sidecar index (.mai) file
-  --with <key=value>         Search parameter (repeatable; type-specific)
-  --extract                  Genomic: write raw sequence/records to stdout
-  --filenames-only           Shorthand for --with format=filenames
-
-Universal --with parameters:
-  topk=N                     Maximum results to return (default: 10)
-  format=text|json|filenames Output format (default: text)
-  threads=N                  Worker threads
-
-Exit codes: 0=results found, 1=no results, 2=usage error, 3=runtime error"#);
 }
 
 fn print_version_usage() {
@@ -1427,8 +1422,11 @@ fn cmd_get(args: &[String]) -> i32 {
                     continue;
                 }
             };
-            let _ = reader.stream_file_by_index(idx, &mut handle);
+            if let Err(e) = reader.stream_file_by_index(idx, &mut handle) {
+                print_error(&format!("Failed to stream {}: {}", name, e), "get");
+            }
         }
+        let _ = handle.flush();
     } else {
         for name in &file_names {
             let (idx, _) = match reader.find_file(name) {
@@ -1640,6 +1638,237 @@ fn cmd_diff(args: &[String]) -> i32 {
     }
 
     EXIT_OK
+}
+
+fn cmd_delta(args: &[String]) -> i32 {
+    let mut source_path = String::new();
+    let mut target_path = String::new();
+    let mut output_path = String::new();
+    let mut join = DeltaJoin::Right;
+    let mut compression_algo: Option<CompressionAlgo> = None;
+    let mut compression_level = -1i32;
+    let mut checksum_type: Option<ChecksumType> = None;
+    let mut block_mode = BlockMode::Shared;
+    let mut multiblock = true;
+    let mut block_size: Option<u64> = None;
+    let mut force = false;
+    let mut num_threads = 0usize;
+    let mut include_posix = true;
+    let mut prefix_override: Option<String> = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg == "-h" || arg == "--help" {
+            print_delta_usage();
+            return EXIT_OK;
+        } else if (arg == "-o" || arg == "--output") && i + 1 < args.len() {
+            i += 1;
+            output_path = args[i].clone();
+        } else if arg == "--join" && i + 1 < args.len() {
+            i += 1;
+            match DeltaJoin::from_str(&args[i]) {
+                Ok(j) => join = j,
+                Err(e) => {
+                    print_error(&e, "delta");
+                    return EXIT_USAGE;
+                }
+            }
+        } else if (arg == "-c" || arg == "--compression") && i + 1 < args.len() {
+            i += 1;
+            match args[i].to_lowercase().as_str() {
+                "none" => compression_algo = Some(CompressionAlgo::None),
+                "gzip" | "gz" => compression_algo = Some(CompressionAlgo::Gzip),
+                "zstd" | "zst" => compression_algo = Some(CompressionAlgo::Zstd),
+                "lz4" => compression_algo = Some(CompressionAlgo::Lz4),
+                "bzip2" | "bz2" => compression_algo = Some(CompressionAlgo::Bzip2),
+                _ => {
+                    print_error(&format!("Invalid compression algorithm: {}", args[i]), "delta");
+                    return EXIT_USAGE;
+                }
+            }
+        } else if arg == "--compression-level" && i + 1 < args.len() {
+            i += 1;
+            match args[i].parse::<i32>() {
+                Ok(level) => compression_level = level,
+                Err(_) => {
+                    print_error("Invalid compression level", "delta");
+                    return EXIT_USAGE;
+                }
+            }
+        } else if arg == "--checksum" && i + 1 < args.len() {
+            i += 1;
+            match checksum_from_string(&args[i]) {
+                Some(cs) => checksum_type = Some(cs),
+                None => {
+                    print_error(&format!("Invalid checksum type: {}", args[i]), "delta");
+                    return EXIT_USAGE;
+                }
+            }
+        } else if arg == "--block-size" && i + 1 < args.len() {
+            i += 1;
+            match parse_size(&args[i]) {
+                Some(bs) if bs >= MIN_BLOCK_SIZE && bs <= MAX_BLOCK_SIZE => block_size = Some(bs),
+                _ => {
+                    print_error(&format!("Invalid block size: '{}'. Expected bytes or shorthand (e.g. 64KB, 1MB, 4MB)", args[i]), "delta");
+                    return EXIT_USAGE;
+                }
+            }
+        } else if arg == "--block-mode" && i + 1 < args.len() {
+            i += 1;
+            match args[i].to_lowercase().as_str() {
+                "single" => {
+                    block_mode = BlockMode::Single;
+                    multiblock = false;
+                }
+                "multi" => {
+                    block_mode = BlockMode::Multi;
+                    multiblock = true;
+                }
+                "shared" => {
+                    block_mode = BlockMode::Shared;
+                    multiblock = true;
+                }
+                _ => {
+                    print_error(&format!("Invalid block mode: '{}'. Expected single, multi, or shared", args[i]), "delta");
+                    return EXIT_USAGE;
+                }
+            }
+        } else if arg == "-m" || arg == "--multiblock" {
+            block_mode = BlockMode::Multi;
+            multiblock = true;
+        } else if arg == "--pack-files" {
+            block_mode = BlockMode::Shared;
+            multiblock = true;
+        } else if arg == "--single-file" {
+            block_mode = BlockMode::Single;
+            multiblock = false;
+        } else if arg == "-f" || arg == "--force" {
+            force = true;
+        } else if (arg == "-j" || arg == "--threads") && i + 1 < args.len() {
+            i += 1;
+            match args[i].parse::<usize>() {
+                Ok(t) => num_threads = t,
+                Err(_) => {
+                    print_error("Invalid thread count", "delta");
+                    return EXIT_USAGE;
+                }
+            }
+        } else if arg == "--no-posix" {
+            include_posix = false;
+        } else if arg == "--prefix" && i + 1 < args.len() {
+            i += 1;
+            prefix_override = Some(args[i].clone());
+        } else if arg.starts_with('-') {
+            print_error(&format!("Unknown option: {}", arg), "delta");
+            return EXIT_USAGE;
+        } else if source_path.is_empty() {
+            source_path = arg.clone();
+        } else if target_path.is_empty() {
+            target_path = arg.clone();
+        } else {
+            print_error(&format!("Unexpected argument: {}", arg), "delta");
+            return EXIT_USAGE;
+        }
+        i += 1;
+    }
+
+    if source_path.is_empty() || target_path.is_empty() {
+        print_error("Both source and target paths are required", "delta");
+        print_delta_usage();
+        return EXIT_USAGE;
+    }
+
+    if output_path.is_empty() {
+        print_error("Output archive path (-o <file.mar>) is required", "delta");
+        print_delta_usage();
+        return EXIT_USAGE;
+    }
+
+    if Path::new(&output_path).exists() && !force {
+        print_error(&format!("Output archive already exists: {} (use -f/--force to overwrite)", output_path), "delta");
+        return EXIT_ERROR;
+    }
+
+    let source_reader = match MarReader::open(&source_path) {
+        Ok(r) => r,
+        Err(e) => {
+            print_error(&format!("Failed to open source archive {}: {}", source_path, e), "delta");
+            return EXIT_ERROR;
+        }
+    };
+
+    let target_p = Path::new(&target_path);
+    if !target_p.exists() {
+        print_error(&format!("Target path not found: {}", target_path), "delta");
+        return EXIT_ERROR;
+    }
+
+    let is_target_dir = target_p.is_dir();
+
+    // Prepare WriteOptions
+    let mut write_opts = WriteOptions::default();
+    write_opts.block_mode = block_mode;
+    write_opts.multiblock = multiblock;
+    if let Some(algo) = compression_algo {
+        write_opts.compression = algo;
+    } else {
+        write_opts.compression = source_reader.header().meta_comp_algo;
+    }
+    if let Some(cs) = checksum_type {
+        write_opts.checksum = cs;
+    }
+    if let Some(bs) = block_size {
+        write_opts.block_size = bs;
+    }
+    write_opts.compression_level = compression_level;
+    write_opts.num_threads = num_threads;
+    write_opts.include_posix = include_posix;
+
+    let res = if is_target_dir {
+        create_delta_dir(
+            &source_reader,
+            target_p,
+            &output_path,
+            join,
+            write_opts,
+            prefix_override.as_deref(),
+        )
+    } else {
+        let target_reader = match MarReader::open(&target_path) {
+            Ok(r) => r,
+            Err(e) => {
+                print_error(&format!("Failed to open target archive {}: {}", target_path, e), "delta");
+                return EXIT_ERROR;
+            }
+        };
+        create_delta_archives(
+            &source_reader,
+            &target_reader,
+            &output_path,
+            join,
+            write_opts,
+        )
+    };
+
+    match res {
+        Ok(stats) => {
+            print_info(&format!(
+                "Delta archive created: {}\n  Join mode:      {}\n  Files added:    {}\n  Files modified: {}\n  Total entries:  {} ({})",
+                output_path,
+                join,
+                stats.files_added,
+                stats.files_modified,
+                stats.total_entries,
+                format_bytes(stats.total_bytes)
+            ));
+            EXIT_OK
+        }
+        Err(e) => {
+            print_error(&e, "delta");
+            EXIT_ERROR
+        }
+    }
 }
 
 fn cmd_header(args: &[String]) -> i32 {
@@ -1896,6 +2125,7 @@ fn cmd_redact(args: &[String]) -> i32 {
     EXIT_OK
 }
 
+#[allow(dead_code)]
 fn delegate_to_cpp(cmd_name: &str, args: &[String]) -> i32 {
     let cur_canon = std::env::current_exe().ok().and_then(|p| std::fs::canonicalize(p).ok());
     let mut candidates = Vec::new();
@@ -1957,251 +2187,95 @@ fn delegate_to_cpp(cmd_name: &str, args: &[String]) -> i32 {
     EXIT_UNAVAILABLE
 }
 
-fn cmd_index(args: &[String]) -> i32 {
-    let mut archive_path = String::new();
-    let mut type_name = String::new();
-    let mut output_path = String::new();
-    let mut opts = IndexOptions::default();
-    let mut align_log2 = 0u8;
-
-    let mut i = 0;
-    while i < args.len() {
-        let arg = &args[i];
-        if arg == "-h" || arg == "--help" {
-            print_index_usage();
-            return EXIT_OK;
-        } else if (arg == "-i" || arg == "--input") && i + 1 < args.len() {
-            i += 1;
-            archive_path = args[i].clone();
-        } else if arg == "--type" && i + 1 < args.len() {
-            i += 1;
-            type_name = args[i].clone();
-        } else if arg == "--aux" && i + 1 < args.len() {
-            i += 1;
-            opts.aux_files.push(args[i].clone());
-        } else if arg == "--with" && i + 1 < args.len() {
-            i += 1;
-            if let Some(pos) = args[i].find('=') {
-                opts.params.insert(args[i][..pos].to_string(), args[i][pos + 1..].to_string());
+fn find_mar_enterprise_bin() -> Option<std::path::PathBuf> {
+    if let Ok(env_path) = std::env::var("MAR_ENTERPRISE_BIN") {
+        let p = std::path::PathBuf::from(env_path);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    if let Ok(env_path) = std::env::var("MAR_INDEX_BIN") {
+        let p = std::path::PathBuf::from(env_path);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            for name in &["mar-enterprise", "mar-index"] {
+                let candidate = dir.join(name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
             }
-        } else if (arg == "-o" || arg == "--output") && i + 1 < args.len() {
-            i += 1;
-            output_path = args[i].clone();
-        } else if arg == "--align" && i + 1 < args.len() {
-            i += 1;
-            align_log2 = args[i].parse().unwrap_or(0);
-        }
-        i += 1;
-    }
-
-    if archive_path.is_empty() || type_name.is_empty() {
-        print_index_usage();
-        return EXIT_USAGE;
-    }
-
-    let reader = match MarReader::open(&archive_path) {
-        Ok(r) => r,
-        Err(e) => {
-            print_error(&format!("Failed to open archive: {}", e), "index");
-            return EXIT_ERROR;
-        }
-    };
-
-    let mut hasher = XXHash3_64::new(0);
-    if let Ok(mut f) = File::open(&archive_path) {
-        let mut buf = vec![0u8; 65536];
-        loop {
-            let n = f.read(&mut buf).unwrap_or(0);
-            if n == 0 { break; }
-            hasher.update(&buf[..n]);
         }
     }
-    let archive_hash = hasher.finalize();
-
-    let itype = match type_name.as_str() {
-        "vector" => {
-            return delegate_to_cpp("index", args);
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            for name in &["mar-enterprise", "mar-index"] {
+                let candidate = parent.join(name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+            // Check common development sibling directories
+            let dev_candidates = [
+                parent.join("../mar-enterprise/target/release/mar-enterprise"),
+                parent.join("../mar-enterprise/target/debug/mar-enterprise"),
+                parent.join("../mar-enterprise/mar-enterprise"),
+                parent.join("../mar-index/target/release/mar-index"),
+                parent.join("../mar-index/mar-index"),
+            ];
+            for cand in &dev_candidates {
+                if cand.is_file() {
+                    return Some(cand.clone());
+                }
+            }
         }
-        "minhash" => MAIIndexType::MinHash,
-        "bm25" => MAIIndexType::BM25,
-        "email" => MAIIndexType::Email,
-        "timeseries" => MAIIndexType::TimeSeries,
-        "genomic" => MAIIndexType::Genomic,
-        "fasta" => MAIIndexType::Fasta,
-        _ => {
-            print_error(&format!("Unsupported index type: {}", type_name), "index");
-            return EXIT_ERROR;
+    }
+    None
+}
+
+fn delegate_to_mar_enterprise(cmd_name: &str, args: &[String]) -> i32 {
+    if let Some(bin) = find_mar_enterprise_bin() {
+        let mut full_args = Vec::new();
+        let opts = get_options();
+        if opts.quiet {
+            full_args.push("-q".to_string());
         }
-    };
+        for _ in 0..opts.verbose {
+            full_args.push("-v".to_string());
+        }
+        if opts.stopwatch {
+            full_args.push("--stopwatch".to_string());
+        }
+        full_args.push(cmd_name.to_string());
+        full_args.extend_from_slice(args);
 
-    let mut writer = MAIWriter::new(&archive_path, itype, archive_hash);
-    let res = match itype {
-        MAIIndexType::MinHash => build_minhash_index(&reader, &mut writer, &opts),
-        MAIIndexType::BM25 => build_bm25_index(&reader, &mut writer, &opts),
-        MAIIndexType::Email => build_email_index(&reader, &mut writer, &opts),
-        MAIIndexType::TimeSeries => build_timeseries_index(&reader, &mut writer, &opts),
-        MAIIndexType::Genomic => build_genomic_index(&reader, &mut writer, &opts),
-        MAIIndexType::Fasta => build_fasta_index(&reader, &mut writer, &opts),
-        _ => Err("Unsupported index type".to_string()),
-    };
-
-    if let Err(e) = res {
-        print_error(&e, "index");
-        return EXIT_ERROR;
+        match std::process::Command::new(&bin).args(&full_args).status() {
+            Ok(status) => status.code().unwrap_or(EXIT_ERROR),
+            Err(e) => {
+                eprintln!("mar: failed to execute {}: {}", bin.display(), e);
+                EXIT_ERROR
+            }
+        }
+    } else {
+        eprintln!("'mar {}' requires the MAR Enterprise Extension (mar-enterprise).", cmd_name);
+        eprintln!("To obtain an enterprise license, visit: https://earthframe.com/enterprise");
+        EXIT_UNAVAILABLE
     }
+}
 
-    if output_path.is_empty() {
-        output_path = format!("{}.{}.mai", archive_path, type_name);
-    }
-
-    println!("Writing index to {}...", output_path);
-    if let Err(e) = writer.write_to_file(&output_path, align_log2) {
-        print_error(&e, "index");
-        return EXIT_ERROR;
-    }
-
-    println!("Successfully created {} index.", type_name);
-    EXIT_OK
+fn cmd_index(args: &[String]) -> i32 {
+    delegate_to_mar_enterprise("index", args)
 }
 
 fn cmd_search(args: &[String]) -> i32 {
-    let mut archive_path = String::new();
-    let mut index_path = String::new();
-    let mut query = String::new();
-    let mut opts = IndexOptions::default();
+    delegate_to_mar_enterprise("search", args)
+}
 
-    let mut i = 0;
-    while i < args.len() {
-        let arg = &args[i];
-        if arg == "-h" || arg == "--help" {
-            print_search_usage();
-            return EXIT_OK;
-        } else if (arg == "-i" || arg == "--input") && i + 1 < args.len() {
-            i += 1;
-            archive_path = args[i].clone();
-        } else if arg == "--index" && i + 1 < args.len() {
-            i += 1;
-            index_path = args[i].clone();
-        } else if arg == "--with" && i + 1 < args.len() {
-            i += 1;
-            if let Some(pos) = args[i].find('=') {
-                opts.params.insert(args[i][..pos].to_string(), args[i][pos + 1..].to_string());
-            }
-        } else if arg == "--extract" {
-            opts.params.insert("extract".to_string(), "true".to_string());
-        } else if arg == "--filenames-only" {
-            opts.params.insert("format".to_string(), "filenames".to_string());
-        } else if !arg.starts_with('-') {
-            query = arg.clone();
-        }
-        i += 1;
-    }
-
-    if archive_path.is_empty() || index_path.is_empty() {
-        print_search_usage();
-        return EXIT_USAGE;
-    }
-
-    let reader = match MarReader::open(&archive_path) {
-        Ok(r) => r,
-        Err(e) => {
-            print_error(&format!("Failed to open archive: {}", e), "search");
-            return EXIT_ERROR;
-        }
-    };
-
-    let index = match MAIReader::open(&index_path) {
-        Some(idx) => idx,
-        None => {
-            print_error(&format!("Failed to open index: {}", index_path), "search");
-            return EXIT_ERROR;
-        }
-    };
-
-    let itype = index.header().index_type;
-    if itype == MAIIndexType::Vector as u8 {
-        return delegate_to_cpp("search", args);
-    }
-
-    // Warn if the archive has changed since the index was built.
-    if let Ok(mut in_file) = File::open(&archive_path) {
-        let mut hasher = XXHash3_64::new(0);
-        let mut buffer = [0u8; 65536];
-        loop {
-            match in_file.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(n) => hasher.update(&buffer[..n]),
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => break,
-            }
-        }
-        if index.header().archive_hash != hasher.finalize() {
-            eprintln!("mar: warning: index may be stale (archive hash mismatch)");
-        }
-    }
-
-    let res = if itype == MAIIndexType::MinHash as u8 {
-        search_minhash(&reader, &index, &query, &opts)
-    } else if itype == MAIIndexType::BM25 as u8 {
-        search_bm25(&reader, &index, &query, &opts)
-    } else if itype == MAIIndexType::Email as u8 {
-        search_email(&reader, &index, &query, &opts)
-    } else if itype == MAIIndexType::TimeSeries as u8 {
-        search_timeseries(&reader, &index, &query, &opts)
-    } else if itype == MAIIndexType::Genomic as u8 {
-        search_genomic(&reader, &index, &query, &opts)
-    } else if itype == MAIIndexType::Fasta as u8 {
-        search_fasta(&reader, &index, &query, &opts)
-    } else {
-        print_error("No searcher available for this index type", "search");
-        return EXIT_ERROR;
-    };
-
-    let results = match res {
-        Ok(r) => r,
-        Err(e) => {
-            print_error(&e, "search");
-            return EXIT_ERROR;
-        }
-    };
-
-    if results.is_empty() {
-        return EXIT_NO_RESULTS;
-    }
-
-    let fmt = opts.params.get("format").map(|s| s.as_str()).unwrap_or("text");
-    if fmt == "filenames" {
-        for r in &results {
-            println!("{}", r.filename);
-        }
-    } else if fmt == "json" {
-        for (i, r) in results.iter().enumerate() {
-            let mut line = format!("{{\"rank\":{},\"score\":{:.4},\"file\":\"{}\"", i + 1, r.score, json_escape(&r.filename));
-            if !r.metadata.is_empty() {
-                line.push_str(",\"metadata\":{");
-                let mut first = true;
-                for (k, v) in &r.metadata {
-                    if !first { line.push(','); }
-                    first = false;
-                    line.push_str(&format!("\"{}\":\"{}\"", json_escape(k), json_escape(v)));
-                }
-                line.push('}');
-            }
-            line.push('}');
-            println!("{}", line);
-        }
-    } else {
-        println!("{:<4}  {:<8}  {:<40}", "RANK", "SCORE", "FILE");
-        for (i, r) in results.iter().enumerate() {
-            let mut row = format!("{:<4}  {:<8.4}  {:<40}", i + 1, r.score, r.filename);
-            for (k, v) in &r.metadata {
-                row.push_str(&format!("  {}={}", k, v));
-            }
-            println!("{}", row);
-        }
-    }
-
-    EXIT_OK
+fn cmd_okf(args: &[String]) -> i32 {
+    delegate_to_mar_enterprise("okf", args)
 }
 
 fn hex_encode(data: &[u8]) -> String {
@@ -2315,6 +2389,7 @@ fn main() {
         "get" => cmd_get(&filtered_args),
         "cat" => cmd_cat(&filtered_args),
         "diff" => cmd_diff(&filtered_args),
+        "delta" => cmd_delta(&filtered_args),
         "header" => cmd_header(&filtered_args),
         "validate" => cmd_validate(&filtered_args),
         "version" => cmd_version(&filtered_args),
@@ -2322,9 +2397,7 @@ fn main() {
         "slice" => cmd_slice(&filtered_args),
         "index" => cmd_index(&filtered_args),
         "search" => cmd_search(&filtered_args),
-        "okf" => {
-            delegate_to_cpp("okf", &filtered_args)
-        }
+        "okf" => cmd_okf(&filtered_args),
         _ => {
             print_error(&format!("Unknown command: {}", cmd_name), "");
             print_usage();
