@@ -415,7 +415,6 @@ python:
 	fi; \
 	if [ -n "$$DYLIB_PATH" ]; then \
 		cp "$$DYLIB_PATH" python/pymar/_mar.so; \
-		if [ -d pymar/pymar ]; then cp "$$DYLIB_PATH" pymar/pymar/_mar.so; fi; \
 		echo "Python extension built: python/pymar/_mar.so"; \
 	fi
 
