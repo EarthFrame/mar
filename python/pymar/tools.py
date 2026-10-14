@@ -204,12 +204,16 @@ def mar_header(path: str) -> Dict:
     Get header information and metadata for a MAR archive.
     
     Args:
-        path: Path to the .mar archive.
+        path: Path to the .mar archive or remote URL.
         
     Returns:
         A dictionary containing version, file count, and block count.
     """
-    archive = MarArchive(path)
+    if path.startswith(("http://", "https://", "s3://")):
+        from .remote import RemoteArchive
+        archive = RemoteArchive(path)
+    else:
+        archive = MarArchive(path)
     return archive.get_header().model_dump()
 
 def mar_version() -> str:

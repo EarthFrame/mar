@@ -219,9 +219,48 @@ def test_cli_slice_local(tmp_path):
         [sys.executable, "-m", "pymar", "slice", src, "-o", dst, "-i", "*.pdb", "-i", "*.txt"],
         capture_output=True,
         text=True,
+        env=dict(os.environ, PYTHONPATH="python")
     )
     assert res.returncode == 0, f"stdout: {res.stdout}, stderr: {res.stderr}"
     assert os.path.exists(dst)
     out_arc = MarArchive(dst)
     assert sorted(out_arc.get_names()) == ["f1.txt", "f2.pdb"]
+    out_arc.close()
+
+
+def test_cli_slice_remote_logging(remote_2000_server, tmp_path):
+    url, server, local_src = remote_2000_server
+    dst = str(tmp_path / "cli_remote_subset.mar")
+
+    res = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pymar",
+            "slice",
+            "-v",
+            "-j",
+            "4",
+            url,
+            "-o",
+            dst,
+            "-i",
+            "structures/AF-00001-F1-model.pdb",
+            "-i",
+            "structures/AF-00002-F1-model.pdb",
+        ],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, PYTHONPATH="python")
+    )
+    assert res.returncode == 0, f"stdout: {res.stdout}, stderr: {res.stderr}"
+    assert os.path.exists(dst)
+    assert "mar: inspecting remote archive" in res.stderr
+    assert "mar: matched 2 of 2,500 files" in res.stderr
+    assert "mar: downloading with 1 worker thread" in res.stderr
+    assert "mar: completed in" in res.stderr
+    assert "transferred" in res.stderr
+
+    out_arc = MarArchive(dst)
+    assert out_arc.file_count == 2
     out_arc.close()

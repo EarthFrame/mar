@@ -156,6 +156,8 @@ fn match_char_class(class: &[u8], ch: u8) -> bool {
 pub enum FilterRule {
     Include(String),
     Exclude(String),
+    IncludeLiteral(String),
+    ExcludeLiteral(String),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -177,11 +179,68 @@ impl AlgebraicFilter {
         }
     }
 
+    pub fn add_include_literal(&mut self, path: &str) {
+        let p = path.trim();
+        if !p.is_empty() {
+            self.rules.push(FilterRule::IncludeLiteral(p.to_string()));
+            self.has_includes = true;
+        }
+    }
+
     pub fn add_exclude(&mut self, pattern: &str) {
         let pat = pattern.trim();
         if !pat.is_empty() {
             self.rules.push(FilterRule::Exclude(pat.to_string()));
         }
+    }
+
+    pub fn add_exclude_literal(&mut self, path: &str) {
+        let p = path.trim();
+        if !p.is_empty() {
+            self.rules.push(FilterRule::ExcludeLiteral(p.to_string()));
+        }
+    }
+
+    pub fn load_literal_includes_from_file(&mut self, file_path: &str) -> Result<usize, String> {
+        let mut count = 0;
+        let reader: Box<dyn BufRead> = if file_path == "-" {
+            Box::new(BufReader::new(io::stdin()))
+        } else {
+            let f = File::open(file_path).map_err(|e| format!("Failed to open file {}: {}", file_path, e))?;
+            Box::new(BufReader::new(f))
+        };
+
+        for line in reader.lines() {
+            let line = line.map_err(|e| format!("Failed to read file list: {}", e))?;
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            self.add_include_literal(trimmed);
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    pub fn load_literal_excludes_from_file(&mut self, file_path: &str) -> Result<usize, String> {
+        let mut count = 0;
+        let reader: Box<dyn BufRead> = if file_path == "-" {
+            Box::new(BufReader::new(io::stdin()))
+        } else {
+            let f = File::open(file_path).map_err(|e| format!("Failed to open exclude file {}: {}", file_path, e))?;
+            Box::new(BufReader::new(f))
+        };
+
+        for line in reader.lines() {
+            let line = line.map_err(|e| format!("Failed to read exclude list: {}", e))?;
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            self.add_exclude_literal(trimmed);
+            count += 1;
+        }
+        Ok(count)
     }
 
     pub fn load_includes_from_file(&mut self, file_path: &str) -> Result<usize, String> {
@@ -258,6 +317,16 @@ impl AlgebraicFilter {
                         matched_status = Some(false);
                     }
                 }
+                FilterRule::IncludeLiteral(literal) => {
+                    if Self::literal_matches(literal, path) {
+                        matched_status = Some(true);
+                    }
+                }
+                FilterRule::ExcludeLiteral(literal) => {
+                    if Self::literal_matches(literal, path) {
+                        matched_status = Some(false);
+                    }
+                }
             }
         }
 
@@ -265,6 +334,25 @@ impl AlgebraicFilter {
             Some(status) => status,
             None => !self.has_includes,
         }
+    }
+
+    fn literal_matches(rule_path: &str, candidate_path: &str) -> bool {
+        if rule_path == candidate_path {
+            return true;
+        }
+        // Normalize rule_path without trailing slash for prefix check
+        let prefix = rule_path.trim_end_matches('/');
+        if let Some(rest) = candidate_path.strip_prefix(prefix) {
+            if rest.starts_with('/') {
+                return true;
+            }
+        }
+        // Also check if candidate without trailing slash equals rule_path without trailing slash
+        let cand_trimmed = candidate_path.trim_end_matches('/');
+        if cand_trimmed == prefix {
+            return true;
+        }
+        false
     }
 
     /// Filter a slice of names, returning a vector of (original_index, name) pairs that match.
@@ -334,5 +422,18 @@ mod tests {
 
         assert!(filter.matches("AF-001.pdb"));
         assert!(!filter.matches("trash.tmp"));
+    }
+
+    #[test]
+    fn test_literal_filter() {
+        let mut filter = AlgebraicFilter::new();
+        filter.add_include_literal("Texas_Statutes/organized/03 - Business and Commerce Code [BC]/");
+        filter.add_include_literal("Texas_Statutes/special [brackets]/doc.pdf");
+
+        assert!(filter.matches("Texas_Statutes/organized/03 - Business and Commerce Code [BC]/"));
+        assert!(filter.matches("Texas_Statutes/organized/03 - Business and Commerce Code [BC]/bc.1.pdf"));
+        assert!(filter.matches("Texas_Statutes/special [brackets]/doc.pdf"));
+        assert!(!filter.matches("Texas_Statutes/organized/04 - Business Organizations Code [BO]/bo.1.pdf"));
+        assert!(!filter.matches("Texas_Statutes/special [brackets]/other.pdf"));
     }
 }

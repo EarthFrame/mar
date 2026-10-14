@@ -71,9 +71,10 @@ def glob_match(pattern: str, text: str) -> bool:
 
 class FilterRule:
     """Single inclusion or exclusion rule for algebraic archive filtering."""
-    def __init__(self, is_include: bool, pattern: str):
+    def __init__(self, is_include: bool, pattern: str, is_literal: bool = False):
         self.is_include = is_include
         self.pattern = pattern
+        self.is_literal = is_literal
 
 class AlgebraicFilter:
     """
@@ -89,13 +90,24 @@ class AlgebraicFilter:
     def add_include(self, pattern: str):
         pat = pattern.strip()
         if pat:
-            self.rules.append(FilterRule(True, pat))
+            self.rules.append(FilterRule(True, pat, is_literal=False))
+            self.has_includes = True
+
+    def add_include_literal(self, path: str):
+        p = path.strip()
+        if p:
+            self.rules.append(FilterRule(True, p, is_literal=True))
             self.has_includes = True
 
     def add_exclude(self, pattern: str):
         pat = pattern.strip()
         if pat:
-            self.rules.append(FilterRule(False, pat))
+            self.rules.append(FilterRule(False, pat, is_literal=False))
+
+    def add_exclude_literal(self, path: str):
+        p = path.strip()
+        if p:
+            self.rules.append(FilterRule(False, p, is_literal=True))
 
     def load_includes_from_file(self, file_path: str) -> int:
         count = 0
@@ -105,6 +117,20 @@ class AlgebraicFilter:
                 line = line.strip()
                 if line and not line.startswith("#"):
                     self.add_include(line)
+                    count += 1
+        finally:
+            if file_path != "-":
+                lines.close()
+        return count
+
+    def load_literal_includes_from_file(self, file_path: str) -> int:
+        count = 0
+        lines = sys.stdin if file_path == "-" else open(file_path, "r", encoding="utf-8")
+        try:
+            for line in lines:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    self.add_include_literal(line)
                     count += 1
         finally:
             if file_path != "-":
@@ -125,14 +151,43 @@ class AlgebraicFilter:
                 lines.close()
         return count
 
+    def load_literal_excludes_from_file(self, file_path: str) -> int:
+        count = 0
+        lines = sys.stdin if file_path == "-" else open(file_path, "r", encoding="utf-8")
+        try:
+            for line in lines:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    self.add_exclude_literal(line)
+                    count += 1
+        finally:
+            if file_path != "-":
+                lines.close()
+        return count
+
+    @staticmethod
+    def _literal_matches(rule_path: str, candidate_path: str) -> bool:
+        if rule_path == candidate_path:
+            return True
+        prefix = rule_path.rstrip("/")
+        if candidate_path.startswith(prefix + "/"):
+            return True
+        if candidate_path.rstrip("/") == prefix:
+            return True
+        return False
+
     def matches(self, path: str) -> bool:
         if not self.rules:
             return True
 
         matched_status = None
         for rule in self.rules:
-            if glob_match(rule.pattern, path):
-                matched_status = rule.is_include
+            if rule.is_literal:
+                if self._literal_matches(rule.pattern, path):
+                    matched_status = rule.is_include
+            else:
+                if glob_match(rule.pattern, path):
+                    matched_status = rule.is_include
 
         if matched_status is not None:
             return matched_status
@@ -364,9 +419,9 @@ class MarArchive:
             for exc in excludes:
                 af.add_exclude(exc)
         if files_from:
-            af.load_includes_from_file(files_from)
+            af.load_literal_includes_from_file(files_from)
         if exclude_from:
-            af.load_excludes_from_file(exclude_from)
+            af.load_literal_excludes_from_file(exclude_from)
 
         all_names = self.list_files()
         matched_names = af.filter_names(all_names)
@@ -442,6 +497,8 @@ def slice_archive(
     files_from: Optional[str] = None,
     exclude_from: Optional[str] = None,
     compression: str = "zstd",
+    threads: int = 0,
+    verbose: int = 0,
     force: bool = True,
     **kwargs
 ) -> str:
@@ -452,7 +509,7 @@ def slice_archive(
         files = list(files or []) + list(patterns)
     if archive_path_or_url.startswith(("http://", "https://", "s3://")):
         from .remote import RemoteArchive
-        arc = RemoteArchive(archive_path_or_url, **kwargs)
+        arc = RemoteArchive(archive_path_or_url, verbose=verbose, **kwargs)
     else:
         arc = MarArchive(archive_path_or_url)
 
@@ -464,6 +521,8 @@ def slice_archive(
         files_from=files_from,
         exclude_from=exclude_from,
         compression=compression,
+        threads=threads,
+        verbose=verbose,
         force=force,
         **kwargs
     )

@@ -762,3 +762,94 @@ fn test_cli_enterprise_delegations() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn test_cli_slice_files_from_literal_and_brackets() {
+    let dir = temp_test_dir("slice_literal");
+    let src = dir.join("src");
+    let bracket_dir = src.join("organized").join("03 - Business Code [BC]");
+    let other_dir = src.join("organized").join("04 - Other Code [OC]");
+    fs::create_dir_all(&bracket_dir).unwrap();
+    fs::create_dir_all(&other_dir).unwrap();
+
+    fs::write(bracket_dir.join("bc.1.pdf"), b"BC 1 content").unwrap();
+    fs::write(bracket_dir.join("bc.2.pdf"), b"BC 2 content").unwrap();
+    fs::write(other_dir.join("oc.1.pdf"), b"OC 1 content").unwrap();
+
+    let orig_mar = dir.join("orig.mar");
+    run_mar_success(&[
+        "create",
+        "-f",
+        orig_mar.to_str().unwrap(),
+        src.to_str().unwrap(),
+    ]);
+
+    // 1. Verify direct glob slicing still works on bracket directory
+    let glob_mar = dir.join("glob.mar");
+    run_mar_success(&[
+        "slice",
+        orig_mar.to_str().unwrap(),
+        "-o",
+        glob_mar.to_str().unwrap(),
+        "**Business**",
+    ]);
+    let list_glob = run_mar_success(&["list", glob_mar.to_str().unwrap()]);
+    let out_glob = String::from_utf8_lossy(&list_glob.stdout);
+    assert!(out_glob.contains("bc.1.pdf"));
+    assert!(out_glob.contains("bc.2.pdf"));
+    assert!(!out_glob.contains("oc.1.pdf"));
+
+    // 2. Test literal list file containing brackets directly (e.g. from mar list | grep ...)
+    let list_file = dir.join("list.txt");
+    fs::write(
+        &list_file,
+        format!(
+            "{}\n{}\n",
+            "src/organized/03 - Business Code [BC]/bc.1.pdf",
+            "src/organized/03 - Business Code [BC]/bc.2.pdf"
+        ),
+    )
+    .unwrap();
+
+    let sliced_mar = dir.join("sliced.mar");
+    run_mar_success(&[
+        "slice",
+        "-T",
+        list_file.to_str().unwrap(),
+        orig_mar.to_str().unwrap(),
+        "-o",
+        sliced_mar.to_str().unwrap(),
+    ]);
+
+    let list_out = run_mar_success(&["list", sliced_mar.to_str().unwrap()]);
+    let out_str = String::from_utf8_lossy(&list_out.stdout);
+    assert!(out_str.contains("bc.1.pdf"));
+    assert!(out_str.contains("bc.2.pdf"));
+    assert!(!out_str.contains("oc.1.pdf"));
+
+    // 3. Test directory prefix in literal list file
+    let dir_list_file = dir.join("dir_list.txt");
+    fs::write(
+        &dir_list_file,
+        "src/organized/03 - Business Code [BC]/\n",
+    )
+    .unwrap();
+
+    let dir_sliced_mar = dir.join("dir_sliced.mar");
+    run_mar_success(&[
+        "slice",
+        "-T",
+        dir_list_file.to_str().unwrap(),
+        orig_mar.to_str().unwrap(),
+        "-o",
+        dir_sliced_mar.to_str().unwrap(),
+    ]);
+
+    let list_dir_out = run_mar_success(&["list", dir_sliced_mar.to_str().unwrap()]);
+    let out_dir_str = String::from_utf8_lossy(&list_dir_out.stdout);
+    assert!(out_dir_str.contains("bc.1.pdf"));
+    assert!(out_dir_str.contains("bc.2.pdf"));
+    assert!(!out_dir_str.contains("oc.1.pdf"));
+
+    let _ = fs::remove_dir_all(&dir);
+}

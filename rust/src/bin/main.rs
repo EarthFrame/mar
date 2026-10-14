@@ -159,8 +159,10 @@ Options:
   -o, --output <file>        Path to destination archive (required)
   -i, --include <pattern>    Include glob pattern (repeatable)
   -x, --exclude <pattern>    Exclude glob pattern (repeatable)
-  -T, --files-from <file>    Read file list/patterns to include (- for stdin)
-  --exclude-from <file>      Read file list/patterns to exclude from file
+  -T, --files-from <file>    Read file list to include (literal paths, - for stdin)
+  --exclude-from <file>      Read file list to exclude (literal paths, - for stdin)
+  --files-from-glob <file>   Read file list to include as glob patterns (- for stdin)
+  --exclude-from-glob <file> Read file list to exclude as glob patterns (- for stdin)
   -c, --compression <algo>   Compression: none, lz4, zstd (default: match source or zstd), gzip, bzip2
   --compression-level <n>    Compression level (-1 = default)
   --checksum <type>          Checksum: xxhash3 (default), xxhash32, blake3, crc32c, none
@@ -690,6 +692,16 @@ fn cmd_slice(args: &[String]) -> i32 {
                 print_error("Option -T/--files-from requires an argument", "slice");
                 return EXIT_USAGE;
             }
+            if let Err(e) = filter.load_literal_includes_from_file(&args[i]) {
+                print_error(&e, "slice");
+                return EXIT_ERROR;
+            }
+        } else if arg == "--files-from-glob" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Option --files-from-glob requires an argument", "slice");
+                return EXIT_USAGE;
+            }
             if let Err(e) = filter.load_includes_from_file(&args[i]) {
                 print_error(&e, "slice");
                 return EXIT_ERROR;
@@ -698,6 +710,16 @@ fn cmd_slice(args: &[String]) -> i32 {
             i += 1;
             if i >= args.len() {
                 print_error("Option --exclude-from requires an argument", "slice");
+                return EXIT_USAGE;
+            }
+            if let Err(e) = filter.load_literal_excludes_from_file(&args[i]) {
+                print_error(&e, "slice");
+                return EXIT_ERROR;
+            }
+        } else if arg == "--exclude-from-glob" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Option --exclude-from-glob requires an argument", "slice");
                 return EXIT_USAGE;
             }
             if let Err(e) = filter.load_excludes_from_file(&args[i]) {

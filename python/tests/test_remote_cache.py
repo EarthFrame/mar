@@ -206,3 +206,59 @@ def test_hdr_cache_and_archive_destinations(http_server, tmp_path, monkeypatch):
         assert not f.endswith(".mar"), f"Found .mar file in cache: {f}"
 
 
+def test_remote_worker_clamping_and_stats():
+    from pymar.remote import clamp_workers, format_bytes
+    # Test worker clamping
+    assert clamp_workers(0) == 8
+    assert clamp_workers(-5) == 8
+    assert clamp_workers(4) == 4
+    assert clamp_workers(32) == 32
+    assert clamp_workers(100) == 32
+    assert clamp_workers(100, max_limit=16) == 16
+
+    # Test format bytes
+    assert format_bytes(500) == "500 B"
+    assert format_bytes(2048) == "2.0 KB"
+    assert format_bytes(1048576 * 5) == "5.00 MB"
+
+
+def test_remote_logging_and_full_archive_warning(http_server, tmp_path, capsys):
+    cache_dir = str(tmp_path / "warn_cache")
+    out_archive = str(tmp_path / "out_warn.mar")
+
+    # Slice with verbose=1 and NO filter
+    remote = pymar.RemoteArchive(http_server, cache_dir=cache_dir, verbose=1)
+    assert remote.header_downloaded is True
+    assert remote.header_size == 48
+    assert remote.total_header_size >= 48
+    remote.slice(out_archive, threads=2, verbose=1)
+    remote.close()
+
+    captured = capsys.readouterr()
+    err = captured.err
+    assert "mar: inspecting remote archive" in err
+    assert "mar: downloaded mar header and index" in err
+    assert "warning: no filter specified; slicing all" in err
+    assert "range requests" in err
+    assert "transferred" in err
+    assert os.path.exists(out_archive)
+
+    # Second open: cache hit, header_downloaded should be False
+    remote_cached = pymar.RemoteArchive(http_server, cache_dir=cache_dir, verbose=1)
+    assert remote_cached.header_downloaded is False
+    assert remote_cached.header_size == 48
+    assert remote_cached.total_header_size == remote.total_header_size
+    remote_cached.close()
+
+    captured2 = capsys.readouterr()
+    assert "mar: cache hit" in captured2.err
+    assert "mar: downloaded mar header and index" not in captured2.err
+
+    # Test mar_header on remote URL
+    hdr = pymar.mar_header(http_server)
+    assert "files" in hdr
+    assert "blocks" in hdr
+    assert "version" in hdr
+
+
+

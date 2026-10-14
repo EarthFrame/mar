@@ -51,7 +51,8 @@ def cmd_slice(argv: List[str]) -> int:
             exclude_from=args.exclude_from,
             compression=args.compression,
             force=args.force,
-            threads=args.threads
+            threads=args.threads,
+            verbose=args.verbose
         )
         if args.verbose:
             print(f"mar: successfully sliced {args.archive} -> {out}")
@@ -76,9 +77,10 @@ def cmd_create(argv: List[str]) -> int:
 def cmd_list(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(prog="pymar list", description="List archive contents.")
     parser.add_argument("archive", help="Path or URI to archive")
+    parser.add_argument("-v", "--verbose", action="count", default=0, help="Verbose output")
     args = parser.parse_args(argv)
     try:
-        arc = pymar.open(args.archive)
+        arc = pymar.open(args.archive, verbose=args.verbose)
         for name in arc.list_files():
             print(name)
         return 0
@@ -90,9 +92,10 @@ def cmd_get(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(prog="pymar get", description="Get a file from an archive.")
     parser.add_argument("archive", help="Path or URI to archive")
     parser.add_argument("filename", help="File name in archive")
+    parser.add_argument("-v", "--verbose", action="count", default=0, help="Verbose output")
     args = parser.parse_args(argv)
     try:
-        arc = pymar.open(args.archive)
+        arc = pymar.open(args.archive, verbose=args.verbose)
         content = arc.read_file(args.filename)
         sys.stdout.buffer.write(content)
         return 0
