@@ -8,7 +8,12 @@ thread_local! {
     static ZSTD_DECOMPRESSOR: RefCell<Option<zstd::bulk::Decompressor<'static>>> = const { RefCell::new(None) };
 }
 
-pub fn compress_into(data: &[u8], algo: CompressionAlgo, level: i32, out: &mut Vec<u8>) -> Result<(), String> {
+pub fn compress_into(
+    data: &[u8],
+    algo: CompressionAlgo,
+    level: i32,
+    out: &mut Vec<u8>,
+) -> Result<(), String> {
     match algo {
         CompressionAlgo::None => {
             out.extend_from_slice(data);
@@ -21,7 +26,10 @@ pub fn compress_into(data: &[u8], algo: CompressionAlgo, level: i32, out: &mut V
                     let mut curr = level_cell.borrow_mut();
                     let mut enc = encoder_cell.borrow_mut();
                     if enc.is_none() || *curr != l {
-                        *enc = Some(zstd::bulk::Compressor::new(l).map_err(|e| format!("Zstd init failed: {}", e))?);
+                        *enc = Some(
+                            zstd::bulk::Compressor::new(l)
+                                .map_err(|e| format!("Zstd init failed: {}", e))?,
+                        );
                         *curr = l;
                     }
                     if let Some(ref mut c) = *enc {
@@ -30,7 +38,8 @@ pub fn compress_into(data: &[u8], algo: CompressionAlgo, level: i32, out: &mut V
                         out.reserve(max_size);
                         // Resize buffer so bulk compressor can write directly into it
                         out.resize(start_len + max_size, 0);
-                        let written = c.compress_to_buffer(data, &mut out[start_len..])
+                        let written = c
+                            .compress_to_buffer(data, &mut out[start_len..])
                             .map_err(|e| format!("Zstd compress failed: {}", e))?;
                         out.truncate(start_len + written);
                         Ok(())
@@ -63,7 +72,9 @@ pub fn compress_into(data: &[u8], algo: CompressionAlgo, level: i32, out: &mut V
             encoder
                 .write_all(data)
                 .map_err(|e| format!("Gzip compress failed: {}", e))?;
-            let res = encoder.finish().map_err(|e| format!("Gzip finish failed: {}", e))?;
+            let res = encoder
+                .finish()
+                .map_err(|e| format!("Gzip finish failed: {}", e))?;
             out.extend_from_slice(&res);
             Ok(())
         }
@@ -79,7 +90,9 @@ pub fn compress_into(data: &[u8], algo: CompressionAlgo, level: i32, out: &mut V
             encoder
                 .write_all(data)
                 .map_err(|e| format!("Bzip2 compress failed: {}", e))?;
-            let res = encoder.finish().map_err(|e| format!("Bzip2 finish failed: {}", e))?;
+            let res = encoder
+                .finish()
+                .map_err(|e| format!("Bzip2 finish failed: {}", e))?;
             out.extend_from_slice(&res);
             Ok(())
         }
@@ -92,7 +105,12 @@ pub fn compress(data: &[u8], algo: CompressionAlgo, level: i32) -> Result<Vec<u8
     Ok(out)
 }
 
-pub fn decompress_into(data: &[u8], algo: CompressionAlgo, raw_size: u64, out: &mut Vec<u8>) -> Result<(), String> {
+pub fn decompress_into(
+    data: &[u8],
+    algo: CompressionAlgo,
+    raw_size: u64,
+    out: &mut Vec<u8>,
+) -> Result<(), String> {
     match algo {
         CompressionAlgo::None => {
             out.extend_from_slice(data);
@@ -107,10 +125,14 @@ pub fn decompress_into(data: &[u8], algo: CompressionAlgo, raw_size: u64, out: &
                 ZSTD_DECOMPRESSOR.with(|cell| {
                     let mut dec = cell.borrow_mut();
                     if dec.is_none() {
-                        *dec = Some(zstd::bulk::Decompressor::new().map_err(|e| format!("Zstd decompress init failed: {}", e))?);
+                        *dec = Some(
+                            zstd::bulk::Decompressor::new()
+                                .map_err(|e| format!("Zstd decompress init failed: {}", e))?,
+                        );
                     }
                     if let Some(ref mut d) = *dec {
-                        let written = d.decompress_to_buffer(data, &mut out[start_len..])
+                        let written = d
+                            .decompress_to_buffer(data, &mut out[start_len..])
                             .map_err(|e| format!("Zstd decompress failed: {}", e))?;
                         out.truncate(start_len + written);
                         Ok(())
@@ -119,7 +141,8 @@ pub fn decompress_into(data: &[u8], algo: CompressionAlgo, raw_size: u64, out: &
                     }
                 })
             } else {
-                let decoded = zstd::decode_all(data).map_err(|e| format!("Zstd decompress failed: {}", e))?;
+                let decoded =
+                    zstd::decode_all(data).map_err(|e| format!("Zstd decompress failed: {}", e))?;
                 out.extend_from_slice(&decoded);
                 Ok(())
             }
@@ -143,13 +166,15 @@ pub fn decompress_into(data: &[u8], algo: CompressionAlgo, raw_size: u64, out: &
         }
         CompressionAlgo::Gzip => {
             let mut decoder = flate2::read::GzDecoder::new(data);
-            decoder.read_to_end(out)
+            decoder
+                .read_to_end(out)
                 .map_err(|e| format!("Gzip decompress failed: {}", e))?;
             Ok(())
         }
         CompressionAlgo::Bzip2 => {
             let mut decoder = bzip2::read::BzDecoder::new(data);
-            decoder.read_to_end(out)
+            decoder
+                .read_to_end(out)
                 .map_err(|e| format!("Bzip2 decompress failed: {}", e))?;
             Ok(())
         }

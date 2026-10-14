@@ -23,17 +23,12 @@ enum TaskWork {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BlockMode {
     Single,
     Multi,
+    #[default]
     Shared,
-}
-
-impl Default for BlockMode {
-    fn default() -> Self {
-        BlockMode::Shared
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -106,11 +101,17 @@ impl MarWriter {
 
     pub fn add_file(&mut self, file_path: &str, archive_name: &str) -> Result<(), String> {
         let p = Path::new(file_path);
-        let metadata = fs::symlink_metadata(p).map_err(|e| format!("Failed to stat {}: {}", file_path, e))?;
+        let metadata =
+            fs::symlink_metadata(p).map_err(|e| format!("Failed to stat {}: {}", file_path, e))?;
         self.add_file_with_metadata(file_path, archive_name, &metadata)
     }
 
-    fn add_file_with_metadata(&mut self, file_path: &str, archive_name: &str, metadata: &fs::Metadata) -> Result<(), String> {
+    fn add_file_with_metadata(
+        &mut self,
+        file_path: &str,
+        archive_name: &str,
+        metadata: &fs::Metadata,
+    ) -> Result<(), String> {
         let p = Path::new(file_path);
         let arc_name = if archive_name.is_empty() {
             let mut name = file_path.to_string();
@@ -128,7 +129,10 @@ impl MarWriter {
         let file_type = metadata.file_type();
         let (entry_type, symlink_target) = if file_type.is_symlink() {
             let target = fs::read_link(p).map_err(|e| e.to_string())?;
-            (EntryType::Symlink, Some(target.to_string_lossy().to_string()))
+            (
+                EntryType::Symlink,
+                Some(target.to_string_lossy().to_string()),
+            )
         } else if file_type.is_dir() {
             (EntryType::Directory, None)
         } else {
@@ -155,9 +159,15 @@ impl MarWriter {
             metadata.permissions().mode()
         };
         #[cfg(not(unix))]
-        let mode = if entry_type == EntryType::Directory { DEFAULT_DIR_MODE } else { DEFAULT_FILE_MODE };
+        let mode = if entry_type == EntryType::Directory {
+            DEFAULT_DIR_MODE
+        } else {
+            DEFAULT_FILE_MODE
+        };
 
-        let mtime = metadata.modified().ok()
+        let mtime = metadata
+            .modified()
+            .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
@@ -187,7 +197,8 @@ impl MarWriter {
 
     pub fn add_directory(&mut self, dir_path: &str, prefix: &str) -> Result<(), String> {
         let p = Path::new(dir_path);
-        let metadata = fs::symlink_metadata(p).map_err(|e| format!("Not a directory: {}: {}", dir_path, e))?;
+        let metadata =
+            fs::symlink_metadata(p).map_err(|e| format!("Not a directory: {}: {}", dir_path, e))?;
         if !metadata.is_dir() {
             return Err(format!("Not a directory: {}", dir_path));
         }
@@ -218,7 +229,9 @@ impl MarWriter {
             #[cfg(not(unix))]
             let mode = DEFAULT_DIR_MODE;
 
-            let mtime = metadata.modified().ok()
+            let mtime = metadata
+                .modified()
+                .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
@@ -257,7 +270,9 @@ impl MarWriter {
                 };
                 #[cfg(not(unix))]
                 let mode = DEFAULT_DIR_MODE;
-                let mtime = metadata.modified().ok()
+                let mtime = metadata
+                    .modified()
+                    .ok()
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_secs() as i64)
                     .unwrap_or(0);
@@ -396,7 +411,10 @@ impl MarWriter {
         // 1b. If dedup_by_hash is enabled, compute hashes upfront in parallel so we can map duplicates
         if self.options.compute_hashes && self.options.dedup_by_hash {
             for fd in self.files.iter_mut() {
-                if fd.entry.entry_type == EntryType::RegularFile && fd.entry.logical_size > 0 && fd.hash.is_none() {
+                if fd.entry.entry_type == EntryType::RegularFile
+                    && fd.entry.logical_size > 0
+                    && fd.hash.is_none()
+                {
                     if let Some(ref c) = fd.content {
                         let mut hasher = crate::checksum::XXHash3_64::new(0);
                         hasher.update(c);
@@ -409,9 +427,15 @@ impl MarWriter {
                 }
             }
 
-            let files_to_hash: Vec<(usize, String)> = self.files.iter().enumerate()
+            let files_to_hash: Vec<(usize, String)> = self
+                .files
+                .iter()
+                .enumerate()
                 .filter_map(|(i, fd)| {
-                    if fd.entry.entry_type == EntryType::RegularFile && fd.entry.logical_size > 0 && fd.hash.is_none() {
+                    if fd.entry.entry_type == EntryType::RegularFile
+                        && fd.entry.logical_size > 0
+                        && fd.hash.is_none()
+                    {
                         fd.source_path.as_ref().map(|p| (i, p.clone()))
                     } else {
                         None
@@ -420,20 +444,25 @@ impl MarWriter {
                 .collect();
 
             let computed: Vec<(usize, [u8; 32])> = pool.install(|| {
-                files_to_hash.into_par_iter().map(|(idx, path)| {
-                    let mut hasher = crate::checksum::XXHash3_64::new(0);
-                    if let Ok(mut f) = File::open(&path) {
-                        let mut buf = vec![0u8; 1024 * 1024];
-                        while let Ok(n) = std::io::Read::read(&mut f, &mut buf) {
-                            if n == 0 { break; }
-                            hasher.update(&buf[..n]);
+                files_to_hash
+                    .into_par_iter()
+                    .map(|(idx, path)| {
+                        let mut hasher = crate::checksum::XXHash3_64::new(0);
+                        if let Ok(mut f) = File::open(&path) {
+                            let mut buf = vec![0u8; 1024 * 1024];
+                            while let Ok(n) = std::io::Read::read(&mut f, &mut buf) {
+                                if n == 0 {
+                                    break;
+                                }
+                                hasher.update(&buf[..n]);
+                            }
                         }
-                    }
-                    let val = hasher.finalize();
-                    let mut h = [0u8; 32];
-                    h[..8].copy_from_slice(&val.to_le_bytes());
-                    (idx, h)
-                }).collect()
+                        let val = hasher.finalize();
+                        let mut h = [0u8; 32];
+                        h[..8].copy_from_slice(&val.to_le_bytes());
+                        (idx, h)
+                    })
+                    .collect()
             });
 
             for (idx, h) in computed {
@@ -445,22 +474,29 @@ impl MarWriter {
         // 2. Map duplicate files to canonical files when dedup_by_hash is active
         let mut canonical: Vec<usize> = (0..self.files.len()).collect();
         if self.options.dedup_by_hash && self.options.compute_hashes {
-            let mut seen: std::collections::HashMap<[u8; 32], usize> = std::collections::HashMap::new();
-            for i in 0..self.files.len() {
-                let flen = self.files[i].entry.logical_size;
-                let ftype = self.files[i].entry.entry_type;
+            let mut seen: std::collections::HashMap<[u8; 32], usize> =
+                std::collections::HashMap::new();
+            for (i, (canon_ref, file_desc)) in
+                canonical.iter_mut().zip(self.files.iter()).enumerate()
+            {
+                let flen = file_desc.entry.logical_size;
+                let ftype = file_desc.entry.entry_type;
                 if ftype != EntryType::RegularFile || flen == 0 {
                     continue;
                 }
-                if let Some(h) = self.files[i].hash {
+                if let Some(h) = file_desc.hash {
                     if let Some(&canon) = seen.get(&h) {
                         if self.files[canon].entry.logical_size == flen {
-                            canonical[i] = canon;
-                            self.files[i].entry.entry_flags |= entry_flags::SHARED_SPANS;
+                            *canon_ref = canon;
                             continue;
                         }
                     }
                     seen.insert(h, i);
+                }
+            }
+            for (i, &canon_idx) in canonical.iter().enumerate() {
+                if canon_idx != i {
+                    self.files[i].entry.entry_flags |= entry_flags::SHARED_SPANS;
                 }
             }
         }
@@ -472,98 +508,72 @@ impl MarWriter {
         }
 
         let mut tasks: Vec<BlockTask> = Vec::new();
-        let block_size = if self.options.multiblock { self.options.block_size } else { u64::MAX };
+        let block_size = if self.options.multiblock {
+            self.options.block_size
+        } else {
+            u64::MAX
+        };
 
         match self.options.block_mode {
-        BlockMode::Shared => {
-            // Uncompressed archives (compression == None) use single-file-per-block
-            // to support safe in-place / out-of-place block-level redaction without
-            // corrupting adjacent files packed into shared blocks.
-            if self.options.compression == CompressionAlgo::None {
-                for (i, fd) in self.files.iter_mut().enumerate() {
-                    if fd.entry.entry_type != EntryType::RegularFile {
-                        continue;
-                    }
-                    let flen = fd.entry.logical_size;
-                    let task_id = tasks.len();
-                    tasks.push(BlockTask {
-                        work: TaskWork::SingleFile { file_idx: i, offset: 0, length: flen },
-                    });
-                    fd.spans.push(Span {
-                        block_id: task_id as u32,
-                        offset_in_block: 0,
-                        length: flen as u32,
-                        sequence_order: 0,
-                    });
-                }
-            } else {
-                let mut current_packed_files: Vec<usize> = Vec::new();
-                let mut current_packed_size = 0u64;
-
-                for i in 0..self.files.len() {
-                    let fd = &self.files[i];
-                    if fd.entry.entry_type != EntryType::RegularFile {
-                        continue;
-                    }
-
-                    let flen = fd.entry.logical_size;
-                    if flen == 0 {
+            BlockMode::Shared => {
+                // Uncompressed archives (compression == None) use single-file-per-block
+                // to support safe in-place / out-of-place block-level redaction without
+                // corrupting adjacent files packed into shared blocks.
+                if self.options.compression == CompressionAlgo::None {
+                    for (i, fd) in self.files.iter_mut().enumerate() {
+                        if fd.entry.entry_type != EntryType::RegularFile {
+                            continue;
+                        }
+                        let flen = fd.entry.logical_size;
                         let task_id = tasks.len();
                         tasks.push(BlockTask {
-                            work: TaskWork::SingleFile { file_idx: i, offset: 0, length: 0 },
+                            work: TaskWork::SingleFile {
+                                file_idx: i,
+                                offset: 0,
+                                length: flen,
+                            },
                         });
-                        self.files[i].spans.push(Span {
+                        fd.spans.push(Span {
                             block_id: task_id as u32,
                             offset_in_block: 0,
-                            length: 0,
+                            length: flen as u32,
                             sequence_order: 0,
                         });
-                        continue;
                     }
+                } else {
+                    let mut current_packed_files: Vec<usize> = Vec::new();
+                    let mut current_packed_size = 0u64;
 
-                    // Large file: spans multiple blocks or takes dedicated blocks
-                    if flen >= block_size {
-                        // Flush any pending packed files first so ordering and task IDs are aligned
-                        if !current_packed_files.is_empty() {
-                            let packed_task_id = tasks.len();
+                    #[allow(clippy::needless_range_loop)]
+                    for i in 0..self.files.len() {
+                        let canon_idx = canonical[i];
+                        if self.files[i].entry.entry_type != EntryType::RegularFile {
+                            continue;
+                        }
+
+                        let flen = self.files[i].entry.logical_size;
+                        if flen == 0 {
+                            let task_id = tasks.len();
                             tasks.push(BlockTask {
-                                work: TaskWork::PackedBlock {
-                                    file_indices: current_packed_files.clone(),
-                                    raw_size: current_packed_size,
+                                work: TaskWork::SingleFile {
+                                    file_idx: i,
+                                    offset: 0,
+                                    length: 0,
                                 },
                             });
-                            for &fidx in &current_packed_files {
-                                self.files[fidx].spans[0].block_id = packed_task_id as u32;
-                            }
-                            current_packed_files.clear();
-                            current_packed_size = 0;
+                            self.files[i].spans.push(Span {
+                                block_id: task_id as u32,
+                                offset_in_block: 0,
+                                length: 0,
+                                sequence_order: 0,
+                            });
+                            continue;
                         }
 
-                        let mut seq = 0;
-                        let mut off = 0;
-                        while off < flen {
-                            let len = std::cmp::min(block_size, flen - off);
-                            if canonical[i] == i {
-                                let task_id = tasks.len();
-                                tasks.push(BlockTask {
-                                    work: TaskWork::SingleFile { file_idx: i, offset: off, length: len },
-                                });
-                                self.files[i].spans.push(Span {
-                                    block_id: task_id as u32,
-                                    offset_in_block: 0,
-                                    length: len as u32,
-                                    sequence_order: seq,
-                                });
-                            }
-                            off += len;
-                            seq += 1;
-                        }
-                    } else {
-                        // Small file: candidate for packed blocks
-                        if canonical[i] == i {
-                            // Check if it fits in current packed block
-                            if !current_packed_files.is_empty() && (current_packed_size + flen > block_size) {
-                                // Flush current packed block
+                        // Large file: spans multiple blocks or takes dedicated blocks
+                        if flen >= block_size {
+                            // Flush any pending packed files first so ordering and task IDs are aligned
+                            if !current_packed_files.is_empty() {
                                 let packed_task_id = tasks.len();
                                 tasks.push(BlockTask {
                                     work: TaskWork::PackedBlock {
@@ -578,37 +588,83 @@ impl MarWriter {
                                 current_packed_size = 0;
                             }
 
-                            let offset_in_block = current_packed_size as u32;
-                            // Pre-record span with dummy block_id; will be set when packed task is pushed
-                            self.files[i].spans.push(Span {
-                                block_id: 0,
-                                offset_in_block,
-                                length: flen as u32,
-                                sequence_order: 0,
-                            });
-                            current_packed_files.push(i);
-                            current_packed_size += flen;
+                            let mut seq = 0;
+                            let mut off = 0;
+                            while off < flen {
+                                let len = std::cmp::min(block_size, flen - off);
+                                if canon_idx == i {
+                                    let task_id = tasks.len();
+                                    tasks.push(BlockTask {
+                                        work: TaskWork::SingleFile {
+                                            file_idx: i,
+                                            offset: off,
+                                            length: len,
+                                        },
+                                    });
+                                    self.files[i].spans.push(Span {
+                                        block_id: task_id as u32,
+                                        offset_in_block: 0,
+                                        length: len as u32,
+                                        sequence_order: seq,
+                                    });
+                                }
+                                off += len;
+                                seq += 1;
+                            }
+                        } else {
+                            // Small file: candidate for packed blocks
+                            if canon_idx == i {
+                                // Check if it fits in current packed block
+                                if !current_packed_files.is_empty()
+                                    && (current_packed_size + flen > block_size)
+                                {
+                                    // Flush current packed block
+                                    let packed_task_id = tasks.len();
+                                    tasks.push(BlockTask {
+                                        work: TaskWork::PackedBlock {
+                                            file_indices: current_packed_files.clone(),
+                                            raw_size: current_packed_size,
+                                        },
+                                    });
+                                    for &fidx in &current_packed_files {
+                                        self.files[fidx].spans[0].block_id = packed_task_id as u32;
+                                    }
+                                    current_packed_files.clear();
+                                    current_packed_size = 0;
+                                }
+
+                                let offset_in_block = current_packed_size as u32;
+                                // Pre-record span with dummy block_id; will be set when packed task is pushed
+                                self.files[i].spans.push(Span {
+                                    block_id: 0,
+                                    offset_in_block,
+                                    length: flen as u32,
+                                    sequence_order: 0,
+                                });
+                                current_packed_files.push(i);
+                                current_packed_size += flen;
+                            }
+                        }
+                    }
+
+                    // Flush remaining packed block if any
+                    if !current_packed_files.is_empty() {
+                        let packed_task_id = tasks.len();
+                        tasks.push(BlockTask {
+                            work: TaskWork::PackedBlock {
+                                file_indices: current_packed_files.clone(),
+                                raw_size: current_packed_size,
+                            },
+                        });
+                        for &fidx in &current_packed_files {
+                            self.files[fidx].spans[0].block_id = packed_task_id as u32;
                         }
                     }
                 }
-
-                // Flush remaining packed block if any
-                if !current_packed_files.is_empty() {
-                    let packed_task_id = tasks.len();
-                    tasks.push(BlockTask {
-                        work: TaskWork::PackedBlock {
-                            file_indices: current_packed_files.clone(),
-                            raw_size: current_packed_size,
-                        },
-                    });
-                    for &fidx in &current_packed_files {
-                        self.files[fidx].spans[0].block_id = packed_task_id as u32;
-                    }
-                }
             }
-        }
             BlockMode::Multi | BlockMode::Single => {
                 for (i, fd) in self.files.iter_mut().enumerate() {
+                    let canon_idx = canonical[i];
                     if fd.entry.entry_type != EntryType::RegularFile {
                         continue;
                     }
@@ -616,7 +672,11 @@ impl MarWriter {
                     if flen == 0 {
                         let task_id = tasks.len();
                         tasks.push(BlockTask {
-                            work: TaskWork::SingleFile { file_idx: i, offset: 0, length: 0 },
+                            work: TaskWork::SingleFile {
+                                file_idx: i,
+                                offset: 0,
+                                length: 0,
+                            },
                         });
                         fd.spans.push(Span {
                             block_id: task_id as u32,
@@ -630,10 +690,14 @@ impl MarWriter {
                     let mut off = 0;
                     while off < flen {
                         let len = std::cmp::min(block_size, flen - off);
-                        if canonical[i] == i {
+                        if canon_idx == i {
                             let task_id = tasks.len();
                             tasks.push(BlockTask {
-                                work: TaskWork::SingleFile { file_idx: i, offset: off, length: len },
+                                work: TaskWork::SingleFile {
+                                    file_idx: i,
+                                    offset: off,
+                                    length: len,
+                                },
                             });
                             fd.spans.push(Span {
                                 block_id: task_id as u32,
@@ -651,9 +715,13 @@ impl MarWriter {
 
         // Propagate spans to duplicate files
         if self.options.dedup_by_hash && self.options.compute_hashes {
-            for i in 0..self.files.len() {
+            let canon_spans: Vec<Vec<Span>> = canonical
+                .iter()
+                .map(|&c_idx| self.files[c_idx].spans.clone())
+                .collect();
+            for (i, (file_desc, spans)) in self.files.iter_mut().zip(canon_spans).enumerate() {
                 if canonical[i] != i {
-                    self.files[i].spans = self.files[canonical[i]].spans.clone();
+                    file_desc.spans = spans;
                 }
             }
         }
@@ -672,7 +740,11 @@ impl MarWriter {
             match tasks[t_idx].work {
                 TaskWork::SingleFile { file_idx, .. } => {
                     while t_idx < tasks.len() {
-                        if let TaskWork::SingleFile { file_idx: next_fidx, .. } = tasks[t_idx].work {
+                        if let TaskWork::SingleFile {
+                            file_idx: next_fidx,
+                            ..
+                        } = tasks[t_idx].work
+                        {
                             if next_fidx == file_idx {
                                 t_idx += 1;
                                 continue;
@@ -680,12 +752,20 @@ impl MarWriter {
                         }
                         break;
                     }
-                    ranges.push(FileTaskRange { start, end: t_idx, file_idx: Some(file_idx) });
+                    ranges.push(FileTaskRange {
+                        start,
+                        end: t_idx,
+                        file_idx: Some(file_idx),
+                    });
                 }
                 TaskWork::PackedBlock { .. } => {
                     // Each packed block task is self-contained
                     t_idx += 1;
-                    ranges.push(FileTaskRange { start, end: t_idx, file_idx: None });
+                    ranges.push(FileTaskRange {
+                        start,
+                        end: t_idx,
+                        file_idx: None,
+                    });
                 }
             }
         }
@@ -697,7 +777,10 @@ impl MarWriter {
                 for r in &ranges {
                     if let Some(fidx) = r.file_idx {
                         let fd = &mut self.files[fidx];
-                        if fd.entry.entry_type == EntryType::RegularFile && fd.entry.logical_size > 0 && fd.hash.is_none() {
+                        if fd.entry.entry_type == EntryType::RegularFile
+                            && fd.entry.logical_size > 0
+                            && fd.hash.is_none()
+                        {
                             let mut hasher = crate::checksum::XXHash3_64::new(0);
                             if let Some(ref c) = fd.content {
                                 hasher.update(c);
@@ -705,7 +788,9 @@ impl MarWriter {
                                 if let Ok(mut f) = File::open(p) {
                                     let mut buf = vec![0u8; 1024 * 1024];
                                     while let Ok(n) = std::io::Read::read(&mut f, &mut buf) {
-                                        if n == 0 { break; }
+                                        if n == 0 {
+                                            break;
+                                        }
                                         hasher.update(&buf[..n]);
                                     }
                                 }
@@ -727,7 +812,11 @@ impl MarWriter {
                     let mut cur = r.start;
                     while cur < r.end {
                         let next = (cur + chunk_size).min(r.end);
-                        split_ranges.push(FileTaskRange { start: cur, end: next, file_idx: r.file_idx });
+                        split_ranges.push(FileTaskRange {
+                            start: cur,
+                            end: next,
+                            file_idx: r.file_idx,
+                        });
                         cur = next;
                     }
                 } else {
@@ -739,15 +828,24 @@ impl MarWriter {
 
         // 5. Estimate header space accurately using a dummy block table of the exact size
         let alignment = 1u64 << self.options.align_log2;
-        let dummy_block_table = vec![BlockDesc { block_offset: 0, raw_size: 0, stored_size: 0 }; tasks.len()];
+        let dummy_block_table = vec![
+            BlockDesc {
+                block_offset: 0,
+                raw_size: 0,
+                stored_size: 0
+            };
+            tasks.len()
+        ];
         let temp_meta = self.build_meta_container(&dummy_block_table, true);
-        let header_size_bytes = align_up(FIXED_HEADER_SIZE as u64 + temp_meta.len() as u64, alignment);
+        let header_size_bytes =
+            align_up(FIXED_HEADER_SIZE as u64 + temp_meta.len() as u64, alignment);
 
         if crate::is_interrupted() {
             return Err("Operation cancelled by user".to_string());
         }
 
-        let file = File::create(&self.path).map_err(|e| format!("Failed to create archive: {}", e))?;
+        let file =
+            File::create(&self.path).map_err(|e| format!("Failed to create archive: {}", e))?;
         async_io::advise_file(&file, 0, 0, AccessPattern::Sequential);
         async_io::set_direct_caching(&file, true);
 
@@ -766,11 +864,15 @@ impl MarWriter {
         let has_error = AtomicBool::new(false);
 
         // Spawn dedicated sequential writer thread
-        let mut writer_file = file.try_clone().map_err(|e| format!("Failed to clone file handle: {}", e))?;
+        let mut writer_file = file
+            .try_clone()
+            .map_err(|e| format!("Failed to clone file handle: {}", e))?;
         let num_tasks = tasks.len();
         let writer_handle = std::thread::spawn(move || -> Result<(Vec<BlockDesc>, u64), String> {
             use std::io::{Seek, SeekFrom};
-            writer_file.seek(SeekFrom::Start(header_size_bytes)).map_err(|e| format!("Seek error: {}", e))?;
+            writer_file
+                .seek(SeekFrom::Start(header_size_bytes))
+                .map_err(|e| format!("Seek error: {}", e))?;
             let mut cur_offset = header_size_bytes;
             let mut recorded_blocks: Vec<Option<BlockDesc>> = vec![None; num_tasks];
 
@@ -779,7 +881,9 @@ impl MarWriter {
                     return Err("Operation cancelled by user".to_string());
                 }
                 let block_start = cur_offset;
-                writer_file.write_all(&msg.payload).map_err(|e| format!("Sequential write error: {}", e))?;
+                writer_file
+                    .write_all(&msg.payload)
+                    .map_err(|e| format!("Sequential write error: {}", e))?;
                 cur_offset += msg.payload.len() as u64;
 
                 recorded_blocks[msg.task_id] = Some(BlockDesc {
@@ -815,263 +919,323 @@ impl MarWriter {
         }
 
         let worker_results: Vec<Result<WorkerOutput, String>> = pool.install(|| {
-            (0..num_threads).into_par_iter().map(|_| -> Result<WorkerOutput, String> {
-                let mut local_file_hashes = Vec::new();
-                let mut read_buf = Vec::new();
-                let mut write_buf = Vec::new();
+            (0..num_threads)
+                .into_par_iter()
+                .map(|_| -> Result<WorkerOutput, String> {
+                    let mut local_file_hashes = Vec::new();
+                    let mut read_buf = Vec::new();
+                    let mut write_buf = Vec::new();
 
-                while !has_error.load(Ordering::Relaxed) {
-                    if crate::is_interrupted() {
-                        has_error.store(true, Ordering::Relaxed);
-                        return Err("Operation cancelled by user".to_string());
-                    }
-
-                    let range_id = next_range_id.fetch_add(1, Ordering::Relaxed);
-                    if range_id >= ranges.len() {
-                        break;
-                    }
-
-                    let range = &ranges[range_id];
-
-                    if let Some(file_idx) = range.file_idx {
-                        let fd = &self.files[file_idx];
-                        let mut opened_file = if fd.content.is_none() {
-                            if let Some(ref path) = fd.source_path {
-                                match File::open(path) {
-                                    Ok(f) => {
-                                        async_io::advise_file(&f, 0, 0, AccessPattern::Sequential);
-                                        Some(f)
-                                    }
-                                    Err(e) => {
-                                        has_error.store(true, Ordering::Relaxed);
-                                        return Err(format!("Failed to open {}: {}", path, e));
-                                    }
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-
-                        let mut hasher = if self.options.compute_hashes && !self.options.dedup_by_hash {
-                            if fd.entry.entry_type == EntryType::RegularFile && fd.entry.logical_size > 0 && fd.hash.is_none() {
-                                Some(crate::checksum::XXHash3_64::new(0))
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-
-                        for task_id in range.start..range.end {
-                            if has_error.load(Ordering::Relaxed) || crate::is_interrupted() {
-                                has_error.store(true, Ordering::Relaxed);
-                                break;
-                            }
-                            let task = &tasks[task_id];
-                            let (task_offset, task_len) = match task.work {
-                                TaskWork::SingleFile { offset, length, .. } => (offset, length as usize),
-                                _ => unreachable!(),
-                            };
-
-                            if task_len == 0 {
-                                read_buf.clear();
-                            } else {
-                                if read_buf.len() < task_len {
-                                    read_buf.resize(task_len, 0);
-                                }
-                                let chunk = &mut read_buf[..task_len];
-
-                                if let Some(ref mut f) = opened_file {
-                                    #[cfg(unix)]
-                                    {
-                                        use std::os::unix::fs::FileExt;
-                                        if let Err(e) = f.read_exact_at(chunk, task_offset) {
-                                            has_error.store(true, Ordering::Relaxed);
-                                            return Err(format!("Read error in {} at offset {}: {}", fd.name, task_offset, e));
-                                        }
-                                    }
-                                    #[cfg(not(unix))]
-                                    {
-                                        use std::io::{Read, Seek, SeekFrom};
-                                        if let Err(e) = f.seek(SeekFrom::Start(task_offset)) {
-                                            has_error.store(true, Ordering::Relaxed);
-                                            return Err(format!("Seek error in {} at offset {}: {}", fd.name, task_offset, e));
-                                        }
-                                        if let Err(e) = f.read_exact(chunk) {
-                                            has_error.store(true, Ordering::Relaxed);
-                                            return Err(format!("Read error in {}: {}", fd.name, e));
-                                        }
-                                    }
-                                } else if let Some(ref c) = fd.content {
-                                    let start = task_offset as usize;
-                                    let end = (task_offset + task_len as u64) as usize;
-                                    chunk.copy_from_slice(&c[start..end]);
-                                }
-                            }
-
-                            let raw_slice = &read_buf[..task_len];
-                            if let Some(ref mut h) = hasher {
-                                if !raw_slice.is_empty() {
-                                    h.update(raw_slice);
-                                }
-                            }
-
-                            write_buf.clear();
-                            write_buf.resize(BLOCK_HEADER_SIZE, 0);
-
-                            if let Err(e) = crate::compression::compress_into(raw_slice, compression, compression_level, &mut write_buf) {
-                                has_error.store(true, Ordering::Relaxed);
-                                return Err(e);
-                            }
-
-                            let compressed_len = write_buf.len() - BLOCK_HEADER_SIZE;
-                            let checksum = compute_fast_checksum(&write_buf[BLOCK_HEADER_SIZE..], checksum_type);
-
-                            let block_total = write_buf.len() as u64;
-                            let padded_total = align_up(block_total, alignment);
-
-                            let bh = BlockHeader {
-                                raw_size: task_len as u64,
-                                stored_size: compressed_len as u64,
-                                comp_algo: compression,
-                                fast_checksum_type: checksum_type,
-                                reserved0: 0,
-                                fast_checksum: checksum,
-                                mode_or_perms: fd.posix.mode,
-                                block_flags: 0,
-                            };
-
-                            bh.write(&mut write_buf[..BLOCK_HEADER_SIZE]);
-
-                            let pad = (padded_total - block_total) as usize;
-                            if pad > 0 {
-                                write_buf.resize(write_buf.len() + pad, 0);
-                            }
-
-                            if tx.send(CompressedBlockMsg {
-                                task_id,
-                                raw_size: task_len as u64,
-                                stored_size: compressed_len as u64,
-                                payload: write_buf.clone(),
-                            }).is_err() {
-                                has_error.store(true, Ordering::Relaxed);
-                                return Err("Writer thread closed channel prematurely".to_string());
-                            }
+                    while !has_error.load(Ordering::Relaxed) {
+                        if crate::is_interrupted() {
+                            has_error.store(true, Ordering::Relaxed);
+                            return Err("Operation cancelled by user".to_string());
                         }
 
-                        if let Some(h) = hasher {
-                            let val = h.finalize();
-                            let mut hash_bytes = [0u8; 32];
-                            hash_bytes[..8].copy_from_slice(&val.to_le_bytes());
-                            local_file_hashes.push((file_idx, hash_bytes));
+                        let range_id = next_range_id.fetch_add(1, Ordering::Relaxed);
+                        if range_id >= ranges.len() {
+                            break;
                         }
-                    } else {
-                        // PackedBlock task
-                        for task_id in range.start..range.end {
-                            if has_error.load(Ordering::Relaxed) || crate::is_interrupted() {
-                                has_error.store(true, Ordering::Relaxed);
-                                break;
-                            }
-                            let task = &tasks[task_id];
-                            let (file_indices, raw_total_len) = match &task.work {
-                                TaskWork::PackedBlock { file_indices, raw_size } => (file_indices, *raw_size as usize),
-                                _ => unreachable!(),
-                            };
 
-                            read_buf.clear();
-                            read_buf.resize(raw_total_len, 0);
+                        let range = &ranges[range_id];
 
-                            let mut cur_buf_pos = 0;
-                            for &fidx in file_indices {
-                                let fd = &self.files[fidx];
-                                let flen = fd.entry.logical_size as usize;
-                                if flen == 0 {
-                                    continue;
-                                }
-
-                                let dest_slice = &mut read_buf[cur_buf_pos..cur_buf_pos + flen];
-                                cur_buf_pos += flen;
-
-                                if let Some(ref c) = fd.content {
-                                    dest_slice.copy_from_slice(c.as_slice());
-                                } else if let Some(ref p) = fd.source_path {
-                                    match File::open(p) {
-                                        Ok(mut f) => {
-                                            use std::io::Read;
-                                            if let Err(e) = f.read_exact(dest_slice) {
-                                                has_error.store(true, Ordering::Relaxed);
-                                                return Err(format!("Read error in {}: {}", p, e));
-                                            }
+                        if let Some(file_idx) = range.file_idx {
+                            let fd = &self.files[file_idx];
+                            let mut opened_file = if fd.content.is_none() {
+                                if let Some(ref path) = fd.source_path {
+                                    match File::open(path) {
+                                        Ok(f) => {
+                                            async_io::advise_file(
+                                                &f,
+                                                0,
+                                                0,
+                                                AccessPattern::Sequential,
+                                            );
+                                            Some(f)
                                         }
                                         Err(e) => {
                                             has_error.store(true, Ordering::Relaxed);
-                                            return Err(format!("Failed to open {}: {}", p, e));
+                                            return Err(format!("Failed to open {}: {}", path, e));
                                         }
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            };
+
+                            let mut hasher =
+                                if self.options.compute_hashes && !self.options.dedup_by_hash {
+                                    if fd.entry.entry_type == EntryType::RegularFile
+                                        && fd.entry.logical_size > 0
+                                        && fd.hash.is_none()
+                                    {
+                                        Some(crate::checksum::XXHash3_64::new(0))
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                };
+
+                            for (task_id, task) in
+                                tasks.iter().enumerate().take(range.end).skip(range.start)
+                            {
+                                if has_error.load(Ordering::Relaxed) || crate::is_interrupted() {
+                                    has_error.store(true, Ordering::Relaxed);
+                                    break;
+                                }
+                                let (task_offset, task_len) = match task.work {
+                                    TaskWork::SingleFile { offset, length, .. } => {
+                                        (offset, length as usize)
+                                    }
+                                    _ => unreachable!(),
+                                };
+
+                                if task_len == 0 {
+                                    read_buf.clear();
+                                } else {
+                                    if read_buf.len() < task_len {
+                                        read_buf.resize(task_len, 0);
+                                    }
+                                    let chunk = &mut read_buf[..task_len];
+
+                                    if let Some(ref mut f) = opened_file {
+                                        #[cfg(unix)]
+                                        {
+                                            use std::os::unix::fs::FileExt;
+                                            if let Err(e) = f.read_exact_at(chunk, task_offset) {
+                                                has_error.store(true, Ordering::Relaxed);
+                                                return Err(format!(
+                                                    "Read error in {} at offset {}: {}",
+                                                    fd.name, task_offset, e
+                                                ));
+                                            }
+                                        }
+                                        #[cfg(not(unix))]
+                                        {
+                                            use std::io::{Read, Seek, SeekFrom};
+                                            if let Err(e) = f.seek(SeekFrom::Start(task_offset)) {
+                                                has_error.store(true, Ordering::Relaxed);
+                                                return Err(format!(
+                                                    "Seek error in {} at offset {}: {}",
+                                                    fd.name, task_offset, e
+                                                ));
+                                            }
+                                            if let Err(e) = f.read_exact(chunk) {
+                                                has_error.store(true, Ordering::Relaxed);
+                                                return Err(format!(
+                                                    "Read error in {}: {}",
+                                                    fd.name, e
+                                                ));
+                                            }
+                                        }
+                                    } else if let Some(ref c) = fd.content {
+                                        let start = task_offset as usize;
+                                        let end = (task_offset + task_len as u64) as usize;
+                                        chunk.copy_from_slice(&c[start..end]);
                                     }
                                 }
 
-                                if self.options.compute_hashes && !self.options.dedup_by_hash && fd.hash.is_none() {
-                                    let mut hasher = crate::checksum::XXHash3_64::new(0);
-                                    hasher.update(dest_slice);
-                                    let val = hasher.finalize();
-                                    let mut hash_bytes = [0u8; 32];
-                                    hash_bytes[..8].copy_from_slice(&val.to_le_bytes());
-                                    local_file_hashes.push((fidx, hash_bytes));
+                                let raw_slice = &read_buf[..task_len];
+                                if let Some(ref mut h) = hasher {
+                                    if !raw_slice.is_empty() {
+                                        h.update(raw_slice);
+                                    }
+                                }
+
+                                write_buf.clear();
+                                write_buf.resize(BLOCK_HEADER_SIZE, 0);
+
+                                if let Err(e) = crate::compression::compress_into(
+                                    raw_slice,
+                                    compression,
+                                    compression_level,
+                                    &mut write_buf,
+                                ) {
+                                    has_error.store(true, Ordering::Relaxed);
+                                    return Err(e);
+                                }
+
+                                let compressed_len = write_buf.len() - BLOCK_HEADER_SIZE;
+                                let checksum = compute_fast_checksum(
+                                    &write_buf[BLOCK_HEADER_SIZE..],
+                                    checksum_type,
+                                );
+
+                                let block_total = write_buf.len() as u64;
+                                let padded_total = align_up(block_total, alignment);
+
+                                let bh = BlockHeader {
+                                    raw_size: task_len as u64,
+                                    stored_size: compressed_len as u64,
+                                    comp_algo: compression,
+                                    fast_checksum_type: checksum_type,
+                                    reserved0: 0,
+                                    fast_checksum: checksum,
+                                    mode_or_perms: fd.posix.mode,
+                                    block_flags: 0,
+                                };
+
+                                bh.write(&mut write_buf[..BLOCK_HEADER_SIZE]);
+
+                                let pad = (padded_total - block_total) as usize;
+                                if pad > 0 {
+                                    write_buf.resize(write_buf.len() + pad, 0);
+                                }
+
+                                if tx
+                                    .send(CompressedBlockMsg {
+                                        task_id,
+                                        raw_size: task_len as u64,
+                                        stored_size: compressed_len as u64,
+                                        payload: write_buf.clone(),
+                                    })
+                                    .is_err()
+                                {
+                                    has_error.store(true, Ordering::Relaxed);
+                                    return Err(
+                                        "Writer thread closed channel prematurely".to_string()
+                                    );
                                 }
                             }
 
-                            let raw_slice = &read_buf[..raw_total_len];
-                            write_buf.clear();
-                            write_buf.resize(BLOCK_HEADER_SIZE, 0);
-
-                            if let Err(e) = crate::compression::compress_into(raw_slice, compression, compression_level, &mut write_buf) {
-                                has_error.store(true, Ordering::Relaxed);
-                                return Err(e);
+                            if let Some(h) = hasher {
+                                let val = h.finalize();
+                                let mut hash_bytes = [0u8; 32];
+                                hash_bytes[..8].copy_from_slice(&val.to_le_bytes());
+                                local_file_hashes.push((file_idx, hash_bytes));
                             }
+                        } else {
+                            // PackedBlock task
+                            for (task_id, task) in
+                                tasks.iter().enumerate().take(range.end).skip(range.start)
+                            {
+                                if has_error.load(Ordering::Relaxed) || crate::is_interrupted() {
+                                    has_error.store(true, Ordering::Relaxed);
+                                    break;
+                                }
+                                let (file_indices, raw_total_len) = match &task.work {
+                                    TaskWork::PackedBlock {
+                                        file_indices,
+                                        raw_size,
+                                    } => (file_indices, *raw_size as usize),
+                                    _ => unreachable!(),
+                                };
 
-                            let compressed_len = write_buf.len() - BLOCK_HEADER_SIZE;
-                            let checksum = compute_fast_checksum(&write_buf[BLOCK_HEADER_SIZE..], checksum_type);
+                                read_buf.clear();
+                                read_buf.resize(raw_total_len, 0);
 
-                            let block_total = write_buf.len() as u64;
-                            let padded_total = align_up(block_total, alignment);
+                                let mut cur_buf_pos = 0;
+                                for &fidx in file_indices {
+                                    let fd = &self.files[fidx];
+                                    let flen = fd.entry.logical_size as usize;
+                                    if flen == 0 {
+                                        continue;
+                                    }
 
-                            let bh = BlockHeader {
-                                raw_size: raw_total_len as u64,
-                                stored_size: compressed_len as u64,
-                                comp_algo: compression,
-                                fast_checksum_type: checksum_type,
-                                reserved0: 0,
-                                fast_checksum: checksum,
-                                mode_or_perms: 0o644,
-                                block_flags: 0,
-                            };
+                                    let dest_slice = &mut read_buf[cur_buf_pos..cur_buf_pos + flen];
+                                    cur_buf_pos += flen;
 
-                            bh.write(&mut write_buf[..BLOCK_HEADER_SIZE]);
+                                    if let Some(ref c) = fd.content {
+                                        dest_slice.copy_from_slice(c.as_slice());
+                                    } else if let Some(ref p) = fd.source_path {
+                                        match File::open(p) {
+                                            Ok(mut f) => {
+                                                use std::io::Read;
+                                                if let Err(e) = f.read_exact(dest_slice) {
+                                                    has_error.store(true, Ordering::Relaxed);
+                                                    return Err(format!(
+                                                        "Read error in {}: {}",
+                                                        p, e
+                                                    ));
+                                                }
+                                            }
+                                            Err(e) => {
+                                                has_error.store(true, Ordering::Relaxed);
+                                                return Err(format!("Failed to open {}: {}", p, e));
+                                            }
+                                        }
+                                    }
 
-                            let pad = (padded_total - block_total) as usize;
-                            if pad > 0 {
-                                write_buf.resize(write_buf.len() + pad, 0);
-                            }
+                                    if self.options.compute_hashes
+                                        && !self.options.dedup_by_hash
+                                        && fd.hash.is_none()
+                                    {
+                                        let mut hasher = crate::checksum::XXHash3_64::new(0);
+                                        hasher.update(dest_slice);
+                                        let val = hasher.finalize();
+                                        let mut hash_bytes = [0u8; 32];
+                                        hash_bytes[..8].copy_from_slice(&val.to_le_bytes());
+                                        local_file_hashes.push((fidx, hash_bytes));
+                                    }
+                                }
 
-                            if tx.send(CompressedBlockMsg {
-                                task_id,
-                                raw_size: raw_total_len as u64,
-                                stored_size: compressed_len as u64,
-                                payload: write_buf.clone(),
-                            }).is_err() {
-                                has_error.store(true, Ordering::Relaxed);
-                                return Err("Writer thread closed channel prematurely".to_string());
+                                let raw_slice = &read_buf[..raw_total_len];
+                                write_buf.clear();
+                                write_buf.resize(BLOCK_HEADER_SIZE, 0);
+
+                                if let Err(e) = crate::compression::compress_into(
+                                    raw_slice,
+                                    compression,
+                                    compression_level,
+                                    &mut write_buf,
+                                ) {
+                                    has_error.store(true, Ordering::Relaxed);
+                                    return Err(e);
+                                }
+
+                                let compressed_len = write_buf.len() - BLOCK_HEADER_SIZE;
+                                let checksum = compute_fast_checksum(
+                                    &write_buf[BLOCK_HEADER_SIZE..],
+                                    checksum_type,
+                                );
+
+                                let block_total = write_buf.len() as u64;
+                                let padded_total = align_up(block_total, alignment);
+
+                                let bh = BlockHeader {
+                                    raw_size: raw_total_len as u64,
+                                    stored_size: compressed_len as u64,
+                                    comp_algo: compression,
+                                    fast_checksum_type: checksum_type,
+                                    reserved0: 0,
+                                    fast_checksum: checksum,
+                                    mode_or_perms: 0o644,
+                                    block_flags: 0,
+                                };
+
+                                bh.write(&mut write_buf[..BLOCK_HEADER_SIZE]);
+
+                                let pad = (padded_total - block_total) as usize;
+                                if pad > 0 {
+                                    write_buf.resize(write_buf.len() + pad, 0);
+                                }
+
+                                if tx
+                                    .send(CompressedBlockMsg {
+                                        task_id,
+                                        raw_size: raw_total_len as u64,
+                                        stored_size: compressed_len as u64,
+                                        payload: write_buf.clone(),
+                                    })
+                                    .is_err()
+                                {
+                                    has_error.store(true, Ordering::Relaxed);
+                                    return Err(
+                                        "Writer thread closed channel prematurely".to_string()
+                                    );
+                                }
                             }
                         }
                     }
-                }
 
-                Ok(WorkerOutput {
-                    file_hashes: local_file_hashes,
+                    Ok(WorkerOutput {
+                        file_hashes: local_file_hashes,
+                    })
                 })
-            }).collect::<Vec<Result<WorkerOutput, String>>>()
+                .collect::<Vec<Result<WorkerOutput, String>>>()
         });
 
         // Close channel so writer thread knows no more blocks are coming
@@ -1138,9 +1302,17 @@ impl MarWriter {
             header_size_bytes,
             meta_offset: FIXED_HEADER_SIZE as u64,
             meta_stored_size: meta_stored.len() as u64,
-            meta_raw_size: if meta_algo != CompressionAlgo::None { meta.len() as u64 } else { 0 },
+            meta_raw_size: if meta_algo != CompressionAlgo::None {
+                meta.len() as u64
+            } else {
+                0
+            },
             meta_comp_algo: meta_algo,
-            index_type: if self.options.multiblock { IndexType::Multiblock } else { IndexType::SingleFilePerBlock },
+            index_type: if self.options.multiblock {
+                IndexType::Multiblock
+            } else {
+                IndexType::SingleFilePerBlock
+            },
             reserved0: 0,
             header_crc32c: 0,
         };
@@ -1202,14 +1374,21 @@ impl MarWriter {
             posix_entries.push(fd.posix.clone());
             symlink_targets.push(fd.symlink_target.clone());
             all_spans.push(fd.spans.clone());
-            if assume_all_hashes && self.options.compute_hashes && fd.entry.entry_type == EntryType::RegularFile && fd.entry.logical_size > 0 {
+            if assume_all_hashes
+                && self.options.compute_hashes
+                && fd.entry.entry_type == EntryType::RegularFile
+                && fd.entry.logical_size > 0
+            {
                 hashes.push(Some([0u8; 32]));
             } else {
                 hashes.push(fd.hash);
             }
         }
 
-        let name_format = self.options.name_table_format.unwrap_or_else(|| recommend_format(&names));
+        let name_format = self
+            .options
+            .name_table_format
+            .unwrap_or_else(|| recommend_format(&names));
         let name_data = write_name_table(&names, name_format);
 
         // Serialize file table
@@ -1227,8 +1406,16 @@ impl MarWriter {
             data: Vec<u8>,
         }
         let mut sections: Vec<Sec> = Vec::new();
-        sections.push(Sec { stype: section_type::NAME_TABLE, flags: name_format as u32, data: name_data });
-        sections.push(Sec { stype: section_type::FILE_TABLE, flags: 0, data: file_data });
+        sections.push(Sec {
+            stype: section_type::NAME_TABLE,
+            flags: name_format as u32,
+            data: name_data,
+        });
+        sections.push(Sec {
+            stype: section_type::FILE_TABLE,
+            flags: 0,
+            data: file_data,
+        });
 
         if self.options.multiblock {
             let mut spans_data = Vec::new();
@@ -1252,7 +1439,11 @@ impl MarWriter {
                     spans_data.extend_from_slice(&sbuf);
                 }
             }
-            sections.push(Sec { stype: section_type::FILE_SPANS, flags: 0, data: spans_data });
+            sections.push(Sec {
+                stype: section_type::FILE_SPANS,
+                flags: 0,
+                data: spans_data,
+            });
         }
 
         if !block_table.is_empty() {
@@ -1263,7 +1454,11 @@ impl MarWriter {
                 b.write(&mut bbuf);
                 bdata.extend_from_slice(&bbuf);
             }
-            sections.push(Sec { stype: section_type::BLOCK_TABLE, flags: 0, data: bdata });
+            sections.push(Sec {
+                stype: section_type::BLOCK_TABLE,
+                flags: 0,
+                data: bdata,
+            });
         }
 
         if self.options.include_posix {
@@ -1274,14 +1469,18 @@ impl MarWriter {
                 p.write(&mut pbuf);
                 pdata.extend_from_slice(&pbuf);
             }
-            sections.push(Sec { stype: section_type::POSIX_META, flags: 0, data: pdata });
+            sections.push(Sec {
+                stype: section_type::POSIX_META,
+                flags: 0,
+                data: pdata,
+            });
         }
 
         if symlink_targets.iter().any(|t| t.is_some()) {
             let mut sdata = Vec::new();
             let fc = symlink_targets.len();
             sdata.extend_from_slice(&(fc as u32).to_le_bytes());
-            let bitset_size = (fc + 7) / 8;
+            let bitset_size = fc.div_ceil(8);
             let mut bitset = vec![0u8; bitset_size];
             for (i, t) in symlink_targets.iter().enumerate() {
                 if t.is_some() {
@@ -1289,13 +1488,15 @@ impl MarWriter {
                 }
             }
             sdata.extend_from_slice(&bitset);
-            for t in &symlink_targets {
-                if let Some(target) = t {
-                    sdata.extend_from_slice(&(target.len() as u32).to_le_bytes());
-                    sdata.extend_from_slice(target.as_bytes());
-                }
+            for target in symlink_targets.iter().flatten() {
+                sdata.extend_from_slice(&(target.len() as u32).to_le_bytes());
+                sdata.extend_from_slice(target.as_bytes());
             }
-            sections.push(Sec { stype: section_type::SYMLINK_TARGETS, flags: 0, data: sdata });
+            sections.push(Sec {
+                stype: section_type::SYMLINK_TARGETS,
+                flags: 0,
+                data: sdata,
+            });
         }
 
         if self.options.compute_hashes {
@@ -1306,7 +1507,7 @@ impl MarWriter {
             hdata.push(32u8); // hash_len
             hdata.extend_from_slice(&[0u8; 2]); // Reserved
 
-            let bitset_size = (fc + 7) / 8;
+            let bitset_size = fc.div_ceil(8);
             let mut bitset = vec![0u8; bitset_size];
             for (i, h) in hashes.iter().enumerate() {
                 if h.is_some() {
@@ -1314,12 +1515,14 @@ impl MarWriter {
                 }
             }
             hdata.extend_from_slice(&bitset);
-            for h in &hashes {
-                if let Some(hash) = h {
-                    hdata.extend_from_slice(hash);
-                }
+            for hash in hashes.iter().flatten() {
+                hdata.extend_from_slice(hash);
             }
-            sections.push(Sec { stype: section_type::FILE_HASHES, flags: 0, data: hdata });
+            sections.push(Sec {
+                stype: section_type::FILE_HASHES,
+                flags: 0,
+                data: hdata,
+            });
         }
 
         // Assemble meta

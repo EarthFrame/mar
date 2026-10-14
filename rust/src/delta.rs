@@ -1,5 +1,5 @@
 use crate::checksum::XXHash3_64;
-use crate::format::{DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, EntryType, PosixEntry};
+use crate::format::{EntryType, PosixEntry, DEFAULT_DIR_MODE, DEFAULT_FILE_MODE};
 use crate::reader::MarReader;
 use crate::writer::{MarWriter, WriteOptions};
 use std::collections::HashMap;
@@ -17,8 +17,10 @@ pub enum DeltaJoin {
     Outer, // Symmetric difference: Added + Modified in target, plus Deleted in source
 }
 
-impl DeltaJoin {
-    pub fn from_str(s: &str) -> Result<Self, String> {
+impl std::str::FromStr for DeltaJoin {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_ascii_lowercase().as_str() {
             "right" => Ok(DeltaJoin::Right),
             "left" => Ok(DeltaJoin::Left),
@@ -176,19 +178,28 @@ pub fn create_delta_archives(
     match join {
         DeltaJoin::Right => {
             // Target perspective: Added + Modified in target
-            for &t_idx in target_added_indices.iter().chain(target_modified_indices.iter()) {
+            for &t_idx in target_added_indices
+                .iter()
+                .chain(target_modified_indices.iter())
+            {
                 add_reader_entry_to_writer(&mut writer, target, t_idx)?;
             }
         }
         DeltaJoin::Left => {
             // Source perspective: Deleted + Modified in source
-            for &s_idx in source_deleted_indices.iter().chain(source_modified_indices.iter()) {
+            for &s_idx in source_deleted_indices
+                .iter()
+                .chain(source_modified_indices.iter())
+            {
                 add_reader_entry_to_writer(&mut writer, source, s_idx)?;
             }
         }
         DeltaJoin::Outer => {
             // Symmetric difference: Added + Modified in target, plus Deleted in source
-            for &t_idx in target_added_indices.iter().chain(target_modified_indices.iter()) {
+            for &t_idx in target_added_indices
+                .iter()
+                .chain(target_modified_indices.iter())
+            {
                 add_reader_entry_to_writer(&mut writer, target, t_idx)?;
             }
             for &s_idx in &source_deleted_indices {
@@ -232,7 +243,10 @@ pub fn create_delta_dir(
     let mut stats = DeltaStatistics::default();
 
     if !target_dir.exists() {
-        return Err(format!("Target directory not found: {}", target_dir.display()));
+        return Err(format!(
+            "Target directory not found: {}",
+            target_dir.display()
+        ));
     }
 
     // Compute prefix:
@@ -267,7 +281,12 @@ pub fn create_delta_dir(
 
     // Collect all entries from filesystem
     let mut fs_entries = Vec::new();
-    collect_fs_entries(&target_dir_canon, &target_dir_canon, &prefix, &mut fs_entries)?;
+    collect_fs_entries(
+        &target_dir_canon,
+        &target_dir_canon,
+        &prefix,
+        &mut fs_entries,
+    )?;
 
     let mut fs_map = HashMap::with_capacity(fs_entries.len());
     for (i, entry) in fs_entries.iter().enumerate() {
@@ -300,7 +319,8 @@ pub fn create_delta_dir(
                             is_modified = true;
                         } else {
                             // Check mtime
-                            let s_mtime = source.get_posix_meta(s_idx).map(|p| p.mtime).unwrap_or(0);
+                            let s_mtime =
+                                source.get_posix_meta(s_idx).map(|p| p.mtime).unwrap_or(0);
                             if s_mtime != 0 && fs_item.mtime != 0 && s_mtime != fs_item.mtime {
                                 is_modified = true;
                             } else if source.has_hashes() {
@@ -316,9 +336,11 @@ pub fn create_delta_dir(
                             } else {
                                 // Content fallback
                                 if let Ok(mut f) = File::open(&fs_item.disk_path) {
-                                    let mut fs_data = Vec::with_capacity(fs_item.logical_size as usize);
+                                    let mut fs_data =
+                                        Vec::with_capacity(fs_item.logical_size as usize);
                                     if f.read_to_end(&mut fs_data).is_ok() {
-                                        let s_data = source.read_file_by_index(s_idx).unwrap_or_default();
+                                        let s_data =
+                                            source.read_file_by_index(s_idx).unwrap_or_default();
                                         if fs_data != s_data {
                                             is_modified = true;
                                         }
@@ -377,7 +399,10 @@ pub fn create_delta_dir(
             }
         }
         DeltaJoin::Left => {
-            for &s_idx in source_deleted_indices.iter().chain(source_modified_indices.iter()) {
+            for &s_idx in source_deleted_indices
+                .iter()
+                .chain(source_modified_indices.iter())
+            {
                 add_reader_entry_to_writer(&mut writer, source, s_idx)?;
             }
         }
@@ -434,14 +459,16 @@ fn collect_fs_entries(
         return Err("Operation cancelled by user".to_string());
     }
 
-    let entries = fs::read_dir(current).map_err(|e| format!("Failed to read {}: {}", current.display(), e))?;
+    let entries = fs::read_dir(current)
+        .map_err(|e| format!("Failed to read {}: {}", current.display(), e))?;
     for entry_res in entries {
         if crate::is_interrupted() {
             return Err("Operation cancelled by user".to_string());
         }
         let entry = entry_res.map_err(|e| e.to_string())?;
         let path = entry.path();
-        let meta = fs::symlink_metadata(&path).map_err(|e| format!("Stat failed on {}: {}", path.display(), e))?;
+        let meta = fs::symlink_metadata(&path)
+            .map_err(|e| format!("Stat failed on {}: {}", path.display(), e))?;
 
         let rel = path
             .strip_prefix(root)
@@ -460,7 +487,11 @@ fn collect_fs_entries(
             meta.permissions().mode()
         };
         #[cfg(not(unix))]
-        let mode = if meta.is_dir() { DEFAULT_DIR_MODE } else { DEFAULT_FILE_MODE };
+        let mode = if meta.is_dir() {
+            DEFAULT_DIR_MODE
+        } else {
+            DEFAULT_FILE_MODE
+        };
 
         let mtime = meta
             .modified()
@@ -564,32 +595,17 @@ fn add_reader_entry_to_writer(
     Ok(())
 }
 
-fn add_fs_entry_to_writer(
-    writer: &mut MarWriter,
-    entry: &FsScanEntry,
-) -> Result<(), String> {
+fn add_fs_entry_to_writer(writer: &mut MarWriter, entry: &FsScanEntry) -> Result<(), String> {
     match entry.entry_type {
         EntryType::RegularFile => {
-            writer.add_file(
-                &entry.disk_path.to_string_lossy(),
-                &entry.archive_name,
-            )?;
+            writer.add_file(&entry.disk_path.to_string_lossy(), &entry.archive_name)?;
         }
         EntryType::Directory => {
-            writer.add_directory_entry(
-                &entry.archive_name,
-                entry.mode,
-                entry.mtime,
-            );
+            writer.add_directory_entry(&entry.archive_name, entry.mode, entry.mtime);
         }
         EntryType::Symlink => {
             if let Some(ref tgt) = entry.symlink_target {
-                writer.add_symlink(
-                    &entry.archive_name,
-                    tgt,
-                    entry.mode,
-                    entry.mtime,
-                );
+                writer.add_symlink(&entry.archive_name, tgt, entry.mode, entry.mtime);
             }
         }
         _ => {}

@@ -53,7 +53,10 @@ pub fn compare_archives(source: &MarReader, target: &MarReader) -> (DiffStatisti
     let mut target_map: HashMap<String, (usize, u64, String)> = HashMap::new();
     for (i, name) in target_names.iter().enumerate() {
         if let Some(entry) = target.get_file_entry(i) {
-            let hash_str = target.get_hash(i).map(|h| hex::encode(&h)).unwrap_or_default();
+            let hash_str = target
+                .get_hash(i)
+                .map(|h| hex::encode(&h))
+                .unwrap_or_default();
             target_map.insert(name.clone(), (i, entry.logical_size, hash_str));
         }
     }
@@ -66,14 +69,21 @@ pub fn compare_archives(source: &MarReader, target: &MarReader) -> (DiffStatisti
         };
 
         let old_size = s_entry.logical_size;
-        let old_hash = source.get_hash(i).map(|h| hex::encode(&h)).unwrap_or_default();
+        let old_hash = source
+            .get_hash(i)
+            .map(|h| hex::encode(&h))
+            .unwrap_or_default();
 
         if let Some(&(_t_idx, new_size, ref new_hash)) = target_map.get(name) {
             let mut modified = old_size != new_size;
-            if !modified && source.has_hashes() && target.has_hashes() && !old_hash.is_empty() && !new_hash.is_empty() {
-                if old_hash != *new_hash {
-                    modified = true;
-                }
+            if !modified
+                && source.has_hashes()
+                && target.has_hashes()
+                && !old_hash.is_empty()
+                && !new_hash.is_empty()
+                && old_hash != *new_hash
+            {
+                modified = true;
             }
 
             if modified {
@@ -118,7 +128,10 @@ pub fn compare_archives(source: &MarReader, target: &MarReader) -> (DiffStatisti
         if !source_set.contains(name) {
             if let Some(t_entry) = target.get_file_entry(i) {
                 let new_size = t_entry.logical_size;
-                let new_hash = target.get_hash(i).map(|h| hex::encode(&h)).unwrap_or_default();
+                let new_hash = target
+                    .get_hash(i)
+                    .map(|h| hex::encode(&h))
+                    .unwrap_or_default();
                 stats.files_added += 1;
                 stats.bytes_added += new_size;
                 diffs.push(FileDiff {
@@ -145,7 +158,8 @@ pub fn print_summary(stats: &DiffStatistics, source_name: &str, target_name: &st
     println!("  Deleted:   {:>6}", stats.files_deleted);
     println!("  Modified:  {:>6}", stats.files_modified);
     println!("  Unchanged: {:>6}", stats.files_unchanged);
-    let total = stats.files_added + stats.files_deleted + stats.files_modified + stats.files_unchanged;
+    let total =
+        stats.files_added + stats.files_deleted + stats.files_modified + stats.files_unchanged;
     println!("  Total:     {:>6}", total);
     println!();
     println!("Size Changes:");
@@ -183,9 +197,16 @@ pub fn print_file_diffs(diffs: &[FileDiff]) {
             DiffType::Modified => {
                 let mut out = format!("M  {}", diff.path);
                 if diff.old_size != diff.new_size {
-                    out.push_str(&format!(" ({} → {})", format_bytes(diff.old_size), format_bytes(diff.new_size)));
+                    out.push_str(&format!(
+                        " ({} → {})",
+                        format_bytes(diff.old_size),
+                        format_bytes(diff.new_size)
+                    ));
                 }
-                if !diff.old_hash.is_empty() && !diff.new_hash.is_empty() && diff.old_hash != diff.new_hash {
+                if !diff.old_hash.is_empty()
+                    && !diff.new_hash.is_empty()
+                    && diff.old_hash != diff.new_hash
+                {
                     let s_old = &diff.old_hash[..diff.old_hash.len().min(8)];
                     let s_new = &diff.new_hash[..diff.new_hash.len().min(8)];
                     out.push_str(&format!(" [{} → {}]", s_old, s_new));

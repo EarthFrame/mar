@@ -92,14 +92,7 @@ fn test_cli_create_codecs_checksums_and_block_modes() {
 
     for (i, (comp, csum, mode)) in combinations.iter().enumerate() {
         let mar_file = dir.join(format!("test_{}.mar", i));
-        let mut args = vec![
-            "create",
-            "-f",
-            "-c",
-            comp,
-            "--checksum",
-            csum,
-        ];
+        let mut args = vec!["create", "-f", "-c", comp, "--checksum", csum];
         if *mode == "--block-mode" {
             args.push("--block-mode");
             args.push("shared");
@@ -137,11 +130,20 @@ fn test_cli_create_force_and_files_from() {
     assert_ne!(fail_out.status.code(), Some(0));
 
     // Overwrite with -f should succeed
-    run_mar_success(&["create", "-f", mar_path.to_str().unwrap(), f2.to_str().unwrap()]);
+    run_mar_success(&[
+        "create",
+        "-f",
+        mar_path.to_str().unwrap(),
+        f2.to_str().unwrap(),
+    ]);
 
     // Test -T / --files-from
     let list_file = dir.join("files.txt");
-    fs::write(&list_file, format!("{}\n{}\n", f1.to_str().unwrap(), f3.to_str().unwrap())).unwrap();
+    fs::write(
+        &list_file,
+        format!("{}\n{}\n", f1.to_str().unwrap(), f3.to_str().unwrap()),
+    )
+    .unwrap();
 
     let mar_from_list = dir.join("list.mar");
     run_mar_success(&[
@@ -170,7 +172,12 @@ fn test_cli_extract_strip_components_and_selective() {
     fs::write(src.join("other.txt"), b"Other content").unwrap();
 
     let mar_path = dir.join("deep.mar");
-    run_mar_success(&["create", "-f", mar_path.to_str().unwrap(), dir.join("deep").to_str().unwrap()]);
+    run_mar_success(&[
+        "create",
+        "-f",
+        mar_path.to_str().unwrap(),
+        dir.join("deep").to_str().unwrap(),
+    ]);
 
     // 1. Selective extraction
     let selective_dir = dir.join("selective");
@@ -209,7 +216,13 @@ fn test_cli_list_table_json_and_nometa() {
     fs::write(&f2, b"Beta 456789").unwrap();
 
     let mar_path = dir.join("archive.mar");
-    run_mar_success(&["create", "-f", mar_path.to_str().unwrap(), f1.to_str().unwrap(), f2.to_str().unwrap()]);
+    run_mar_success(&[
+        "create",
+        "-f",
+        mar_path.to_str().unwrap(),
+        f1.to_str().unwrap(),
+        f2.to_str().unwrap(),
+    ]);
 
     // 1. Standard list
     let out_plain = run_mar_success(&["list", mar_path.to_str().unwrap()]);
@@ -250,7 +263,12 @@ fn test_cli_get_and_cat_commands() {
     fs::write(&f2, b"Notebook entries").unwrap();
 
     let mar_path = dir.join("archive.mar");
-    run_mar_success(&["create", "-f", mar_path.to_str().unwrap(), src_dir.to_str().unwrap()]);
+    run_mar_success(&[
+        "create",
+        "-f",
+        mar_path.to_str().unwrap(),
+        src_dir.to_str().unwrap(),
+    ]);
 
     // 1. get to stdout
     let get_out = run_mar_success(&["get", "-c", mar_path.to_str().unwrap(), "src/doc.txt"]);
@@ -258,8 +276,17 @@ fn test_cli_get_and_cat_commands() {
 
     // 2. get -o to directory
     let get_dir = dir.join("get_target");
-    run_mar_success(&["get", "-o", get_dir.to_str().unwrap(), mar_path.to_str().unwrap(), "src/notes.txt"]);
-    assert_eq!(fs::read(get_dir.join("src/notes.txt")).unwrap(), b"Notebook entries");
+    run_mar_success(&[
+        "get",
+        "-o",
+        get_dir.to_str().unwrap(),
+        mar_path.to_str().unwrap(),
+        "src/notes.txt",
+    ]);
+    assert_eq!(
+        fs::read(get_dir.join("src/notes.txt")).unwrap(),
+        b"Notebook entries"
+    );
 
     // 3. get with --json
     let get_json = run_mar_success(&["get", "--json", mar_path.to_str().unwrap(), "src/doc.txt"]);
@@ -273,7 +300,13 @@ fn test_cli_get_and_cat_commands() {
 
     // 5. cat -o to file
     let cat_file = dir.join("cat_out.txt");
-    run_mar_success(&["cat", "-o", cat_file.to_str().unwrap(), mar_path.to_str().unwrap(), "src/doc.txt"]);
+    run_mar_success(&[
+        "cat",
+        "-o",
+        cat_file.to_str().unwrap(),
+        mar_path.to_str().unwrap(),
+        "src/doc.txt",
+    ]);
     assert_eq!(fs::read(&cat_file).unwrap(), b"Documentation content");
 
     // 6. cat --fmt json --all
@@ -303,8 +336,18 @@ fn test_cli_diff_command() {
 
     let mar1 = dir.join("v1.mar");
     let mar2 = dir.join("v2.mar");
-    run_mar_success(&["create", "-f", mar1.to_str().unwrap(), src1.to_str().unwrap()]);
-    run_mar_success(&["create", "-f", mar2.to_str().unwrap(), src2.to_str().unwrap()]);
+    run_mar_success(&[
+        "create",
+        "-f",
+        mar1.to_str().unwrap(),
+        src1.to_str().unwrap(),
+    ]);
+    run_mar_success(&[
+        "create",
+        "-f",
+        mar2.to_str().unwrap(),
+        src2.to_str().unwrap(),
+    ]);
 
     // 1. Identical diff
     let same_diff = run_mar_success(&["diff", mar1.to_str().unwrap(), mar1.to_str().unwrap()]);
@@ -322,7 +365,8 @@ fn test_cli_diff_command() {
     assert!(sum_txt.contains("Modified:       1"));
 
     // 3. Detailed delta diff (-d)
-    let delta_diff = run_mar_success(&["diff", "-d", mar1.to_str().unwrap(), mar2.to_str().unwrap()]);
+    let delta_diff =
+        run_mar_success(&["diff", "-d", mar1.to_str().unwrap(), mar2.to_str().unwrap()]);
     let d_txt = String::from_utf8_lossy(&delta_diff.stdout);
     assert!(d_txt.contains("A  data/added.txt"));
     assert!(d_txt.contains("D  data/deleted.txt"));
@@ -348,8 +392,18 @@ fn test_cli_delta_command() {
 
     let mar1 = dir.join("v1.mar");
     let mar2 = dir.join("v2.mar");
-    run_mar_success(&["create", "-f", mar1.to_str().unwrap(), src1.to_str().unwrap()]);
-    run_mar_success(&["create", "-f", mar2.to_str().unwrap(), src2.to_str().unwrap()]);
+    run_mar_success(&[
+        "create",
+        "-f",
+        mar1.to_str().unwrap(),
+        src1.to_str().unwrap(),
+    ]);
+    run_mar_success(&[
+        "create",
+        "-f",
+        mar2.to_str().unwrap(),
+        src2.to_str().unwrap(),
+    ]);
 
     // 1. Archive-to-archive delta (default join: right)
     let delta_arc = dir.join("delta_arc.mar");
@@ -421,7 +475,12 @@ fn test_cli_slice_command() {
     fs::write(src.join("script.rs"), b"fn main() {}").unwrap();
 
     let mar_full = dir.join("full.mar");
-    run_mar_success(&["create", "-f", mar_full.to_str().unwrap(), src.to_str().unwrap()]);
+    run_mar_success(&[
+        "create",
+        "-f",
+        mar_full.to_str().unwrap(),
+        src.to_str().unwrap(),
+    ]);
 
     // 1. Slice by include pattern -i
     let mar_sliced = dir.join("sliced.mar");
@@ -488,7 +547,11 @@ fn test_cli_redact_command() {
     let src = dir.join("src");
     fs::create_dir_all(&src).unwrap();
 
-    fs::write(src.join("confidential.txt"), b"Top secret classified content").unwrap();
+    fs::write(
+        src.join("confidential.txt"),
+        b"Top secret classified content",
+    )
+    .unwrap();
     fs::write(src.join("public.txt"), b"Public open content").unwrap();
 
     let mar_orig = dir.join("orig.mar");
@@ -515,7 +578,11 @@ fn test_cli_redact_command() {
     run_mar_success(&["validate", mar_redacted.to_str().unwrap()]);
 
     // Verify confidential content is redacted (empty output)
-    let cat_conf = run_mar_success(&["cat", mar_redacted.to_str().unwrap(), "src/confidential.txt"]);
+    let cat_conf = run_mar_success(&[
+        "cat",
+        mar_redacted.to_str().unwrap(),
+        "src/confidential.txt",
+    ]);
     assert_eq!(cat_conf.stdout, b"");
 
     // Verify public content is intact
@@ -525,10 +592,16 @@ fn test_cli_redact_command() {
     // 2. In-place redaction (-I)
     let mar_inplace = dir.join("inplace.mar");
     fs::copy(&mar_orig, &mar_inplace).unwrap();
-    run_mar_success(&["redact", "-I", mar_inplace.to_str().unwrap(), "src/confidential.txt"]);
+    run_mar_success(&[
+        "redact",
+        "-I",
+        mar_inplace.to_str().unwrap(),
+        "src/confidential.txt",
+    ]);
     run_mar_success(&["validate", mar_inplace.to_str().unwrap()]);
 
-    let cat_in_conf = run_mar_success(&["cat", mar_inplace.to_str().unwrap(), "src/confidential.txt"]);
+    let cat_in_conf =
+        run_mar_success(&["cat", mar_inplace.to_str().unwrap(), "src/confidential.txt"]);
     assert_eq!(cat_in_conf.stdout, b"");
 
     let _ = fs::remove_dir_all(&dir);
@@ -585,7 +658,12 @@ fn test_cli_header_and_hash_commands() {
 
     fs::write(src.join("info.txt"), b"Some header test info").unwrap();
     let mar_path = dir.join("archive.mar");
-    run_mar_success(&["create", "-f", mar_path.to_str().unwrap(), src.to_str().unwrap()]);
+    run_mar_success(&[
+        "create",
+        "-f",
+        mar_path.to_str().unwrap(),
+        src.to_str().unwrap(),
+    ]);
 
     // 1. Header command
     let header_out = run_mar_success(&["header", mar_path.to_str().unwrap()]);
@@ -603,7 +681,9 @@ fn test_cli_header_and_hash_commands() {
 
     // 3. Hash command - blake3 (64 hex chars)
     let blake_out = run_mar_success(&["hash", "--algo", "blake3", mar_path.to_str().unwrap()]);
-    let blake_txt = String::from_utf8_lossy(&blake_out.stdout).trim().to_string();
+    let blake_txt = String::from_utf8_lossy(&blake_out.stdout)
+        .trim()
+        .to_string();
     assert_eq!(blake_txt.len(), 64);
     assert!(blake_txt.chars().all(|c| c.is_ascii_hexdigit()));
 
@@ -656,8 +736,8 @@ fn test_cli_global_and_subcommand_help() {
 
     // 2. Per-command help for all core subcommands
     let subcommands = [
-        "create", "extract", "list", "get", "cat", "diff", "delta", "slice", "redact",
-        "validate", "header", "hash", "version",
+        "create", "extract", "list", "get", "cat", "diff", "delta", "slice", "redact", "validate",
+        "header", "hash", "version",
     ];
     for cmd in &subcommands {
         let help_out = run_mar_success(&[cmd, "--help"]);
@@ -689,8 +769,8 @@ fn test_cli_usage_errors_exit_code_2() {
 
     // Missing arguments across commands
     let cmds_missing_args = [
-        "create", "extract", "list", "get", "cat", "diff", "delta", "slice", "redact",
-        "validate", "header", "hash",
+        "create", "extract", "list", "get", "cat", "diff", "delta", "slice", "redact", "validate",
+        "header", "hash",
     ];
     for cmd in &cmds_missing_args {
         let out = run_mar(&[cmd]);
@@ -750,14 +830,17 @@ fn test_cli_enterprise_delegations() {
 
     for cmd in &["index", "search", "okf"] {
         let out = std::process::Command::new(mar_bin)
-            .args(&[cmd, "--sample-flag", "sample-target"])
+            .args([*cmd, "--sample-flag", "sample-target"])
             .env("MAR_ENTERPRISE_BIN", &mock_bin)
             .output()
             .unwrap();
 
         assert_eq!(out.status.code(), Some(0));
         let stdout = String::from_utf8_lossy(&out.stdout);
-        assert!(stdout.contains(&format!("MOCK_ENTERPRISE: {} --sample-flag sample-target", cmd)));
+        assert!(stdout.contains(&format!(
+            "MOCK_ENTERPRISE: {} --sample-flag sample-target",
+            cmd
+        )));
     }
 
     let _ = fs::remove_dir_all(&dir);
@@ -829,11 +912,7 @@ fn test_cli_slice_files_from_literal_and_brackets() {
 
     // 3. Test directory prefix in literal list file
     let dir_list_file = dir.join("dir_list.txt");
-    fs::write(
-        &dir_list_file,
-        "src/organized/03 - Business Code [BC]/\n",
-    )
-    .unwrap();
+    fs::write(&dir_list_file, "src/organized/03 - Business Code [BC]/\n").unwrap();
 
     let dir_sliced_mar = dir.join("dir_sliced.mar");
     run_mar_success(&[

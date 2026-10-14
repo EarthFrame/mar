@@ -126,9 +126,14 @@ impl<'a> PositionalWriter<'a> {
         {
             let mut written = 0;
             while written < buf.len() {
-                let n = self.file.seek_write(&buf[written..], offset + written as u64)?;
+                let n = self
+                    .file
+                    .seek_write(&buf[written..], offset + written as u64)?;
                 if n == 0 {
-                    return Err(io::Error::new(io::ErrorKind::WriteZero, "failed to write any bytes"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        "failed to write any bytes",
+                    ));
                 }
                 written += n;
             }
@@ -162,9 +167,14 @@ impl<'a> PositionalReader<'a> {
         {
             let mut read = 0;
             while read < buf.len() {
-                let n = self.file.seek_read(&mut buf[read..], offset + read as u64)?;
+                let n = self
+                    .file
+                    .seek_read(&mut buf[read..], offset + read as u64)?;
                 if n == 0 {
-                    return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "unexpected EOF"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "unexpected EOF",
+                    ));
                 }
                 read += n;
             }

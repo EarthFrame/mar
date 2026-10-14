@@ -714,7 +714,7 @@ uninstall:
 
 # Clean
 clean:
-	rm -rf $(BUILD_DIR) $(DIST_DIR) mar mar-rust mar-cpp $(TEST_TARGET) python/pymar/_mar.so pymar/pymar/_mar.so 2>/dev/null || true
+	rm -rf $(BUILD_DIR) $(DIST_DIR) mar mar-rust mar-cpp $(TEST_TARGET) python/pymar/_mar.so 2>/dev/null || true
 	cargo clean --manifest-path rust/Cargo.toml
 	cargo clean --manifest-path python/Cargo.toml
 

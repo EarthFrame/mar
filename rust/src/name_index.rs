@@ -1,10 +1,7 @@
 use crate::format::NameTableFormat;
 
 pub fn common_prefix_len(a: &str, b: &str) -> usize {
-    a.bytes()
-        .zip(b.bytes())
-        .take_while(|(x, y)| x == y)
-        .count()
+    a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
 }
 
 pub fn recommend_format(names: &[String]) -> NameTableFormat {
@@ -79,8 +76,10 @@ pub fn read_name_table(data: &[u8], format: NameTableFormat) -> Result<Vec<Strin
                 if pos + 4 > data.len() {
                     return Err("FRONT_CODED truncated".to_string());
                 }
-                let prefix_len = u16::from_le_bytes(data[pos..pos + 2].try_into().unwrap()) as usize;
-                let suffix_len = u16::from_le_bytes(data[pos + 2..pos + 4].try_into().unwrap()) as usize;
+                let prefix_len =
+                    u16::from_le_bytes(data[pos..pos + 2].try_into().unwrap()) as usize;
+                let suffix_len =
+                    u16::from_le_bytes(data[pos + 2..pos + 4].try_into().unwrap()) as usize;
                 pos += 4;
 
                 if pos + suffix_len > data.len() {
@@ -234,13 +233,17 @@ fn deserialize_trie_node(data: &[u8], pos: &mut usize) -> Result<TrieNode, Strin
         for _ in 0..child_count {
             let label_len = match label_encoding {
                 1 => {
-                    if *pos >= data.len() { return Err("Label length truncated".to_string()); }
+                    if *pos >= data.len() {
+                        return Err("Label length truncated".to_string());
+                    }
                     let l = data[*pos] as usize;
                     *pos += 1;
                     l
                 }
                 2 => {
-                    if *pos + 2 > data.len() { return Err("Label length truncated".to_string()); }
+                    if *pos + 2 > data.len() {
+                        return Err("Label length truncated".to_string());
+                    }
                     let l = (data[*pos] as usize) | ((data[*pos + 1] as usize) << 8);
                     *pos += 2;
                     l
@@ -261,7 +264,10 @@ fn deserialize_trie_node(data: &[u8], pos: &mut usize) -> Result<TrieNode, Strin
         }
     }
 
-    Ok(TrieNode { file_index, children })
+    Ok(TrieNode {
+        file_index,
+        children,
+    })
 }
 
 fn collect_trie_names(node: &TrieNode, prefix: &str, out: &mut [String]) {
@@ -281,7 +287,10 @@ fn collect_trie_names(node: &TrieNode, prefix: &str, out: &mut [String]) {
 }
 
 fn build_trie(names: &[String]) -> TrieNode {
-    let mut root = TrieNode { file_index: None, children: Vec::new() };
+    let mut root = TrieNode {
+        file_index: None,
+        children: Vec::new(),
+    };
     for (idx, path) in names.iter().enumerate() {
         let mut curr = &mut root;
         let mut start = 0;
@@ -297,7 +306,13 @@ fn build_trie(names: &[String]) -> TrieNode {
                     let next_idx = match found_idx {
                         Some(fidx) => fidx,
                         None => {
-                            curr.children.push((segment.to_string(), TrieNode { file_index: None, children: Vec::new() }));
+                            curr.children.push((
+                                segment.to_string(),
+                                TrieNode {
+                                    file_index: None,
+                                    children: Vec::new(),
+                                },
+                            ));
                             curr.children.len() - 1
                         }
                     };
@@ -307,7 +322,13 @@ fn build_trie(names: &[String]) -> TrieNode {
             }
         }
         if !any_segments {
-            curr.children.push((String::new(), TrieNode { file_index: None, children: Vec::new() }));
+            curr.children.push((
+                String::new(),
+                TrieNode {
+                    file_index: None,
+                    children: Vec::new(),
+                },
+            ));
             let last = curr.children.len() - 1;
             curr = &mut curr.children[last].1;
         }

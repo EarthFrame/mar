@@ -4,7 +4,7 @@
 	dh $@
 
 override_dh_auto_build:
-	$(MAKE) BUILD=release
+	$(MAKE) mar
 
 override_dh_auto_install:
 	$(MAKE) install DESTDIR=debian/mar PREFIX=/usr

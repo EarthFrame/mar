@@ -45,34 +45,22 @@ sed -i.bak \
 rm -f "$REPO_ROOT/rust/src/format.rs.bak"
 echo "✓ Updated rust/src/format.rs"
 
-# 4. Rust CLI Version (rust/src/bin/main.rs and pymar/src/bin/main.rs)
+# 4. Rust CLI Version (rust/src/bin/main.rs)
 sed -i.bak "s/const TOOL_VERSION: &str = \"[0-9]*\.[0-9]*\.[0-9]*\";/const TOOL_VERSION: &str = \"$NEW_VERSION\";/" "$REPO_ROOT/rust/src/bin/main.rs"
 rm -f "$REPO_ROOT/rust/src/bin/main.rs.bak"
-if [ -f "$REPO_ROOT/pymar/src/bin/main.rs" ]; then
-    sed -i.bak "s/const TOOL_VERSION: &str = \"[0-9]*\.[0-9]*\.[0-9]*\";/const TOOL_VERSION: &str = \"$NEW_VERSION\";/" "$REPO_ROOT/pymar/src/bin/main.rs"
-    rm -f "$REPO_ROOT/pymar/src/bin/main.rs.bak"
-fi
-echo "✓ Updated Rust main.rs binaries"
+echo "✓ Updated Rust main.rs binary"
 
-# 5. Cargo crates (rust/Cargo.toml, python/Cargo.toml, pymar/Cargo.toml)
+# 5. Cargo crates (rust/Cargo.toml, python/Cargo.toml)
 sed -i.bak "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$NEW_VERSION\"/" "$REPO_ROOT/rust/Cargo.toml"
 rm -f "$REPO_ROOT/rust/Cargo.toml.bak"
 sed -i.bak "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$NEW_VERSION\"/" "$REPO_ROOT/python/Cargo.toml"
 rm -f "$REPO_ROOT/python/Cargo.toml.bak"
-if [ -f "$REPO_ROOT/pymar/Cargo.toml" ]; then
-    sed -i.bak "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$NEW_VERSION\"/" "$REPO_ROOT/pymar/Cargo.toml"
-    rm -f "$REPO_ROOT/pymar/Cargo.toml.bak"
-fi
 echo "✓ Updated Cargo.toml files"
 
-# 6. Python packaging (python/pyproject.toml, pymar/pyproject.toml)
+# 6. Python packaging (python/pyproject.toml)
 sed -i.bak "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$NEW_VERSION\"/" "$REPO_ROOT/python/pyproject.toml"
 rm -f "$REPO_ROOT/python/pyproject.toml.bak"
-if [ -f "$REPO_ROOT/pymar/pyproject.toml" ]; then
-    sed -i.bak "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$NEW_VERSION\"/" "$REPO_ROOT/pymar/pyproject.toml"
-    rm -f "$REPO_ROOT/pymar/pyproject.toml.bak"
-fi
-echo "✓ Updated pyproject.toml files"
+echo "✓ Updated pyproject.toml file"
 
 # 7. Dockerfile (docker/Dockerfile)
 sed -i.bak "s/^ARG VERSION=[0-9]*\.[0-9]*\.[0-9]*/ARG VERSION=$NEW_VERSION/" "$REPO_ROOT/docker/Dockerfile"

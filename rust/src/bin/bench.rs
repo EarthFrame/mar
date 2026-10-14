@@ -72,9 +72,11 @@ fn main() {
     match cmd.as_str() {
         "create" => {
             let input_dir = &args[3];
-            let mut opts = WriteOptions::default();
-            opts.compression = CompressionAlgo::Zstd;
-            opts.compression_level = 3;
+            let mut opts = WriteOptions {
+                compression: CompressionAlgo::Zstd,
+                compression_level: 3,
+                ..Default::default()
+            };
             if args.len() > 4 {
                 if let Ok(t) = args[4].parse::<usize>() {
                     opts.num_threads = t;
@@ -113,8 +115,12 @@ fn main() {
         "get" => {
             // Read list of files from stdin or argument file
             let file_list_path = &args[3];
-            let list_content = fs::read_to_string(file_list_path).expect("Failed to read file list");
-            let files: Vec<&str> = list_content.lines().filter(|l| !l.trim().is_empty()).collect();
+            let list_content =
+                fs::read_to_string(file_list_path).expect("Failed to read file list");
+            let files: Vec<&str> = list_content
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .collect();
 
             let reader = MarReader::open(archive_path).expect("Failed to open archive");
             let start = Instant::now();

@@ -131,9 +131,15 @@ fn test_delta_archives_left_and_outer_join() {
     assert!(r_outer.find_file("c.txt").is_some());
     assert!(r_outer.find_file("d.txt").is_some());
     assert!(r_outer.find_file("a.txt").is_none());
-    assert_eq!(r_outer.read_file_by_name("b.txt").unwrap(), b"file b target");
+    assert_eq!(
+        r_outer.read_file_by_name("b.txt").unwrap(),
+        b"file b target"
+    );
     assert_eq!(r_outer.read_file_by_name("c.txt").unwrap(), b"file c base");
-    assert_eq!(r_outer.read_file_by_name("d.txt").unwrap(), b"file d target");
+    assert_eq!(
+        r_outer.read_file_by_name("d.txt").unwrap(),
+        b"file d target"
+    );
 
     let _ = fs::remove_dir_all(&test_dir);
 }
@@ -162,8 +168,14 @@ fn test_delta_archive_to_directory_snapshot() {
         use std::ffi::CString;
         let c_path = CString::new(live_dir.join("f1.txt").to_str().unwrap()).unwrap();
         let times = [
-            libc::timespec { tv_sec: 1000, tv_nsec: 0 },
-            libc::timespec { tv_sec: 1000, tv_nsec: 0 },
+            libc::timespec {
+                tv_sec: 1000,
+                tv_nsec: 0,
+            },
+            libc::timespec {
+                tv_sec: 1000,
+                tv_nsec: 0,
+            },
         ];
         unsafe {
             libc::utimensat(libc::AT_FDCWD, c_path.as_ptr(), times.as_ptr(), 0);
@@ -195,8 +207,14 @@ fn test_delta_archive_to_directory_snapshot() {
     assert!(delta_reader.find_file("f1.txt").is_none());
     assert!(delta_reader.find_file("f3.txt").is_none());
 
-    assert_eq!(delta_reader.read_file_by_name("f2.txt").unwrap(), b"v2 updated data!");
-    assert_eq!(delta_reader.read_file_by_name("f4.txt").unwrap(), b"brand new file");
+    assert_eq!(
+        delta_reader.read_file_by_name("f2.txt").unwrap(),
+        b"v2 updated data!"
+    );
+    assert_eq!(
+        delta_reader.read_file_by_name("f4.txt").unwrap(),
+        b"brand new file"
+    );
 
     let _ = fs::remove_dir_all(&test_dir);
 }
@@ -243,7 +261,9 @@ fn test_delta_preserves_posix_metadata_and_mtime() {
 
     // Extract delta and verify extraction maintains file attributes
     let ext_dir = test_dir.join("extracted");
-    delta_reader.extract(ext_dir.to_str().unwrap(), None).unwrap();
+    delta_reader
+        .extract(ext_dir.to_str().unwrap(), None)
+        .unwrap();
 
     let ext_doc = ext_dir.join("doc.txt");
     assert_eq!(fs::read(&ext_doc).unwrap(), b"version 2.0 with updates");
@@ -253,8 +273,13 @@ fn test_delta_preserves_posix_metadata_and_mtime() {
         use std::os::unix::fs::PermissionsExt;
         let perm = fs::metadata(&ext_doc).unwrap().permissions();
         assert_eq!(perm.mode() & 0o777, 0o755);
-        let mtime = fs::metadata(&ext_doc).unwrap().modified().unwrap()
-            .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let mtime = fs::metadata(&ext_doc)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         assert_eq!(mtime, 1600000000);
     }
 

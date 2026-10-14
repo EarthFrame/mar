@@ -206,7 +206,8 @@ impl AlgebraicFilter {
         let reader: Box<dyn BufRead> = if file_path == "-" {
             Box::new(BufReader::new(io::stdin()))
         } else {
-            let f = File::open(file_path).map_err(|e| format!("Failed to open file {}: {}", file_path, e))?;
+            let f = File::open(file_path)
+                .map_err(|e| format!("Failed to open file {}: {}", file_path, e))?;
             Box::new(BufReader::new(f))
         };
 
@@ -227,7 +228,8 @@ impl AlgebraicFilter {
         let reader: Box<dyn BufRead> = if file_path == "-" {
             Box::new(BufReader::new(io::stdin()))
         } else {
-            let f = File::open(file_path).map_err(|e| format!("Failed to open exclude file {}: {}", file_path, e))?;
+            let f = File::open(file_path)
+                .map_err(|e| format!("Failed to open exclude file {}: {}", file_path, e))?;
             Box::new(BufReader::new(f))
         };
 
@@ -248,7 +250,8 @@ impl AlgebraicFilter {
         let reader: Box<dyn BufRead> = if file_path == "-" {
             Box::new(BufReader::new(io::stdin()))
         } else {
-            let f = File::open(file_path).map_err(|e| format!("Failed to open file {}: {}", file_path, e))?;
+            let f = File::open(file_path)
+                .map_err(|e| format!("Failed to open file {}: {}", file_path, e))?;
             Box::new(BufReader::new(f))
         };
 
@@ -269,7 +272,8 @@ impl AlgebraicFilter {
         let reader: Box<dyn BufRead> = if file_path == "-" {
             Box::new(BufReader::new(io::stdin()))
         } else {
-            let f = File::open(file_path).map_err(|e| format!("Failed to open exclude file {}: {}", file_path, e))?;
+            let f = File::open(file_path)
+                .map_err(|e| format!("Failed to open exclude file {}: {}", file_path, e))?;
             Box::new(BufReader::new(f))
         };
 
@@ -387,7 +391,10 @@ mod tests {
 
     #[test]
     fn test_glob_double_star() {
-        assert!(glob_match("alphafold/**/model.pdb", "alphafold/v4/human/model.pdb"));
+        assert!(glob_match(
+            "alphafold/**/model.pdb",
+            "alphafold/v4/human/model.pdb"
+        ));
         assert!(glob_match("**/model.pdb", "a/b/c/model.pdb"));
         assert!(glob_match("**/model.pdb", "model.pdb"));
         assert!(glob_match("alphafold/**", "alphafold/v4/human/model.pdb"));
@@ -427,13 +434,16 @@ mod tests {
     #[test]
     fn test_literal_filter() {
         let mut filter = AlgebraicFilter::new();
-        filter.add_include_literal("Texas_Statutes/organized/03 - Business and Commerce Code [BC]/");
+        filter
+            .add_include_literal("Texas_Statutes/organized/03 - Business and Commerce Code [BC]/");
         filter.add_include_literal("Texas_Statutes/special [brackets]/doc.pdf");
 
         assert!(filter.matches("Texas_Statutes/organized/03 - Business and Commerce Code [BC]/"));
-        assert!(filter.matches("Texas_Statutes/organized/03 - Business and Commerce Code [BC]/bc.1.pdf"));
+        assert!(filter
+            .matches("Texas_Statutes/organized/03 - Business and Commerce Code [BC]/bc.1.pdf"));
         assert!(filter.matches("Texas_Statutes/special [brackets]/doc.pdf"));
-        assert!(!filter.matches("Texas_Statutes/organized/04 - Business Organizations Code [BO]/bo.1.pdf"));
+        assert!(!filter
+            .matches("Texas_Statutes/organized/04 - Business Organizations Code [BO]/bo.1.pdf"));
         assert!(!filter.matches("Texas_Statutes/special [brackets]/other.pdf"));
     }
 }

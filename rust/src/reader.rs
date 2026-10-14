@@ -9,11 +9,11 @@ use rayon::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
+#[cfg(unix)]
+use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-#[cfg(unix)]
-use std::os::unix::fs::FileExt;
 
 static NEXT_READER_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -48,8 +48,10 @@ pub struct MarReader {
 
 impl MarReader {
     pub fn open(path: &str) -> Result<Self, String> {
-        let file = File::open(path).map_err(|e| format!("Failed to open archive {}: {}", path, e))?;
-        let mmap = unsafe { Mmap::map(&file).map_err(|e| format!("Failed to mmap archive: {}", e))? };
+        let file =
+            File::open(path).map_err(|e| format!("Failed to open archive {}: {}", path, e))?;
+        let mmap =
+            unsafe { Mmap::map(&file).map_err(|e| format!("Failed to mmap archive: {}", e))? };
 
         if mmap.len() < FIXED_HEADER_SIZE {
             return Err("Archive too short for header".to_string());
@@ -61,7 +63,8 @@ impl MarReader {
             return Err("Meta container exceeds archive size".to_string());
         }
 
-        let meta_ptr = &mmap[header.meta_offset as usize..(header.meta_offset + header.meta_stored_size) as usize];
+        let meta_ptr = &mmap
+            [header.meta_offset as usize..(header.meta_offset + header.meta_stored_size) as usize];
         let meta_data = if header.meta_comp_algo == CompressionAlgo::None {
             meta_ptr.to_vec()
         } else {
@@ -79,12 +82,18 @@ impl MarReader {
             if pos + SECTION_ENTRY_SIZE > meta_data.len() {
                 return Err("Truncated section directory".to_string());
             }
-            sections.push(SectionEntry::read(&meta_data[pos..pos + SECTION_ENTRY_SIZE]));
+            sections.push(SectionEntry::read(
+                &meta_data[pos..pos + SECTION_ENTRY_SIZE],
+            ));
             pos += SECTION_ENTRY_SIZE;
         }
 
         let find_section = |st: u32| -> Option<SectionEntry> {
-            sections.iter().rev().find(|s| s.section_type == st).cloned()
+            sections
+                .iter()
+                .rev()
+                .find(|s| s.section_type == st)
+                .cloned()
         };
 
         let get_section_data = |sec: &SectionEntry| -> Result<Vec<u8>, String> {
@@ -136,12 +145,16 @@ impl MarReader {
                 let mut spos = 8;
                 let mut span_starts = Vec::with_capacity(fc as usize);
                 for _ in 0..fc {
-                    span_starts.push(u32::from_le_bytes(spans_data[spos..spos + 4].try_into().unwrap()));
+                    span_starts.push(u32::from_le_bytes(
+                        spans_data[spos..spos + 4].try_into().unwrap(),
+                    ));
                     spos += 4;
                 }
                 let mut span_counts = Vec::with_capacity(fc as usize);
                 for _ in 0..fc {
-                    span_counts.push(u32::from_le_bytes(spans_data[spos..spos + 4].try_into().unwrap()));
+                    span_counts.push(u32::from_le_bytes(
+                        spans_data[spos..spos + 4].try_into().unwrap(),
+                    ));
                     spos += 4;
                 }
                 let mut spans = Vec::with_capacity(total_spans as usize);
@@ -181,7 +194,7 @@ impl MarReader {
             let sdata = get_section_data(&sym_sec)?;
             if sdata.len() >= 4 {
                 let fc = files.len();
-                let bitset_size = (fc + 7) / 8;
+                let bitset_size = fc.div_ceil(8);
                 if sdata.len() >= 4 + bitset_size {
                     let bitset = &sdata[4..4 + bitset_size];
                     let mut spos = 4 + bitset_size;
@@ -191,10 +204,13 @@ impl MarReader {
                         let bit_idx = i % 8;
                         if (bitset[byte_idx] & (1 << bit_idx)) != 0 {
                             if spos + 4 <= sdata.len() {
-                                let tlen = u32::from_le_bytes(sdata[spos..spos + 4].try_into().unwrap()) as usize;
+                                let tlen =
+                                    u32::from_le_bytes(sdata[spos..spos + 4].try_into().unwrap())
+                                        as usize;
                                 spos += 4;
                                 if spos + tlen <= sdata.len() {
-                                    let s = String::from_utf8_lossy(&sdata[spos..spos + tlen]).to_string();
+                                    let s = String::from_utf8_lossy(&sdata[spos..spos + tlen])
+                                        .to_string();
                                     targets.push(Some(s));
                                     spos += tlen;
                                 } else {
@@ -221,7 +237,7 @@ impl MarReader {
                 if let Some(ha) = HashAlgo::from_u8(hdata[4]) {
                     hash_algo = ha;
                 }
-                let bitset_size = (fc + 7) / 8;
+                let bitset_size = fc.div_ceil(8);
                 let bitset = &hdata[8..8 + bitset_size];
                 let mut hpos = 8 + bitset_size;
                 let mut hash_list = Vec::with_capacity(fc);
@@ -261,9 +277,17 @@ impl MarReader {
             let alignment = header.block_alignment();
             let mut offset = header.header_size_bytes;
             let block_count = if header.index_type == IndexType::SingleFilePerBlock {
-                files.iter().filter(|f| f.entry_type == EntryType::RegularFile).count()
+                files
+                    .iter()
+                    .filter(|f| f.entry_type == EntryType::RegularFile)
+                    .count()
             } else if let Some(ref spans) = file_spans {
-                spans.spans.iter().map(|s| s.block_id as usize + 1).max().unwrap_or(0)
+                spans
+                    .spans
+                    .iter()
+                    .map(|s| s.block_id as usize + 1)
+                    .max()
+                    .unwrap_or(0)
             } else {
                 0
             };
@@ -272,7 +296,8 @@ impl MarReader {
                 if (offset + BLOCK_HEADER_SIZE as u64) > mmap.len() as u64 {
                     break;
                 }
-                let bh = BlockHeader::read(&mmap[offset as usize..offset as usize + BLOCK_HEADER_SIZE])?;
+                let bh =
+                    BlockHeader::read(&mmap[offset as usize..offset as usize + BLOCK_HEADER_SIZE])?;
                 block_offsets.push(offset);
                 block_descs.push(BlockDesc {
                     block_offset: offset,
@@ -416,11 +441,15 @@ impl MarReader {
     }
 
     pub fn get_symlink_target(&self, index: usize) -> Option<String> {
-        self.symlink_targets.as_ref().and_then(|t| t.get(index).and_then(|x| x.clone()))
+        self.symlink_targets
+            .as_ref()
+            .and_then(|t| t.get(index).and_then(|x| x.clone()))
     }
 
     pub fn get_hash(&self, index: usize) -> Option<[u8; 32]> {
-        self.hashes.as_ref().and_then(|h| h.get(index).and_then(|x| *x))
+        self.hashes
+            .as_ref()
+            .and_then(|h| h.get(index).and_then(|x| *x))
     }
 
     pub fn has_posix_meta(&self) -> bool {
@@ -470,7 +499,8 @@ impl MarReader {
             return Err("Block header exceeds archive size".to_string());
         }
 
-        let bh = BlockHeader::read(&self.mmap[offset as usize..offset as usize + BLOCK_HEADER_SIZE])?;
+        let bh =
+            BlockHeader::read(&self.mmap[offset as usize..offset as usize + BLOCK_HEADER_SIZE])?;
         let payload_offset = offset as usize + BLOCK_HEADER_SIZE;
         let payload_end = payload_offset + bh.stored_size as usize;
         if payload_end > self.mmap.len() {
@@ -479,10 +509,10 @@ impl MarReader {
 
         let payload = &self.mmap[payload_offset..payload_end];
 
-        if bh.fast_checksum_type != ChecksumType::None {
-            if !verify_fast_checksum(payload, bh.fast_checksum_type, bh.fast_checksum) {
-                return Err("Block checksum mismatch".to_string());
-            }
+        if bh.fast_checksum_type != ChecksumType::None
+            && !verify_fast_checksum(payload, bh.fast_checksum_type, bh.fast_checksum)
+        {
+            return Err("Block checksum mismatch".to_string());
         }
 
         let decompressed = if bh.comp_algo == CompressionAlgo::None || bh.raw_size == 0 {
@@ -564,12 +594,18 @@ impl MarReader {
     }
 
     pub fn read_file_by_name(&self, name: &str) -> Result<Vec<u8>, String> {
-        let found = self.find_file(name).ok_or_else(|| format!("File not found in archive: {}", name))?;
+        let found = self
+            .find_file(name)
+            .ok_or_else(|| format!("File not found in archive: {}", name))?;
         self.read_file_by_index(found.0)
     }
 
     /// Streams file content directly into a streaming sink (O(1) memory bounds).
-    pub fn stream_file_by_index<S: crate::async_io::StreamingSink>(&self, index: usize, sink: &mut S) -> Result<(), String> {
+    pub fn stream_file_by_index<S: crate::async_io::StreamingSink>(
+        &self,
+        index: usize,
+        sink: &mut S,
+    ) -> Result<(), String> {
         if index >= self.files.len() {
             return Err("Invalid file index".to_string());
         }
@@ -604,36 +640,45 @@ impl MarReader {
             if end > block_data.len() {
                 return Err("Span exceeds block data".to_string());
             }
-            sink.write_chunk(&block_data[start..end]).map_err(|e| e.to_string())?;
+            sink.write_chunk(&block_data[start..end])
+                .map_err(|e| e.to_string())?;
         }
 
         Ok(())
     }
 
-fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
-    for _ in 0..strip {
-        if let Some(pos) = name.find('/') {
+    fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
+        for _ in 0..strip {
+            let pos = name.find('/')?;
             name = &name[pos + 1..];
+        }
+        if name.is_empty() {
+            None
         } else {
-            return None;
+            Some(name)
         }
     }
-    if name.is_empty() {
-        None
-    } else {
-        Some(name)
-    }
-}
 
     pub fn extract(&self, output_dir: &str, files: Option<&[String]>) -> Result<(), String> {
         self.extract_parallel(output_dir, files, 0)
     }
 
-    pub fn extract_parallel(&self, output_dir: &str, files: Option<&[String]>, num_threads: usize) -> Result<(), String> {
+    pub fn extract_parallel(
+        &self,
+        output_dir: &str,
+        files: Option<&[String]>,
+        num_threads: usize,
+    ) -> Result<(), String> {
         self.extract_parallel_strip(output_dir, files, num_threads, 0)
     }
 
-    pub fn extract_parallel_strip(&self, output_dir: &str, files: Option<&[String]>, num_threads: usize, strip_components: usize) -> Result<(), String> {
+    pub fn extract_parallel_strip(
+        &self,
+        output_dir: &str,
+        files: Option<&[String]>,
+        num_threads: usize,
+        strip_components: usize,
+    ) -> Result<(), String> {
         // Advise kernel of sequential access to the archive memory map
         self.advise_access(AccessPattern::Sequential);
 
@@ -677,7 +722,8 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
         }
 
         for dir in &dirs_to_create {
-            std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create dir {}: {}", dir.display(), e))?;
+            std::fs::create_dir_all(dir)
+                .map_err(|e| format!("Failed to create dir {}: {}", dir.display(), e))?;
         }
 
         let threads = if num_threads > 0 {
@@ -702,7 +748,10 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
             let mut current_block_idx = 0;
             for (idx, entry) in self.files.iter().enumerate() {
                 if entry.entry_type == EntryType::RegularFile {
-                    if target_paths.contains_key(&idx) && !entry.is_redacted() && entry.logical_size > 0 {
+                    if target_paths.contains_key(&idx)
+                        && !entry.is_redacted()
+                        && entry.logical_size > 0
+                    {
                         tasks.push(SingleFileTask {
                             file_idx: idx,
                             block_idx: current_block_idx,
@@ -715,15 +764,22 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
             // Handle empty and redacted files immediately
             for &idx in &indices {
                 let entry = &self.files[idx];
-                if entry.entry_type == EntryType::RegularFile && (entry.is_redacted() || entry.logical_size == 0) {
+                if entry.entry_type == EntryType::RegularFile
+                    && (entry.is_redacted() || entry.logical_size == 0)
+                {
                     if let Some(out_path) = target_paths.get(&idx) {
-                        File::create(out_path).map_err(|e| format!("Failed to create {}: {}", out_path.display(), e))?;
+                        File::create(out_path).map_err(|e| {
+                            format!("Failed to create {}: {}", out_path.display(), e)
+                        })?;
                         #[cfg(unix)]
                         if let Some(ref meta_vec) = self.posix_meta {
                             if idx < meta_vec.len() {
                                 use std::os::unix::fs::PermissionsExt;
                                 let mode = meta_vec[idx].mode;
-                                let _ = std::fs::set_permissions(out_path, std::fs::Permissions::from_mode(mode & 0o777));
+                                let _ = std::fs::set_permissions(
+                                    out_path,
+                                    std::fs::Permissions::from_mode(mode & 0o777),
+                                );
                             }
                         }
                     }
@@ -739,7 +795,12 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
                     let entry = &self.files[task.file_idx];
                     let mut out_file = File::create(out_path)
                         .map_err(|e| format!("Failed to create {}: {}", out_path.display(), e))?;
-                    async_io::advise_file(&out_file, 0, entry.logical_size, AccessPattern::Sequential);
+                    async_io::advise_file(
+                        &out_file,
+                        0,
+                        entry.logical_size,
+                        AccessPattern::Sequential,
+                    );
 
                     if task.block_idx >= self.block_offsets.len() {
                         return Err("Invalid block index".to_string());
@@ -748,7 +809,9 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
                     if offset as usize + BLOCK_HEADER_SIZE > self.mmap.len() {
                         return Err("Block header exceeds archive".to_string());
                     }
-                    let bh = BlockHeader::read(&self.mmap[offset as usize..offset as usize + BLOCK_HEADER_SIZE])?;
+                    let bh = BlockHeader::read(
+                        &self.mmap[offset as usize..offset as usize + BLOCK_HEADER_SIZE],
+                    )?;
                     let payload_offset = offset as usize + BLOCK_HEADER_SIZE;
                     let payload_end = payload_offset + bh.stored_size as usize;
                     if payload_end > self.mmap.len() {
@@ -756,10 +819,10 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
                     }
                     let payload = &self.mmap[payload_offset..payload_end];
 
-                    if bh.fast_checksum_type != ChecksumType::None {
-                        if !verify_fast_checksum(payload, bh.fast_checksum_type, bh.fast_checksum) {
-                            return Err("Block checksum mismatch".to_string());
-                        }
+                    if bh.fast_checksum_type != ChecksumType::None
+                        && !verify_fast_checksum(payload, bh.fast_checksum_type, bh.fast_checksum)
+                    {
+                        return Err("Block checksum mismatch".to_string());
                     }
 
                     if bh.comp_algo == CompressionAlgo::None || bh.raw_size == 0 {
@@ -777,7 +840,10 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
                         if task.file_idx < meta_vec.len() {
                             use std::os::unix::fs::PermissionsExt;
                             let mode = meta_vec[task.file_idx].mode;
-                            let _ = std::fs::set_permissions(out_path, std::fs::Permissions::from_mode(mode & 0o777));
+                            let _ = std::fs::set_permissions(
+                                out_path,
+                                std::fs::Permissions::from_mode(mode & 0o777),
+                            );
                         }
                     }
 
@@ -814,13 +880,17 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
                 };
 
                 if entry.is_redacted() || entry.logical_size == 0 {
-                    File::create(out_path).map_err(|e| format!("Failed to create {}: {}", out_path.display(), e))?;
+                    File::create(out_path)
+                        .map_err(|e| format!("Failed to create {}: {}", out_path.display(), e))?;
                     #[cfg(unix)]
                     if let Some(ref meta_vec) = self.posix_meta {
                         if idx < meta_vec.len() {
                             use std::os::unix::fs::PermissionsExt;
                             let mode = meta_vec[idx].mode;
-                            let _ = std::fs::set_permissions(out_path, std::fs::Permissions::from_mode(mode & 0o777));
+                            let _ = std::fs::set_permissions(
+                                out_path,
+                                std::fs::Permissions::from_mode(mode & 0o777),
+                            );
                         }
                     }
                     continue;
@@ -834,23 +904,32 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
                 let is_single_span = file_spans.len() == 1;
                 if !is_single_span {
                     // Pre-create multi-span file and pre-allocate its length
-                    let f = File::create(out_path)
-                        .map_err(|e| format!("Failed to create multi-span file {}: {}", out_path.display(), e))?;
-                    f.set_len(entry.logical_size)
-                        .map_err(|e| format!("Failed to set_len for {}: {}", out_path.display(), e))?;
+                    let f = File::create(out_path).map_err(|e| {
+                        format!(
+                            "Failed to create multi-span file {}: {}",
+                            out_path.display(),
+                            e
+                        )
+                    })?;
+                    f.set_len(entry.logical_size).map_err(|e| {
+                        format!("Failed to set_len for {}: {}", out_path.display(), e)
+                    })?;
                     async_io::advise_file(&f, 0, entry.logical_size, AccessPattern::Sequential);
                     multi_span_files.insert(idx, Arc::new(f));
                 }
 
                 let mut current_file_offset = 0u64;
                 for span in file_spans {
-                    block_to_jobs.entry(span.block_id).or_default().push(SpanJob {
-                        file_idx: idx,
-                        offset_in_file: current_file_offset,
-                        offset_in_block: span.offset_in_block,
-                        length: span.length,
-                        is_single_span,
-                    });
+                    block_to_jobs
+                        .entry(span.block_id)
+                        .or_default()
+                        .push(SpanJob {
+                            file_idx: idx,
+                            offset_in_file: current_file_offset,
+                            offset_in_block: span.offset_in_block,
+                            length: span.length,
+                            is_single_span,
+                        });
                     current_file_offset += span.length as u64;
                 }
             }
@@ -889,10 +968,10 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
                     }
                     let payload = &self.mmap[payload_offset..payload_end];
 
-                    if bh.fast_checksum_type != ChecksumType::None {
-                        if !verify_fast_checksum(payload, bh.fast_checksum_type, bh.fast_checksum) {
-                            return Err("Block checksum mismatch".to_string());
-                        }
+                    if bh.fast_checksum_type != ChecksumType::None
+                        && !verify_fast_checksum(payload, bh.fast_checksum_type, bh.fast_checksum)
+                    {
+                        return Err("Block checksum mismatch".to_string());
                     }
 
                     // Thread-local reusable decompression buffer
@@ -973,7 +1052,10 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
                         if let Some(out_path) = target_paths.get(&idx) {
                             use std::os::unix::fs::PermissionsExt;
                             let mode = meta_vec[idx].mode;
-                            let _ = std::fs::set_permissions(out_path, std::fs::Permissions::from_mode(mode & 0o777));
+                            let _ = std::fs::set_permissions(
+                                out_path,
+                                std::fs::Permissions::from_mode(mode & 0o777),
+                            );
                         }
                     }
                 }
@@ -1007,11 +1089,22 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
                         let meta = &meta_vec[idx];
                         if let Ok(c_path) = CString::new(out_path.as_os_str().as_bytes()) {
                             let times = [
-                                libc::timespec { tv_sec: meta.atime, tv_nsec: 0 },
-                                libc::timespec { tv_sec: meta.mtime, tv_nsec: 0 },
+                                libc::timespec {
+                                    tv_sec: meta.atime,
+                                    tv_nsec: 0,
+                                },
+                                libc::timespec {
+                                    tv_sec: meta.mtime,
+                                    tv_nsec: 0,
+                                },
                             ];
                             unsafe {
-                                libc::utimensat(libc::AT_FDCWD, c_path.as_ptr(), times.as_ptr(), libc::AT_SYMLINK_NOFOLLOW);
+                                libc::utimensat(
+                                    libc::AT_FDCWD,
+                                    c_path.as_ptr(),
+                                    times.as_ptr(),
+                                    libc::AT_SYMLINK_NOFOLLOW,
+                                );
                             }
                         }
                     }
@@ -1052,39 +1145,45 @@ fn strip_path_components(mut name: &str, strip: usize) -> Option<&str> {
         };
 
         pool.install(|| {
-            self.block_offsets.par_iter().enumerate().all(|(block_index, &offset)| {
-                if redacted_blocks.contains(&(block_index as u32)) {
-                    return true;
-                }
-                if offset as usize + BLOCK_HEADER_SIZE > self.mmap.len() {
-                    return false;
-                }
-                let bh = match BlockHeader::read(&self.mmap[offset as usize..offset as usize + BLOCK_HEADER_SIZE]) {
-                    Ok(h) => h,
-                    Err(_) => return false,
-                };
-
-                let payload_offset = offset as usize + BLOCK_HEADER_SIZE;
-                let payload_end = payload_offset + bh.stored_size as usize;
-                if payload_end > self.mmap.len() {
-                    return false;
-                }
-                let payload = &self.mmap[payload_offset..payload_end];
-
-                if bh.fast_checksum_type != ChecksumType::None {
-                    if !verify_fast_checksum(payload, bh.fast_checksum_type, bh.fast_checksum) {
+            self.block_offsets
+                .par_iter()
+                .enumerate()
+                .all(|(block_index, &offset)| {
+                    if redacted_blocks.contains(&(block_index as u32)) {
+                        return true;
+                    }
+                    if offset as usize + BLOCK_HEADER_SIZE > self.mmap.len() {
                         return false;
                     }
-                }
+                    let bh = match BlockHeader::read(
+                        &self.mmap[offset as usize..offset as usize + BLOCK_HEADER_SIZE],
+                    ) {
+                        Ok(h) => h,
+                        Err(_) => return false,
+                    };
 
-                if bh.comp_algo != CompressionAlgo::None && bh.raw_size > 0 {
-                    if decompress(payload, bh.comp_algo, bh.raw_size).is_err() {
+                    let payload_offset = offset as usize + BLOCK_HEADER_SIZE;
+                    let payload_end = payload_offset + bh.stored_size as usize;
+                    if payload_end > self.mmap.len() {
                         return false;
                     }
-                }
+                    let payload = &self.mmap[payload_offset..payload_end];
 
-                true
-            })
+                    if bh.fast_checksum_type != ChecksumType::None
+                        && !verify_fast_checksum(payload, bh.fast_checksum_type, bh.fast_checksum)
+                    {
+                        return false;
+                    }
+
+                    if bh.comp_algo != CompressionAlgo::None
+                        && bh.raw_size > 0
+                        && decompress(payload, bh.comp_algo, bh.raw_size).is_err()
+                    {
+                        return false;
+                    }
+
+                    true
+                })
         })
     }
 }

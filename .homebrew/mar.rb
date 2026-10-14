@@ -5,20 +5,14 @@ class Mar < Formula
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
   license "MIT"
 
-  depends_on "pkg-config" => :build
-  depends_on "libzstd"
-  depends_on "lz4"
-  depends_on "libdeflate"
-  depends_on "bzip2"
+  depends_on "rust" => :build
 
   def install
-    # Build with optimizations for distribution
-    system "make", "release"
+    system "make", "mar"
     bin.install "mar"
   end
 
   test do
-    # Simple smoke test to verify installation
-    system "#{bin}/mar", "--version"
+    system "#{bin}/mar", "version"
   end
 end

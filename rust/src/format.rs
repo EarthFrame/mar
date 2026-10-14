@@ -238,7 +238,11 @@ impl FixedHeader {
         buf[16..24].copy_from_slice(&self.meta_offset.to_le_bytes());
         buf[24..32].copy_from_slice(&self.meta_stored_size.to_le_bytes());
         buf[32..40].copy_from_slice(&self.meta_raw_size.to_le_bytes());
-        buf[40] = if self.meta_comp_algo == CompressionAlgo::Zstd { 1 } else { 0 };
+        buf[40] = if self.meta_comp_algo == CompressionAlgo::Zstd {
+            1
+        } else {
+            0
+        };
         buf[41] = self.index_type as u8;
         buf[42..44].copy_from_slice(&self.reserved0.to_le_bytes());
         crate::checksum::crc32c(&buf)
@@ -300,7 +304,11 @@ impl FixedHeader {
         buf[16..24].copy_from_slice(&self.meta_offset.to_le_bytes());
         buf[24..32].copy_from_slice(&self.meta_stored_size.to_le_bytes());
         buf[32..40].copy_from_slice(&self.meta_raw_size.to_le_bytes());
-        buf[40] = if self.meta_comp_algo == CompressionAlgo::Zstd { 1 } else { 0 };
+        buf[40] = if self.meta_comp_algo == CompressionAlgo::Zstd {
+            1
+        } else {
+            0
+        };
         buf[41] = self.index_type as u8;
         buf[42..44].copy_from_slice(&self.reserved0.to_le_bytes());
         buf[44..48].copy_from_slice(&self.header_crc32c.to_le_bytes());
@@ -567,7 +575,9 @@ pub fn parse_size(s: &str) -> Option<u64> {
         return None;
     }
 
-    let num_end = s.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(s.len());
+    let num_end = s
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(s.len());
     let (num_str, unit_str) = s.split_at(num_end);
     let num_str = num_str.trim();
     let unit_str = unit_str.trim();

@@ -6,6 +6,12 @@ pub struct IndexCacheManager {
     cache_dir: PathBuf,
 }
 
+impl Default for IndexCacheManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IndexCacheManager {
     pub fn new() -> Self {
         Self::with_cache_dir(None)
@@ -33,7 +39,9 @@ impl IndexCacheManager {
             Ok(val) if !val.is_empty() => PathBuf::from(val),
             _ => match std::env::var("HOME") {
                 Ok(h) if !h.is_empty() => PathBuf::from(h).join(".cache"),
-                _ => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(".cache"),
+                _ => std::env::current_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .join(".cache"),
             },
         };
         base.join("earthframe").join("mar")
@@ -78,7 +86,8 @@ impl IndexCacheManager {
         let mut file = File::create(&path).map_err(|e| e.to_string())?;
 
         let vbytes = validator.as_bytes();
-        file.write_all(&(vbytes.len() as u32).to_le_bytes()).map_err(|e| e.to_string())?;
+        file.write_all(&(vbytes.len() as u32).to_le_bytes())
+            .map_err(|e| e.to_string())?;
         file.write_all(vbytes).map_err(|e| e.to_string())?;
         file.write_all(meta_data).map_err(|e| e.to_string())?;
         Ok(())

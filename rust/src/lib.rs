@@ -1,16 +1,16 @@
-pub mod format;
+pub mod async_io;
 pub mod checksum;
 pub mod compression;
+pub mod delta;
+pub mod diff;
+pub mod filter;
+pub mod format;
+pub mod mai;
 pub mod name_index;
 pub mod reader;
-pub mod writer;
-pub mod mai;
-pub mod remote;
-pub mod async_io;
-pub mod diff;
-pub mod delta;
 pub mod redact;
-pub mod filter;
+pub mod remote;
+pub mod writer;
 
 static INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 

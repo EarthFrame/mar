@@ -12,6 +12,7 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process;
+use std::str::FromStr;
 use std::time::Instant;
 
 const TOOL_VERSION: &str = "0.3.0";
@@ -43,7 +44,9 @@ fn get_options() -> CliOptions {
 }
 
 fn set_options(opts: CliOptions) {
-    unsafe { CLI_OPTIONS = opts; }
+    unsafe {
+        CLI_OPTIONS = opts;
+    }
 }
 
 fn print_error(msg: &str, cmd: &str) {
@@ -76,7 +79,8 @@ fn print_verbose(msg: &str) {
 // ============================================================================
 
 fn print_usage() {
-    println!(r#"Usage: mar <command> [options] <arguments>
+    println!(
+        r#"Usage: mar <command> [options] <arguments>
 
 Commands:
   create   Create an archive from files or directories
@@ -102,11 +106,13 @@ Common options:
   -v, --verbose   Enable verbose output (use multiple times for more detail)
   --stopwatch     Report command execution time
 
-Use 'mar <command> --help' for command-specific options."#);
+Use 'mar <command> --help' for command-specific options."#
+    );
 }
 
 fn print_create_usage() {
-    println!(r#"Usage: mar create [options] <archive> [files...]
+    println!(
+        r#"Usage: mar create [options] <archive> [files...]
 
 Create an archive from files or directories.
 
@@ -146,11 +152,13 @@ Examples:
   mar create archive.mar file1.txt file2.txt
   mar create -c lz4 archive.mar ./mydir/
   mar create --checksum xxhash32 fast_archive.mar ./data/
-  find . -name "*.txt" | mar create -T - archive.mar"#);
+  find . -name "*.txt" | mar create -T - archive.mar"#
+    );
 }
 
 fn print_slice_usage() {
-    println!(r#"Usage: mar slice [options] <archive> [patterns...]
+    println!(
+        r#"Usage: mar slice [options] <archive> [patterns...]
 
 Extract a subset of files from an archive into a new archive.
 Supports algebraic include / exclude, globs, and file lists.
@@ -183,11 +191,13 @@ Examples:
 
 Remote slicing (S3, HTTPS) is supported via the Python CLI:
   pymar slice s3://alphafold-db/v4/proteome.mar -o subset.mar -T pdbs.txt
-  pymar slice https://cdn.example.com/proteome.mar -o subset.mar -T pdbs.txt"#);
+  pymar slice https://cdn.example.com/proteome.mar -o subset.mar -T pdbs.txt"#
+    );
 }
 
 fn print_extract_usage() {
-    println!(r#"Usage: mar extract [options] <archive> [files...]
+    println!(
+        r#"Usage: mar extract [options] <archive> [files...]
 
 Extract files from an archive.
 
@@ -203,11 +213,13 @@ Examples:
   mar extract archive.mar
   mar extract -o /tmp/output archive.mar
   mar extract -c archive.mar | tar xf -
-  mar extract --strip-components 1 archive.mar"#);
+  mar extract --strip-components 1 archive.mar"#
+    );
 }
 
 fn print_list_usage() {
-    println!(r#"Usage: mar list [options] <archive>
+    println!(
+        r#"Usage: mar list [options] <archive>
 
 List contents of an archive.
 
@@ -223,11 +235,13 @@ Options:
 Examples:
   mar list archive.mar
   mar list --table --header archive.mar
-  mar list --format json archive.mar"#);
+  mar list --format json archive.mar"#
+    );
 }
 
 fn print_hash_usage() {
-    println!(r#"Usage: mar hash [options] <archive>
+    println!(
+        r#"Usage: mar hash [options] <archive>
 
 Compute a deterministic, fast hash of the archive bytes.
 
@@ -237,11 +251,13 @@ Options:
 
 Example:
   mar hash archive.mar
-  mar hash -a blake3 archive.mar"#);
+  mar hash -a blake3 archive.mar"#
+    );
 }
 
 fn print_get_usage() {
-    println!(r#"Usage: mar get [options] <archive> <file1> [file2...]
+    println!(
+        r#"Usage: mar get [options] <archive> <file1> [file2...]
 
 Extract specific files from an archive.
 
@@ -256,11 +272,13 @@ Options:
 Examples:
   mar get archive.mar path/to/file.txt
   mar get -c archive.mar config.json
-  mar get -o /tmp archive.mar file1.txt file2.txt"#);
+  mar get -o /tmp archive.mar file1.txt file2.txt"#
+    );
 }
 
 fn print_cat_usage() {
-    println!(r#"Usage: mar cat [options] <archive> [files...]
+    println!(
+        r#"Usage: mar cat [options] <archive> [files...]
 
 Dump file contents to stdout or as JSON.
 
@@ -275,11 +293,13 @@ Examples:
   mar cat archive.mar file.txt
   mar cat --all archive.mar
   mar cat archive.mar --fmt json | jq '.'
-  mar cat -o output.bin archive.mar file1 file2"#);
+  mar cat -o output.bin archive.mar file1 file2"#
+    );
 }
 
 fn print_diff_usage() {
-    println!(r#"Usage: mar diff [options] <archive1> <archive2>
+    println!(
+        r#"Usage: mar diff [options] <archive1> <archive2>
 
 Compare two archives and show differences.
 
@@ -293,11 +313,13 @@ Options:
 Examples:
   mar diff old.mar new.mar
   mar diff --delta old.mar new.mar | head -20
-  mar diff -v old.mar new.mar"#);
+  mar diff -v old.mar new.mar"#
+    );
 }
 
 fn print_delta_usage() {
-    println!(r#"Usage: mar delta [options] <source.mar> <target.mar|dir> -o <delta.mar>
+    println!(
+        r#"Usage: mar delta [options] <source.mar> <target.mar|dir> -o <delta.mar>
 
 Create a delta archive between two archives or between an archive and a directory.
 
@@ -326,11 +348,13 @@ Join modes:
 Examples:
   mar delta base.mar current.mar -o patch.mar
   mar delta base.mar ./current_dir/ -o patch.mar
-  mar delta --join outer base.mar current.mar -o diff.mar"#);
+  mar delta --join outer base.mar current.mar -o diff.mar"#
+    );
 }
 
 fn print_header_usage() {
-    println!(r#"Usage: mar header [options] <archive>
+    println!(
+        r#"Usage: mar header [options] <archive>
 
 Display archive header information.
 
@@ -339,11 +363,13 @@ Options:
 
 Examples:
   mar header archive.mar
-  mar header -v archive.mar"#);
+  mar header -v archive.mar"#
+    );
 }
 
 fn print_validate_usage() {
-    println!(r#"Usage: mar validate [options] <archive>
+    println!(
+        r#"Usage: mar validate [options] <archive>
 
 Validate archive integrity and verify checksums.
 
@@ -354,11 +380,13 @@ Options:
 
 Examples:
   mar validate archive.mar
-  mar validate -v archive.mar"#);
+  mar validate -v archive.mar"#
+    );
 }
 
 fn print_redact_usage() {
-    println!(r#"Usage: mar redact [options] <archive> <file1> [file2...]
+    println!(
+        r#"Usage: mar redact [options] <archive> <file1> [file2...]
 
 Overwrite the stored data for one or more files with zeros and mark entries as REDACTED.
 
@@ -377,11 +405,13 @@ Notes:
 
 Examples:
   mar redact -o out.mar in.mar secrets.txt keys.pem
-  printf "a\nb\n" | mar redact -I -T - in.mar"#);
+  printf "a\nb\n" | mar redact -I -T - in.mar"#
+    );
 }
 
 fn print_version_usage() {
-    println!(r#"Usage: mar version [options]
+    println!(
+        r#"Usage: mar version [options]
 
 Options:
   -n, --mar-version     Print MAR format version only
@@ -390,7 +420,8 @@ Options:
 Examples:
   mar version
   mar version -n
-  mar version -c"#);
+  mar version -c"#
+    );
 }
 
 // ============================================================================
@@ -454,7 +485,13 @@ fn cmd_create(args: &[String]) -> i32 {
                     opts.multiblock = true;
                 }
                 _ => {
-                    print_error(&format!("Invalid block mode: '{}'. Expected single, multi, or shared", args[i]), "create");
+                    print_error(
+                        &format!(
+                            "Invalid block mode: '{}'. Expected single, multi, or shared",
+                            args[i]
+                        ),
+                        "create",
+                    );
                     return EXIT_USAGE;
                 }
             }
@@ -474,8 +511,14 @@ fn cmd_create(args: &[String]) -> i32 {
                 return EXIT_USAGE;
             }
             if let Some(sz) = parse_size(&args[i]) {
-                if sz < MIN_BLOCK_SIZE || sz > MAX_BLOCK_SIZE {
-                    print_error(&format!("Block size out of range (min: 4KB [4096 bytes], max: 1GB; got {})", args[i]), "create");
+                if !(MIN_BLOCK_SIZE..=MAX_BLOCK_SIZE).contains(&sz) {
+                    print_error(
+                        &format!(
+                            "Block size out of range (min: 4KB [4096 bytes], max: 1GB; got {})",
+                            args[i]
+                        ),
+                        "create",
+                    );
                     return EXIT_USAGE;
                 }
                 opts.block_size = sz;
@@ -570,7 +613,10 @@ fn cmd_create(args: &[String]) -> i32 {
             match fs::read_to_string(&files_from) {
                 Ok(s) => s,
                 Err(e) => {
-                    print_error(&format!("Cannot open files list: {}: {}", files_from, e), "create");
+                    print_error(
+                        &format!("Cannot open files list: {}: {}", files_from, e),
+                        "create",
+                    );
                     return EXIT_ERROR;
                 }
             }
@@ -589,7 +635,10 @@ fn cmd_create(args: &[String]) -> i32 {
     }
 
     if !force && Path::new(&archive_path).exists() {
-        print_error(&format!("Output archive exists (use --force): {}", archive_path), "create");
+        print_error(
+            &format!("Output archive exists (use --force): {}", archive_path),
+            "create",
+        );
         return EXIT_ERROR;
     }
 
@@ -739,7 +788,10 @@ fn cmd_slice(args: &[String]) -> i32 {
                 "gzip" | "gz" => Some(CompressionAlgo::Gzip),
                 "bzip2" | "bz2" => Some(CompressionAlgo::Bzip2),
                 _ => {
-                    print_error(&format!("Unknown compression algorithm: {}", args[i]), "slice");
+                    print_error(
+                        &format!("Unknown compression algorithm: {}", args[i]),
+                        "slice",
+                    );
                     return EXIT_USAGE;
                 }
             };
@@ -777,8 +829,14 @@ fn cmd_slice(args: &[String]) -> i32 {
             }
             match parse_size(&args[i]) {
                 Some(sz) => {
-                    if sz < MIN_BLOCK_SIZE || sz > MAX_BLOCK_SIZE {
-                        print_error(&format!("Block size out of range (min: 4KB, max: 1GB; got {})", args[i]), "slice");
+                    if !(MIN_BLOCK_SIZE..=MAX_BLOCK_SIZE).contains(&sz) {
+                        print_error(
+                            &format!(
+                                "Block size out of range (min: 4KB, max: 1GB; got {})",
+                                args[i]
+                            ),
+                            "slice",
+                        );
                         return EXIT_USAGE;
                     }
                     block_size = Some(sz);
@@ -808,7 +866,13 @@ fn cmd_slice(args: &[String]) -> i32 {
                     multiblock = true;
                 }
                 _ => {
-                    print_error(&format!("Invalid block mode: '{}'. Expected single, multi, or shared", args[i]), "slice");
+                    print_error(
+                        &format!(
+                            "Invalid block mode: '{}'. Expected single, multi, or shared",
+                            args[i]
+                        ),
+                        "slice",
+                    );
                     return EXIT_USAGE;
                 }
             }
@@ -848,19 +912,31 @@ fn cmd_slice(args: &[String]) -> i32 {
     }
 
     if archive_path.is_empty() || output_path.is_empty() {
-        print_error("Both source archive and destination (-o <output>) are required", "slice");
+        print_error(
+            "Both source archive and destination (-o <output>) are required",
+            "slice",
+        );
         print_slice_usage();
         return EXIT_USAGE;
     }
 
     // Remote archive check: delegate to Python pymar CLI
-    if archive_path.starts_with("s3://") || archive_path.starts_with("http://") || archive_path.starts_with("https://") {
+    if archive_path.starts_with("s3://")
+        || archive_path.starts_with("http://")
+        || archive_path.starts_with("https://")
+    {
         print_error(&format!("Remote archives (s3://, http://, https://) require the Python CLI: pymar slice {} -o {}", archive_path, output_path), "slice");
         return EXIT_USAGE;
     }
 
     if Path::new(&output_path).exists() && !force {
-        print_error(&format!("Output archive already exists: {} (use -f/--force to overwrite)", output_path), "slice");
+        print_error(
+            &format!(
+                "Output archive already exists: {} (use -f/--force to overwrite)",
+                output_path
+            ),
+            "slice",
+        );
         return EXIT_ERROR;
     }
 
@@ -879,9 +955,11 @@ fn cmd_slice(args: &[String]) -> i32 {
         return EXIT_ERROR;
     }
 
-    let mut opts = WriteOptions::default();
-    opts.block_mode = block_mode;
-    opts.multiblock = multiblock;
+    let mut opts = WriteOptions {
+        block_mode,
+        multiblock,
+        ..Default::default()
+    };
     if let Some(algo) = compression_algo {
         opts.compression = algo;
     } else {
@@ -903,30 +981,37 @@ fn cmd_slice(args: &[String]) -> i32 {
     for (idx, name) in &matched {
         if let Some(entry) = reader.get_file_entry(*idx) {
             match entry.entry_type {
-                EntryType::RegularFile => {
-                    match reader.read_file_by_index(*idx) {
-                        Ok(data) => {
-                            total_bytes += data.len() as u64;
-                            let mode = reader.get_posix_meta(*idx).map(|p| p.mode).unwrap_or(DEFAULT_FILE_MODE);
-                            let mtime = reader.get_posix_meta(*idx).map(|p| p.mtime).unwrap_or(0);
-                            writer.add_memory(name, &data, mode, mtime);
-                            print_verbose(&format!("Sliced file: {} ({} bytes)", name, data.len()));
-                        }
-                        Err(e) => {
-                            print_error(&format!("Failed to read file {}: {}", name, e), "slice");
-                            return EXIT_ERROR;
-                        }
+                EntryType::RegularFile => match reader.read_file_by_index(*idx) {
+                    Ok(data) => {
+                        total_bytes += data.len() as u64;
+                        let mode = reader
+                            .get_posix_meta(*idx)
+                            .map(|p| p.mode)
+                            .unwrap_or(DEFAULT_FILE_MODE);
+                        let mtime = reader.get_posix_meta(*idx).map(|p| p.mtime).unwrap_or(0);
+                        writer.add_memory(name, &data, mode, mtime);
+                        print_verbose(&format!("Sliced file: {} ({} bytes)", name, data.len()));
                     }
-                }
+                    Err(e) => {
+                        print_error(&format!("Failed to read file {}: {}", name, e), "slice");
+                        return EXIT_ERROR;
+                    }
+                },
                 EntryType::Directory => {
-                    let mode = reader.get_posix_meta(*idx).map(|p| p.mode).unwrap_or(DEFAULT_DIR_MODE);
+                    let mode = reader
+                        .get_posix_meta(*idx)
+                        .map(|p| p.mode)
+                        .unwrap_or(DEFAULT_DIR_MODE);
                     let mtime = reader.get_posix_meta(*idx).map(|p| p.mtime).unwrap_or(0);
                     writer.add_directory_entry(name, mode, mtime);
                     print_verbose(&format!("Sliced dir: {}", name));
                 }
                 EntryType::Symlink => {
                     if let Some(target) = reader.get_symlink_target(*idx) {
-                        let mode = reader.get_posix_meta(*idx).map(|p| p.mode).unwrap_or(0o120777);
+                        let mode = reader
+                            .get_posix_meta(*idx)
+                            .map(|p| p.mode)
+                            .unwrap_or(0o120777);
                         let mtime = reader.get_posix_meta(*idx).map(|p| p.mtime).unwrap_or(0);
                         writer.add_symlink(name, &target, mode, mtime);
                         print_verbose(&format!("Sliced symlink: {} -> {}", name, target));
@@ -1034,7 +1119,10 @@ fn cmd_extract(args: &[String]) -> i32 {
             match fs::read_to_string(&files_from) {
                 Ok(s) => s,
                 Err(e) => {
-                    print_error(&format!("Cannot open files list: {}: {}", files_from, e), "extract");
+                    print_error(
+                        &format!("Cannot open files list: {}: {}", files_from, e),
+                        "extract",
+                    );
                     return EXIT_ERROR;
                 }
             }
@@ -1093,7 +1181,9 @@ fn cmd_extract(args: &[String]) -> i32 {
             Some(file_patterns.as_slice())
         };
 
-        if let Err(e) = reader.extract_parallel_strip(&output_dir, patterns_opt, num_threads, strip_components) {
+        if let Err(e) =
+            reader.extract_parallel_strip(&output_dir, patterns_opt, num_threads, strip_components)
+        {
             if mar_core::is_interrupted() {
                 print_error("Interrupted", "extract");
                 return 130;
@@ -1170,7 +1260,10 @@ fn cmd_list(args: &[String]) -> i32 {
     if get_options().verbose > 0 && show_meta {
         let h = reader.header();
         println!("Archive: {}", archive_path);
-        println!("Version: {}.{}.{}", h.version_major, h.version_minor, h.version_patch);
+        println!(
+            "Version: {}.{}.{}",
+            h.version_major, h.version_minor, h.version_patch
+        );
         println!("Files: {}", files.len());
         println!("Blocks: {}", reader.block_count());
         if reader.block_count() > 0 {
@@ -1196,17 +1289,25 @@ fn cmd_list(args: &[String]) -> i32 {
                 archive_path, files.len(), reader.block_count());
         }
         for (i, entry) in files.iter().enumerate() {
-            let name = names.get(entry.name_id as usize).cloned().unwrap_or_default();
+            let name = names
+                .get(entry.name_id as usize)
+                .cloned()
+                .unwrap_or_default();
             let etype = match entry.entry_type {
                 EntryType::RegularFile => "file",
                 EntryType::Directory => "dir",
                 EntryType::Symlink => "symlink",
                 _ => "other",
             };
-            let mut line = format!("  {{\"name\": \"{}\", \"size\": {}, \"type\": \"{}\"", name, entry.logical_size, etype);
+            let mut line = format!(
+                "  {{\"name\": \"{}\", \"size\": {}, \"type\": \"{}\"",
+                name, entry.logical_size, etype
+            );
             if let Some(posix) = reader.get_posix_meta(i) {
-                line.push_str(&format!(", \"uid\": {}, \"gid\": {}, \"mode\": {}, \"mtime\": {}",
-                    posix.uid, posix.gid, posix.mode, posix.mtime));
+                line.push_str(&format!(
+                    ", \"uid\": {}, \"gid\": {}, \"mode\": {}, \"mtime\": {}",
+                    posix.uid, posix.gid, posix.mode, posix.mtime
+                ));
             }
             if show_checksum && reader.has_hashes() {
                 if let Some(h) = reader.get_hash(i) {
@@ -1222,22 +1323,41 @@ fn cmd_list(args: &[String]) -> i32 {
         println!("]");
     } else if show_table {
         if show_header {
-            let mut hdr = format!("{:<40} {:<10} {:>5} {:>5} {:>10}", "NAME", "MODE", "UID", "GID", "SIZE");
+            let mut hdr = format!(
+                "{:<40} {:<10} {:>5} {:>5} {:>10}",
+                "NAME", "MODE", "UID", "GID", "SIZE"
+            );
             if show_checksum && reader.has_hashes() {
                 hdr.push_str(&format!(" CHECKSUM ({:?})", reader.get_hash_algo()));
             }
             println!("{}", hdr);
-            println!("{:<40} {:<10} {:>5} {:>5} {:>10}", "-".repeat(40), "-".repeat(10), "-".repeat(5), "-".repeat(5), "-".repeat(10));
+            println!(
+                "{:<40} {:<10} {:>5} {:>5} {:>10}",
+                "-".repeat(40),
+                "-".repeat(10),
+                "-".repeat(5),
+                "-".repeat(5),
+                "-".repeat(10)
+            );
         }
 
         for (i, entry) in files.iter().enumerate() {
-            let name = names.get(entry.name_id as usize).cloned().unwrap_or_default();
+            let name = names
+                .get(entry.name_id as usize)
+                .cloned()
+                .unwrap_or_default();
             let posix = reader.get_posix_meta(i);
-            let mode_str = posix.as_ref().map(|p| format_mode(p.mode)).unwrap_or_else(|| "----------".to_string());
+            let mode_str = posix
+                .as_ref()
+                .map(|p| format_mode(p.mode))
+                .unwrap_or_else(|| "----------".to_string());
             let uid = posix.as_ref().map(|p| p.uid).unwrap_or(0);
             let gid = posix.as_ref().map(|p| p.gid).unwrap_or(0);
 
-            let mut row = format!("{:<40} {:<10} {:>5} {:>5} {:>10}", name, mode_str, uid, gid, entry.logical_size);
+            let mut row = format!(
+                "{:<40} {:<10} {:>5} {:>5} {:>10}",
+                name, mode_str, uid, gid, entry.logical_size
+            );
             if show_checksum && reader.has_hashes() {
                 if let Some(h) = reader.get_hash(i) {
                     row.push_str(&format!(" {}", hex_encode(&h)));
@@ -1249,7 +1369,10 @@ fn cmd_list(args: &[String]) -> i32 {
         }
     } else {
         for entry in files {
-            let mut name = names.get(entry.name_id as usize).cloned().unwrap_or_default();
+            let mut name = names
+                .get(entry.name_id as usize)
+                .cloned()
+                .unwrap_or_default();
             if entry.entry_type == EntryType::Directory && !name.ends_with('/') {
                 name.push('/');
             }
@@ -1303,7 +1426,10 @@ fn cmd_hash(args: &[String]) -> i32 {
     let mut file = match File::open(&archive_path) {
         Ok(f) => f,
         Err(e) => {
-            print_error(&format!("Failed to open archive: {}: {}", archive_path, e), "hash");
+            print_error(
+                &format!("Failed to open archive: {}: {}", archive_path, e),
+                "hash",
+            );
             return EXIT_ERROR;
         }
     };
@@ -1314,7 +1440,9 @@ fn cmd_hash(args: &[String]) -> i32 {
             let mut hasher = XXHash3_64::new(0);
             loop {
                 let n = file.read(&mut buf).unwrap_or(0);
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 hasher.update(&buf[..n]);
             }
             format!("{:016x}", hasher.finalize())
@@ -1323,7 +1451,9 @@ fn cmd_hash(args: &[String]) -> i32 {
             let mut hasher = blake3::Hasher::new();
             loop {
                 let n = file.read(&mut buf).unwrap_or(0);
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 hasher.update(&buf[..n]);
             }
             hasher.finalize().to_hex().to_string()
@@ -1332,7 +1462,9 @@ fn cmd_hash(args: &[String]) -> i32 {
             let mut hasher = Md5Hasher::new();
             loop {
                 let n = file.read(&mut buf).unwrap_or(0);
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 hasher.update(&buf[..n]);
             }
             hash_to_hex(&hasher.finalize())
@@ -1430,7 +1562,11 @@ fn cmd_get(args: &[String]) -> i32 {
                 println!(",");
             }
             first = false;
-            print!("  {{\"filename\": \"{}\", \"contents\": \"{}\"}}", name, json_escape(&String::from_utf8_lossy(&content)));
+            print!(
+                "  {{\"filename\": \"{}\", \"contents\": \"{}\"}}",
+                name,
+                json_escape(&String::from_utf8_lossy(&content))
+            );
         }
         println!("\n]");
     } else if to_stdout {
@@ -1477,7 +1613,10 @@ fn cmd_get(args: &[String]) -> i32 {
             let mut out_file = match File::create(&out_path) {
                 Ok(f) => f,
                 Err(e) => {
-                    print_error(&format!("Failed to create {}: {}", out_path.display(), e), "get");
+                    print_error(
+                        &format!("Failed to create {}: {}", out_path.display(), e),
+                        "get",
+                    );
                     continue;
                 }
             };
@@ -1565,10 +1704,17 @@ fn cmd_cat(args: &[String]) -> i32 {
     }
 
     let mut dest: Box<dyn Write> = if !output_file.is_empty() {
-        Box::new(File::create(&output_file).map_err(|e| {
-            print_error(&format!("Cannot open output file: {}: {}", output_file, e), "cat");
-            process::exit(EXIT_ERROR);
-        }).unwrap())
+        Box::new(
+            File::create(&output_file)
+                .map_err(|e| {
+                    print_error(
+                        &format!("Cannot open output file: {}: {}", output_file, e),
+                        "cat",
+                    );
+                    process::exit(EXIT_ERROR);
+                })
+                .unwrap(),
+        )
     } else {
         Box::new(io::stdout())
     };
@@ -1583,8 +1729,13 @@ fn cmd_cat(args: &[String]) -> i32 {
                     writeln!(dest, ",").unwrap();
                 }
                 first = false;
-                write!(dest, "  {{\"filename\": \"{}\", \"contents\": \"{}\"}}",
-                    name, json_escape(&String::from_utf8_lossy(&data))).unwrap();
+                write!(
+                    dest,
+                    "  {{\"filename\": \"{}\", \"contents\": \"{}\"}}",
+                    name,
+                    json_escape(&String::from_utf8_lossy(&data))
+                )
+                .unwrap();
             }
         }
         writeln!(dest, "\n]").unwrap();
@@ -1689,7 +1840,7 @@ fn cmd_delta(args: &[String]) -> i32 {
             output_path = args[i].clone();
         } else if arg == "--join" && i + 1 < args.len() {
             i += 1;
-            match DeltaJoin::from_str(&args[i]) {
+            match <DeltaJoin as FromStr>::from_str(&args[i]) {
                 Ok(j) => join = j,
                 Err(e) => {
                     print_error(&e, "delta");
@@ -1705,7 +1856,10 @@ fn cmd_delta(args: &[String]) -> i32 {
                 "lz4" => compression_algo = Some(CompressionAlgo::Lz4),
                 "bzip2" | "bz2" => compression_algo = Some(CompressionAlgo::Bzip2),
                 _ => {
-                    print_error(&format!("Invalid compression algorithm: {}", args[i]), "delta");
+                    print_error(
+                        &format!("Invalid compression algorithm: {}", args[i]),
+                        "delta",
+                    );
                     return EXIT_USAGE;
                 }
             }
@@ -1730,7 +1884,9 @@ fn cmd_delta(args: &[String]) -> i32 {
         } else if arg == "--block-size" && i + 1 < args.len() {
             i += 1;
             match parse_size(&args[i]) {
-                Some(bs) if bs >= MIN_BLOCK_SIZE && bs <= MAX_BLOCK_SIZE => block_size = Some(bs),
+                Some(bs) if (MIN_BLOCK_SIZE..=MAX_BLOCK_SIZE).contains(&bs) => {
+                    block_size = Some(bs)
+                }
                 _ => {
                     print_error(&format!("Invalid block size: '{}'. Expected bytes or shorthand (e.g. 64KB, 1MB, 4MB)", args[i]), "delta");
                     return EXIT_USAGE;
@@ -1752,7 +1908,13 @@ fn cmd_delta(args: &[String]) -> i32 {
                     multiblock = true;
                 }
                 _ => {
-                    print_error(&format!("Invalid block mode: '{}'. Expected single, multi, or shared", args[i]), "delta");
+                    print_error(
+                        &format!(
+                            "Invalid block mode: '{}'. Expected single, multi, or shared",
+                            args[i]
+                        ),
+                        "delta",
+                    );
                     return EXIT_USAGE;
                 }
             }
@@ -1808,14 +1970,23 @@ fn cmd_delta(args: &[String]) -> i32 {
     }
 
     if Path::new(&output_path).exists() && !force {
-        print_error(&format!("Output archive already exists: {} (use -f/--force to overwrite)", output_path), "delta");
+        print_error(
+            &format!(
+                "Output archive already exists: {} (use -f/--force to overwrite)",
+                output_path
+            ),
+            "delta",
+        );
         return EXIT_ERROR;
     }
 
     let source_reader = match MarReader::open(&source_path) {
         Ok(r) => r,
         Err(e) => {
-            print_error(&format!("Failed to open source archive {}: {}", source_path, e), "delta");
+            print_error(
+                &format!("Failed to open source archive {}: {}", source_path, e),
+                "delta",
+            );
             return EXIT_ERROR;
         }
     };
@@ -1829,9 +2000,11 @@ fn cmd_delta(args: &[String]) -> i32 {
     let is_target_dir = target_p.is_dir();
 
     // Prepare WriteOptions
-    let mut write_opts = WriteOptions::default();
-    write_opts.block_mode = block_mode;
-    write_opts.multiblock = multiblock;
+    let mut write_opts = WriteOptions {
+        block_mode,
+        multiblock,
+        ..Default::default()
+    };
     if let Some(algo) = compression_algo {
         write_opts.compression = algo;
     } else {
@@ -1860,7 +2033,10 @@ fn cmd_delta(args: &[String]) -> i32 {
         let target_reader = match MarReader::open(&target_path) {
             Ok(r) => r,
             Err(e) => {
-                print_error(&format!("Failed to open target archive {}: {}", target_path, e), "delta");
+                print_error(
+                    &format!("Failed to open target archive {}: {}", target_path, e),
+                    "delta",
+                );
                 return EXIT_ERROR;
             }
         };
@@ -1967,9 +2143,15 @@ fn cmd_header(args: &[String]) -> i32 {
             }
         }
         println!("\nEntry types:");
-        if reg > 0 { println!("  Regular files: {}", reg); }
-        if dirs > 0 { println!("  Directories: {}", dirs); }
-        if syms > 0 { println!("  Symlinks: {}", syms); }
+        if reg > 0 {
+            println!("  Regular files: {}", reg);
+        }
+        if dirs > 0 {
+            println!("  Directories: {}", dirs);
+        }
+        if syms > 0 {
+            println!("  Symlinks: {}", syms);
+        }
     }
 
     EXIT_OK
@@ -2116,7 +2298,10 @@ fn cmd_redact(args: &[String]) -> i32 {
             match fs::read_to_string(&files_from) {
                 Ok(s) => s,
                 Err(e) => {
-                    print_error(&format!("Cannot open files list: {}: {}", files_from, e), "redact");
+                    print_error(
+                        &format!("Cannot open files list: {}: {}", files_from, e),
+                        "redact",
+                    );
                     return EXIT_ERROR;
                 }
             }
@@ -2143,13 +2328,22 @@ fn cmd_redact(args: &[String]) -> i32 {
         return EXIT_ERROR;
     }
 
-    print_verbose(&format!("Redacted archive: {}", if in_place { &archive_path } else { &output_path }));
+    print_verbose(&format!(
+        "Redacted archive: {}",
+        if in_place {
+            &archive_path
+        } else {
+            &output_path
+        }
+    ));
     EXIT_OK
 }
 
 #[allow(dead_code)]
 fn delegate_to_cpp(cmd_name: &str, args: &[String]) -> i32 {
-    let cur_canon = std::env::current_exe().ok().and_then(|p| std::fs::canonicalize(p).ok());
+    let cur_canon = std::env::current_exe()
+        .ok()
+        .and_then(|p| std::fs::canonicalize(p).ok());
     let mut candidates = Vec::new();
     if let Ok(env_path) = std::env::var("MAR_CPP_BIN") {
         candidates.push(std::path::PathBuf::from(env_path));
@@ -2193,16 +2387,12 @@ fn delegate_to_cpp(cmd_name: &str, args: &[String]) -> i32 {
                     }
                 }
             }
-            if let Ok(status) = std::process::Command::new(&cand)
-                .args(&full_args)
-                .status() {
+            if let Ok(status) = std::process::Command::new(&cand).args(&full_args).status() {
                 return status.code().unwrap_or(EXIT_ERROR);
             }
         }
     }
-    if let Ok(status) = std::process::Command::new("mar")
-        .args(&full_args)
-        .status() {
+    if let Ok(status) = std::process::Command::new("mar").args(&full_args).status() {
         return status.code().unwrap_or(EXIT_ERROR);
     }
     eprintln!("mar: error: {} command requires C++ mar binary", cmd_name);
@@ -2282,7 +2472,10 @@ fn delegate_to_mar_enterprise(cmd_name: &str, args: &[String]) -> i32 {
             }
         }
     } else {
-        eprintln!("'mar {}' requires the MAR Enterprise Extension (mar-enterprise).", cmd_name);
+        eprintln!(
+            "'mar {}' requires the MAR Enterprise Extension (mar-enterprise).",
+            cmd_name
+        );
         eprintln!("To obtain an enterprise license, visit: https://earthframe.com/enterprise");
         EXIT_UNAVAILABLE
     }
@@ -2328,7 +2521,11 @@ extern "C" fn sigint_handler(_sig: libc::c_int) {
     mar_core::set_interrupted();
     let msg = b"\nOperation interrupted by user (Ctrl+C). Cleaning up...\n";
     unsafe {
-        libc::write(libc::STDERR_FILENO, msg.as_ptr() as *const libc::c_void, msg.len());
+        libc::write(
+            libc::STDERR_FILENO,
+            msg.as_ptr() as *const libc::c_void,
+            msg.len(),
+        );
         // Re-set default handler so a second Ctrl-C kills immediately if desired
         libc::signal(libc::SIGINT, libc::SIG_DFL);
     }
@@ -2338,7 +2535,10 @@ fn main() {
     #[cfg(unix)]
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
-        libc::signal(libc::SIGINT, sigint_handler as *const () as libc::sighandler_t);
+        libc::signal(
+            libc::SIGINT,
+            sigint_handler as *const () as libc::sighandler_t,
+        );
     }
 
     let args: Vec<String> = env::args().collect();
@@ -2396,7 +2596,12 @@ fn main() {
         if (i as isize) <= cmd_start {
             continue;
         }
-        if arg == "--stopwatch" || arg == "-q" || arg == "--quiet" || arg == "-v" || arg == "--verbose" {
+        if arg == "--stopwatch"
+            || arg == "-q"
+            || arg == "--quiet"
+            || arg == "-v"
+            || arg == "--verbose"
+        {
             continue;
         }
         filtered_args.push(arg.clone());

@@ -39,7 +39,7 @@ fn test_mar_okf_enterprise_delegation_override() {
     }
 
     let output = Command::new(mar_bin)
-        .args(&["okf", "pack", "./foo", "-f", "bar.mar"])
+        .args(["okf", "pack", "./foo", "-f", "bar.mar"])
         .env("MAR_ENTERPRISE_BIN", &mock_bin)
         .output()
         .expect("failed to execute mar with mock enterprise");

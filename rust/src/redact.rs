@@ -24,18 +24,24 @@ pub fn redact_archive(
             return Err("Missing output path (use -o, or -I for in-place)".to_string());
         }
         if !force && Path::new(output_path).exists() {
-            return Err(format!("Output archive exists (use --force): {}", output_path));
+            return Err(format!(
+                "Output archive exists (use --force): {}",
+                output_path
+            ));
         }
         fs::copy(input_path, output_path)
             .map_err(|e| format!("Failed to copy archive to {}: {}", output_path, e))?;
         output_path.to_string()
     };
 
-    let reader = MarReader::open(&target_path).map_err(|e| format!("Failed to open archive: {}", e))?;
+    let reader =
+        MarReader::open(&target_path).map_err(|e| format!("Failed to open archive: {}", e))?;
 
     // Refuse to redact archives with compressed data blocks.
     for i in 0..reader.block_count() {
-        let bh = reader.get_block_header(i).ok_or_else(|| format!("Invalid block {}", i))?;
+        let bh = reader
+            .get_block_header(i)
+            .ok_or_else(|| format!("Invalid block {}", i))?;
         if bh.comp_algo != CompressionAlgo::None {
             return Err(format!(
                 "Redaction is not supported for compressed archives. Block {} uses {:?}.",
@@ -133,8 +139,16 @@ pub fn redact_archive(
         data: Vec<u8>,
     }
     let mut sections: Vec<Sec> = Vec::new();
-    sections.push(Sec { stype: section_type::NAME_TABLE, flags: name_format as u32, data: name_data });
-    sections.push(Sec { stype: section_type::FILE_TABLE, flags: 0, data: file_data });
+    sections.push(Sec {
+        stype: section_type::NAME_TABLE,
+        flags: name_format as u32,
+        data: name_data,
+    });
+    sections.push(Sec {
+        stype: section_type::FILE_TABLE,
+        flags: 0,
+        data: file_data,
+    });
 
     if reader.header().index_type == IndexType::Multiblock {
         let mut spans_data = Vec::new();
@@ -162,7 +176,11 @@ pub fn redact_archive(
                 spans_data.extend_from_slice(&sbuf);
             }
         }
-        sections.push(Sec { stype: section_type::FILE_SPANS, flags: 0, data: spans_data });
+        sections.push(Sec {
+            stype: section_type::FILE_SPANS,
+            flags: 0,
+            data: spans_data,
+        });
     }
 
     // Block table
@@ -180,7 +198,11 @@ pub fn redact_archive(
         desc.write(&mut bbuf);
         block_table_data.extend_from_slice(&bbuf);
     }
-    sections.push(Sec { stype: section_type::BLOCK_TABLE, flags: 0, data: block_table_data });
+    sections.push(Sec {
+        stype: section_type::BLOCK_TABLE,
+        flags: 0,
+        data: block_table_data,
+    });
 
     // Posix meta
     if reader.has_posix_meta() {
@@ -188,13 +210,22 @@ pub fn redact_archive(
         pdata.extend_from_slice(&(file_count as u32).to_le_bytes());
         for i in 0..file_count {
             let p = reader.get_posix_meta(i).unwrap_or(PosixEntry {
-                mode: 0, uid: 0, gid: 0, mtime: 0, atime: 0, ctime: 0,
+                mode: 0,
+                uid: 0,
+                gid: 0,
+                mtime: 0,
+                atime: 0,
+                ctime: 0,
             });
             let mut pbuf = [0u8; POSIX_ENTRY_SIZE];
             p.write(&mut pbuf);
             pdata.extend_from_slice(&pbuf);
         }
-        sections.push(Sec { stype: section_type::POSIX_META, flags: 0, data: pdata });
+        sections.push(Sec {
+            stype: section_type::POSIX_META,
+            flags: 0,
+            data: pdata,
+        });
     }
 
     // Hashes
@@ -205,7 +236,7 @@ pub fn redact_archive(
         hdata.push(32u8);
         hdata.extend_from_slice(&[0u8; 2]);
 
-        let bitset_size = (file_count + 7) / 8;
+        let bitset_size = file_count.div_ceil(8);
         let mut bitset = vec![0u8; bitset_size];
         for i in 0..file_count {
             if !affected_files.contains(&i) && reader.get_hash(i).is_some() {
@@ -220,7 +251,11 @@ pub fn redact_archive(
                 }
             }
         }
-        sections.push(Sec { stype: section_type::FILE_HASHES, flags: 0, data: hdata });
+        sections.push(Sec {
+            stype: section_type::FILE_HASHES,
+            flags: 0,
+            data: hdata,
+        });
     }
 
     // Assemble metadata container

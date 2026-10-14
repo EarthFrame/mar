@@ -25,14 +25,14 @@ High-performance Rust engine and Python package for the **MAR** archive format, 
 `pymar` builds out-of-the-box with `maturin` and requires no external system development headers:
 
 ```bash
-cd pymar
+cd python
 pip install .
 ```
 
 For development:
 
 ```bash
-cd pymar
+cd python
 maturin develop
 ```
 

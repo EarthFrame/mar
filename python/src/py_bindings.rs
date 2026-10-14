@@ -1,4 +1,5 @@
 #![allow(non_camel_case_types)]
+#![allow(clippy::useless_conversion)]
 use mar_core::blake3;
 use mar_core::checksum::*;
 use mar_core::format::*;
@@ -135,7 +136,11 @@ impl From<PyWriteOptions> for WriteOptions {
                 PyChecksumType::XXHASH3 => ChecksumType::XXHash3,
             },
             multiblock: o.multiblock,
-            block_mode: if o.multiblock { BlockMode::Shared } else { BlockMode::Single },
+            block_mode: if o.multiblock {
+                BlockMode::Shared
+            } else {
+                BlockMode::Single
+            },
             block_size: o.block_size,
             compress_meta: o.compress_meta,
             deterministic: o.deterministic,
@@ -226,12 +231,16 @@ impl PyMarWriter {
 
     #[pyo3(signature = (path, archive_name = ""))]
     fn add_file(&mut self, path: &str, archive_name: &str) -> PyResult<()> {
-        self.inner.add_file(path, archive_name).map_err(PyRuntimeError::new_err)
+        self.inner
+            .add_file(path, archive_name)
+            .map_err(PyRuntimeError::new_err)
     }
 
     #[pyo3(signature = (path, prefix = ""))]
     fn add_directory(&mut self, path: &str, prefix: &str) -> PyResult<()> {
-        self.inner.add_directory(path, prefix).map_err(PyRuntimeError::new_err)
+        self.inner
+            .add_directory(path, prefix)
+            .map_err(PyRuntimeError::new_err)
     }
 
     #[pyo3(signature = (name, content, mode = DEFAULT_FILE_MODE, mtime = 0))]
@@ -321,19 +330,23 @@ impl PyMarReader {
     }
 
     fn get_file_entries(&self) -> Vec<PyFileEntry> {
-        self.inner.get_file_entries().iter().map(|e| PyFileEntry {
-            entry_type: match e.entry_type {
-                EntryType::RegularFile => PyEntryType::REGULAR_FILE,
-                EntryType::Directory => PyEntryType::DIRECTORY,
-                EntryType::Symlink => PyEntryType::SYMLINK,
-                EntryType::CharDevice => PyEntryType::CHAR_DEVICE,
-                EntryType::BlockDevice => PyEntryType::BLOCK_DEVICE,
-                EntryType::Fifo => PyEntryType::FIFO,
-                EntryType::Socket => PyEntryType::SOCKET,
-                EntryType::Unknown => PyEntryType::UNKNOWN,
-            },
-            logical_size: e.logical_size,
-        }).collect()
+        self.inner
+            .get_file_entries()
+            .iter()
+            .map(|e| PyFileEntry {
+                entry_type: match e.entry_type {
+                    EntryType::RegularFile => PyEntryType::REGULAR_FILE,
+                    EntryType::Directory => PyEntryType::DIRECTORY,
+                    EntryType::Symlink => PyEntryType::SYMLINK,
+                    EntryType::CharDevice => PyEntryType::CHAR_DEVICE,
+                    EntryType::BlockDevice => PyEntryType::BLOCK_DEVICE,
+                    EntryType::Fifo => PyEntryType::FIFO,
+                    EntryType::Socket => PyEntryType::SOCKET,
+                    EntryType::Unknown => PyEntryType::UNKNOWN,
+                },
+                logical_size: e.logical_size,
+            })
+            .collect()
     }
 
     fn find_file(&self, name: &str) -> Option<(usize, PyFileEntry)> {
@@ -357,21 +370,38 @@ impl PyMarReader {
         })
     }
 
-    fn read_file<'py>(&self, py: Python<'py>, arg: &Bound<'_, PyAny>) -> PyResult<Bound<'py, PyBytes>> {
+    fn read_file<'py>(
+        &self,
+        py: Python<'py>,
+        arg: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyBytes>> {
         let bytes_vec = if let Ok(idx) = arg.extract::<usize>() {
-            self.inner.read_file_by_index(idx).map_err(PyRuntimeError::new_err)?
+            self.inner
+                .read_file_by_index(idx)
+                .map_err(PyRuntimeError::new_err)?
         } else if let Ok(name) = arg.extract::<String>() {
-            self.inner.read_file_by_name(&name).map_err(PyRuntimeError::new_err)?
+            self.inner
+                .read_file_by_name(&name)
+                .map_err(PyRuntimeError::new_err)?
         } else {
-            return Err(PyValueError::new_err("Argument must be int index or str filename"));
+            return Err(PyValueError::new_err(
+                "Argument must be int index or str filename",
+            ));
         };
         Ok(PyBytes::new_bound(py, &bytes_vec))
     }
 
     #[pyo3(signature = (output_dir, files = None, num_threads = 0))]
-    fn extract(&self, output_dir: &str, files: Option<Vec<String>>, num_threads: usize) -> PyResult<()> {
+    fn extract(
+        &self,
+        output_dir: &str,
+        files: Option<Vec<String>>,
+        num_threads: usize,
+    ) -> PyResult<()> {
         let f_slice = files.as_deref();
-        self.inner.extract_parallel(output_dir, f_slice, num_threads).map_err(PyRuntimeError::new_err)
+        self.inner
+            .extract_parallel(output_dir, f_slice, num_threads)
+            .map_err(PyRuntimeError::new_err)
     }
 
     #[pyo3(signature = (num_threads = 0, verbose = false))]
@@ -389,7 +419,9 @@ impl PyMarReader {
     }
 
     fn get_block_info(&self, index: usize) -> Option<(u64, u64, u64)> {
-        self.inner.block_desc(index).map(|d| (d.block_offset, d.stored_size, d.raw_size))
+        self.inner
+            .block_desc(index)
+            .map(|d| (d.block_offset, d.stored_size, d.raw_size))
     }
 }
 
@@ -424,7 +456,9 @@ impl PyMAIWriter {
 
     #[pyo3(signature = (path, align_log2 = 0))]
     fn write_to_file(&mut self, path: &str, align_log2: u8) -> PyResult<()> {
-        self.inner.write_to_file(path, align_log2).map_err(PyRuntimeError::new_err)
+        self.inner
+            .write_to_file(path, align_log2)
+            .map_err(PyRuntimeError::new_err)
     }
 }
 
@@ -459,7 +493,8 @@ pub struct PyMAIReader {
 impl PyMAIReader {
     #[staticmethod]
     fn open(path: &str) -> PyResult<Self> {
-        let reader = MAIReader::open(path).ok_or_else(|| PyRuntimeError::new_err(format!("Failed to open index: {}", path)))?;
+        let reader = MAIReader::open(path)
+            .ok_or_else(|| PyRuntimeError::new_err(format!("Failed to open index: {}", path)))?;
         Ok(Self { inner: reader })
     }
 
@@ -508,31 +543,43 @@ impl PyIndexer {
         self.index_type
     }
 
-    fn build(&self, reader: &PyMarReader, writer: &mut PyMAIWriter, opts: &PyIndexOptions) -> PyResult<()> {
+    fn build(
+        &self,
+        reader: &PyMarReader,
+        writer: &mut PyMAIWriter,
+        opts: &PyIndexOptions,
+    ) -> PyResult<()> {
         let rust_opts = IndexOptions {
             params: opts.params.clone(),
             aux_files: opts.aux_files.clone(),
         };
         match self.index_type {
             PyMAIIndexType::MINHASH => {
-                build_minhash_index(&reader.inner, &mut writer.inner, &rust_opts).map_err(PyRuntimeError::new_err)
+                build_minhash_index(&reader.inner, &mut writer.inner, &rust_opts)
+                    .map_err(PyRuntimeError::new_err)
             }
-            PyMAIIndexType::BM25 => {
-                build_bm25_index(&reader.inner, &mut writer.inner, &rust_opts).map_err(PyRuntimeError::new_err)
-            }
+            PyMAIIndexType::BM25 => build_bm25_index(&reader.inner, &mut writer.inner, &rust_opts)
+                .map_err(PyRuntimeError::new_err),
             PyMAIIndexType::EMAIL => {
-                build_email_index(&reader.inner, &mut writer.inner, &rust_opts).map_err(PyRuntimeError::new_err)
+                build_email_index(&reader.inner, &mut writer.inner, &rust_opts)
+                    .map_err(PyRuntimeError::new_err)
             }
             PyMAIIndexType::TIMESERIES => {
-                build_timeseries_index(&reader.inner, &mut writer.inner, &rust_opts).map_err(PyRuntimeError::new_err)
+                build_timeseries_index(&reader.inner, &mut writer.inner, &rust_opts)
+                    .map_err(PyRuntimeError::new_err)
             }
             PyMAIIndexType::GENOMIC => {
-                build_genomic_index(&reader.inner, &mut writer.inner, &rust_opts).map_err(PyRuntimeError::new_err)
+                build_genomic_index(&reader.inner, &mut writer.inner, &rust_opts)
+                    .map_err(PyRuntimeError::new_err)
             }
             PyMAIIndexType::FASTA => {
-                build_fasta_index(&reader.inner, &mut writer.inner, &rust_opts).map_err(PyRuntimeError::new_err)
+                build_fasta_index(&reader.inner, &mut writer.inner, &rust_opts)
+                    .map_err(PyRuntimeError::new_err)
             }
-            _ => Err(PyRuntimeError::new_err(format!("Unsupported indexer type: {}", self.type_name))),
+            _ => Err(PyRuntimeError::new_err(format!(
+                "Unsupported indexer type: {}",
+                self.type_name
+            ))),
         }
     }
 }
@@ -553,11 +600,15 @@ impl PyIndexCacheManager {
     }
 
     fn get<'py>(&self, py: Python<'py>, uri: &str, validator: &str) -> Option<Bound<'py, PyBytes>> {
-        self.inner.get(uri, validator).map(|bytes| PyBytes::new_bound(py, &bytes))
+        self.inner
+            .get(uri, validator)
+            .map(|bytes| PyBytes::new_bound(py, &bytes))
     }
 
     fn set(&self, uri: &str, validator: &str, meta_data: &[u8]) -> PyResult<()> {
-        self.inner.set(uri, validator, meta_data).map_err(PyRuntimeError::new_err)
+        self.inner
+            .set(uri, validator, meta_data)
+            .map_err(PyRuntimeError::new_err)
     }
 
     fn cache_dir(&self) -> String {
@@ -585,7 +636,10 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyIndexCacheManager>()?;
 
     let spec_v = format!("{}.{}.{}", MAR_SPEC_MAJOR, MAR_SPEC_MINOR, MAR_SPEC_PATCH);
-    let tool_v = format!("{}.{}.{}", TOOL_VERSION_MAJOR, TOOL_VERSION_MINOR, TOOL_VERSION_PATCH);
+    let tool_v = format!(
+        "{}.{}.{}",
+        TOOL_VERSION_MAJOR, TOOL_VERSION_MINOR, TOOL_VERSION_PATCH
+    );
     m.add("SPEC_VERSION", &spec_v)?;
     m.add("TOOL_VERSION", &tool_v)?;
     m.add("VERSION", &tool_v)?;
@@ -625,7 +679,10 @@ fn py_get_indexer(type_name: &str) -> PyResult<PyIndexer> {
             type_name: "fasta".to_string(),
             index_type: PyMAIIndexType::FASTA,
         }),
-        _ => Err(PyRuntimeError::new_err(format!("Unknown indexer: {}", type_name))),
+        _ => Err(PyRuntimeError::new_err(format!(
+            "Unknown indexer: {}",
+            type_name
+        ))),
     }
 }
 
@@ -643,9 +700,15 @@ fn py_list_index_types() -> Vec<String> {
 }
 
 #[pyfunction(name = "search")]
-fn py_search(archive_path: &str, index_path: &str, query: &str, opts: &PyIndexOptions) -> PyResult<Vec<PySearchResult>> {
+fn py_search(
+    archive_path: &str,
+    index_path: &str,
+    query: &str,
+    opts: &PyIndexOptions,
+) -> PyResult<Vec<PySearchResult>> {
     let reader = MarReader::open(archive_path).map_err(PyRuntimeError::new_err)?;
-    let index = MAIReader::open(index_path).ok_or_else(|| PyRuntimeError::new_err("Failed to open index"))?;
+    let index = MAIReader::open(index_path)
+        .ok_or_else(|| PyRuntimeError::new_err("Failed to open index"))?;
 
     let itype = index.header().index_type;
     let rust_opts = IndexOptions {
@@ -653,74 +716,103 @@ fn py_search(archive_path: &str, index_path: &str, query: &str, opts: &PyIndexOp
         aux_files: opts.aux_files.clone(),
     };
     if itype == MAIIndexType::MinHash as u8 {
-        let results = search_minhash(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
-        Ok(results.into_iter().map(|r| PySearchResult {
-            file_id: r.file_id,
-            filename: r.filename,
-            score: r.score,
-            content: r.content,
-            metadata: r.metadata,
-        }).collect())
+        let results =
+            search_minhash(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
+        Ok(results
+            .into_iter()
+            .map(|r| PySearchResult {
+                file_id: r.file_id,
+                filename: r.filename,
+                score: r.score,
+                content: r.content,
+                metadata: r.metadata,
+            })
+            .collect())
     } else if itype == MAIIndexType::BM25 as u8 {
-        let results = search_bm25(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
-        Ok(results.into_iter().map(|r| PySearchResult {
-            file_id: r.file_id,
-            filename: r.filename,
-            score: r.score,
-            content: r.content,
-            metadata: r.metadata,
-        }).collect())
+        let results =
+            search_bm25(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
+        Ok(results
+            .into_iter()
+            .map(|r| PySearchResult {
+                file_id: r.file_id,
+                filename: r.filename,
+                score: r.score,
+                content: r.content,
+                metadata: r.metadata,
+            })
+            .collect())
     } else if itype == MAIIndexType::Email as u8 {
-        let results = search_email(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
-        Ok(results.into_iter().map(|r| PySearchResult {
-            file_id: r.file_id,
-            filename: r.filename,
-            score: r.score,
-            content: r.content,
-            metadata: r.metadata,
-        }).collect())
+        let results =
+            search_email(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
+        Ok(results
+            .into_iter()
+            .map(|r| PySearchResult {
+                file_id: r.file_id,
+                filename: r.filename,
+                score: r.score,
+                content: r.content,
+                metadata: r.metadata,
+            })
+            .collect())
     } else if itype == MAIIndexType::TimeSeries as u8 {
-        let results = search_timeseries(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
-        Ok(results.into_iter().map(|r| PySearchResult {
-            file_id: r.file_id,
-            filename: r.filename,
-            score: r.score,
-            content: r.content,
-            metadata: r.metadata,
-        }).collect())
+        let results = search_timeseries(&reader, &index, query, &rust_opts)
+            .map_err(PyRuntimeError::new_err)?;
+        Ok(results
+            .into_iter()
+            .map(|r| PySearchResult {
+                file_id: r.file_id,
+                filename: r.filename,
+                score: r.score,
+                content: r.content,
+                metadata: r.metadata,
+            })
+            .collect())
     } else if itype == MAIIndexType::Genomic as u8 {
-        let results = search_genomic(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
-        Ok(results.into_iter().map(|r| PySearchResult {
-            file_id: r.file_id,
-            filename: r.filename,
-            score: r.score,
-            content: r.content,
-            metadata: r.metadata,
-        }).collect())
+        let results =
+            search_genomic(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
+        Ok(results
+            .into_iter()
+            .map(|r| PySearchResult {
+                file_id: r.file_id,
+                filename: r.filename,
+                score: r.score,
+                content: r.content,
+                metadata: r.metadata,
+            })
+            .collect())
     } else if itype == MAIIndexType::Fasta as u8 {
-        let results = search_fasta(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
-        Ok(results.into_iter().map(|r| PySearchResult {
-            file_id: r.file_id,
-            filename: r.filename,
-            score: r.score,
-            content: r.content,
-            metadata: r.metadata,
-        }).collect())
+        let results =
+            search_fasta(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
+        Ok(results
+            .into_iter()
+            .map(|r| PySearchResult {
+                file_id: r.file_id,
+                filename: r.filename,
+                score: r.score,
+                content: r.content,
+                metadata: r.metadata,
+            })
+            .collect())
     } else {
-        Err(PyRuntimeError::new_err("Unsupported index type in index file"))
+        Err(PyRuntimeError::new_err(
+            "Unsupported index type in index file",
+        ))
     }
 }
 
 #[pyfunction(name = "hash_file")]
 fn py_hash_file(path: &str, algo: &str) -> PyResult<String> {
-    let mut file = File::open(path).map_err(|e| PyRuntimeError::new_err(format!("Failed to open {}: {}", path, e)))?;
+    let mut file = File::open(path)
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to open {}: {}", path, e)))?;
     let mut buffer = vec![0u8; 65536];
 
     match algo {
         "xxhash64" => {
             let mut hasher = XXHash3_64::new(0);
             loop {
-                let n = file.read(&mut buffer).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+                let n = file
+                    .read(&mut buffer)
+                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
                 if n == 0 {
                     break;
                 }
@@ -731,7 +823,9 @@ fn py_hash_file(path: &str, algo: &str) -> PyResult<String> {
         "blake3" => {
             let mut hasher = blake3::Hasher::new();
             loop {
-                let n = file.read(&mut buffer).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+                let n = file
+                    .read(&mut buffer)
+                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
                 if n == 0 {
                     break;
                 }

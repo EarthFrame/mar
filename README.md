@@ -27,21 +27,29 @@ This README provides some basic usage - for more detailed usage, see the EarthFr
 
 ### Installation
 
-Package manager installation and static builds are on the way. For now, if you want to try `mar`, you can build it from source.
+Package manager installation and static builds are available via Homebrew, Debian packages, prebuilt binaries on GitHub Releases, and PyPI:
 
-### Dependencies
+```bash
+# Python package and CLI
+pip install pymar
 
-To build `mar` with all features enabled, you need the following dependencies:
+# Or install from source:
+cd python && pip install .
+```
 
-- **C++17 compatible compiler** (GCC 8+, Clang 7+)
-- **zlib** (for Gzip support)
-- **libzstd** (for Zstandard compression - default)
-- **liblz4** (for LZ4 compression)
-- **libbz2** (for Bzip2 compression)
-- **libdeflate** (for faster Gzip/Deflate implementation)
-- **libblake3** (for accelerated BLAKE3 checksums - vendored in `deps/`, so no system install is required)
+### Dependencies & Toolchains
 
-#### Installation Commands
+The primary CLI binary (`./mar`) is built with **Rust** and does not require external C++ libraries. The C++ reference implementation (`./mar-cpp`) is available for benchmarking and format validation.
+
+- **Rust toolchain (1.80+)**: Required to build the primary `mar` CLI binary, `mar-core` crate, and `pymar` Python extension.
+- **C++17 compiler (GCC 8+, Clang 7+) & development headers**: Only required if building the in-tree C++ reference binary (`mar-cpp`):
+  - `libzstd` (Zstandard compression)
+  - `zlib` / `libdeflate` (Gzip/Deflate compression)
+  - `liblz4` (LZ4 compression)
+  - `libbz2` (Bzip2 compression)
+  - `libblake3` (Vendored in `deps/`, no system install required)
+
+#### Installation Commands (C++ Reference Dependencies)
 
 **Apple macOS (using Homebrew):**
 ```bash
@@ -51,36 +59,42 @@ brew install gcc zstd lz4 bzip2 libdeflate
 **Debian / Ubuntu / Linux Mint:**
 ```bash
 sudo apt update
-sudo apt install build-essential cmake libzstd-dev liblz4-dev libbz2-dev zlib1g-dev libdeflate-dev
+sudo apt install build-essential cargo rustc cmake libzstd-dev liblz4-dev libbz2-dev zlib1g-dev libdeflate-dev
 ```
 
 **Fedora / RHEL / CentOS:**
 ```bash
-sudo dnf install gcc-c++ cmake zstd-devel lz4-devel bzip2-devel zlib-devel libdeflate-devel
+sudo dnf install gcc-c++ cargo rust cmake zstd-devel lz4-devel bzip2-devel zlib-devel libdeflate-devel
 ```
 
 **Arch Linux:**
 ```bash
-sudo pacman -S gcc cmake zstd lz4 bzip2 zlib libdeflate
+sudo pacman -S gcc rust cmake zstd lz4 bzip2 zlib libdeflate
 ```
 
 #### Building
 
 ```bash
-# Install system dependencies (macOS/Linux)
-make system-deps
-
-# Build the tool (defaults to pure Rust CLI binary: ./mar)
+# Build the primary tool (defaults to pure Rust CLI binary: ./mar)
 make
 
 # Build C++ reference binary (./mar-cpp)
 make cpp
 
-# Build using Clang instead of GCC
+# Build Python PyO3 extension (python/pymar/_mar.so)
+make python
+
+# Build using Clang instead of GCC (for C++ reference)
 make CXX=clang++
 
 # Run unit tests
 make test
+
+# Run C++ reference unit tests
+make test-cpp
+
+# Run CLI integration tests
+make integration-test
 
 # Run integration tests
 make integration-test
@@ -218,35 +232,27 @@ See [Subsetting Large Datasets with MAR Slice](docs/tutorials/slice.md) for the 
 
 MAR supports sidecar indices (`.mai` files) for advanced search capabilities like structural similarity (MinHash) and semantic search (Vector/HNSW).
 
-**Note**: Indexing and search are under heavy development. For now, consider these features in beta. The API and CLI are relatively stable but are subject to change. Complete documentation will be available soon.
+**Note**: In the standalone open-source `mar` CLI binary, `mar index`, `mar search`, and `okf` delegate to `mar-enterprise` when available. Native in-tree sidecar indexing and search can also be executed directly via the C++ reference binary (`./mar-cpp`).
 
-### Building with Indexing Support
-
-The indexing infrastructure is built into the core `mar` tool. To build:
-
-```bash
-make
-```
-
-### Using MAR Indexes and MAR Search
+### Using MAR Indexes and MAR Search with C++ Reference Binary
 
 #### 1. Create an Archive
 
 ```bash
-mar create -f data.mar ./my_docs/
+./mar create -f data.mar ./my_docs/
 ```
 
 #### 2. Generate a MinHash Index
 
 MinHash indices allow finding files with similar content.
 ```bash
-mar index -i data.mar --type minhash --with bit_width=32 --with hashes=256 --with threads=4
+./mar-cpp index -i data.mar --type minhash --with bit_width=32 --with hashes=256 --with threads=4
 ```
 
 #### 3. Search for Similar Files
 
 ```bash
-mar search -i data.mar --index data.mar.minhash.mai --type similarity --with file=report.txt
+./mar-cpp search -i data.mar --index data.mar.minhash.mai --type similarity --with file=report.txt
 ```
 
 ## Format Specification
