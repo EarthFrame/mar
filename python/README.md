@@ -40,7 +40,7 @@ maturin develop
 
 ## Cloud Storage & Egress Optimization
 
-`pymar` supports direct mounting of archives hosted in AWS S3, Cloudflare R2, Backblaze B2, or any standard HTTP/HTTPS range-capable storage. For an architectural deep-dive into private buckets, AWS VPC endpoints, and Cloudflare R2 zero-egress setups, see the [Cloud Storage Cost Optimization guide](../../docs/tutorials/cloud_storage_costs.md).
+`pymar` supports direct mounting of archives hosted in AWS S3, Cloudflare R2, Backblaze B2, or any standard HTTP/HTTPS range-capable storage. For documentation on private buckets, AWS VPC endpoints, and Cloudflare R2 zero-egress setups, see the EarthFrame documentation at [https://docs.earthframe.com](https://docs.earthframe.com).
 
 ### S3 / R2 / B2 Configuration
 
@@ -89,7 +89,7 @@ In Boltz-2, datasets distribute the Chemical Component Dictionary (CCD) containi
 
 `pymar` converts `mols.tar` directly to `mols.mar` in memory, provides $O(1)$ random access, and integrates with PyTorch `DataLoader`.
 
-For the complete end-to-end tutorial with egress benchmarks and multi-worker training examples, see the dedicated [Boltz-2 Tutorial](../docs/tutorials/boltz2.md).
+For end-to-end tutorials with egress benchmarks and multi-worker training examples, see the EarthFrame documentation at [https://docs.earthframe.com](https://docs.earthframe.com).
 
 ### Quickstart
 

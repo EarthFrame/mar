@@ -181,7 +181,7 @@ def compare_field(a: Entry | None, b: Entry | None, field: str) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--mar", default=str(DEFAULT_MAR), help="Path to mar binary (default: ./mar)")
-    ap.add_argument("--write-doc", action="store_true", help="Write docs/METADATA_PARITY.md")
+    ap.add_argument("--write-doc", action="store_true", help="Write benchmarks/METADATA_PARITY.md")
     args = ap.parse_args()
 
     mar_bin = Path(args.mar).resolve()
@@ -297,8 +297,7 @@ def main() -> None:
     print(out_md, end="")
 
     if args.write_doc:
-        doc_path = REPO_ROOT / "docs" / "METADATA_PARITY.md"
-        doc_path.parent.mkdir(parents=True, exist_ok=True)
+        doc_path = REPO_ROOT / "benchmarks" / "METADATA_PARITY.md"
         doc_path.write_text(out_md, encoding="utf-8")
 
 

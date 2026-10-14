@@ -88,7 +88,7 @@ help:
 	@echo "UTILITIES:"
 	@echo "  make setup-data      - Extract and prepare benchmark datasets"
 	@echo "  make plot            - (Re)generate plots from results.csv"
-	@echo "  make parity          - Write docs/METADATA_PARITY.md"
+	@echo "  make parity          - Write benchmarks/METADATA_PARITY.md"
 	@echo "  make clean           - Remove all benchmark results and plots"
 	@echo "  make help            - Show this help message"
 	@echo ""

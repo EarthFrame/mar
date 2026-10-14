@@ -81,7 +81,7 @@ make check-deps
 
 ## Linting
 
-> **Status**: The `make lint` target is not yet implemented. It is tracked in [docs/progress/2026-04-28-ci-lint-static.md](docs/progress/2026-04-28-ci-lint-static.md). This section documents the intended workflow for when it is ready.
+> **Status**: The `make lint` target is tracked in the repository roadmap. This section documents the intended workflow for when it is ready.
 
 Before linting, generate a compilation database so `clang-tidy` knows your exact build flags and include paths:
 
@@ -251,7 +251,6 @@ rust/             Pure Rust engine and CLI binary (default mar binary)
 python/           Python bindings (pymar) and tests
 tests/            CLI integration tests (integration_test.sh) and test fixtures
 deps/             Vendored third-party libraries (BLAKE3, hnswlib, nlohmann/json, etc.)
-docs/             Tutorials, release notes, and progress notes
 scripts/          Helper scripts (perf checks, test data generation)
 benchmarks/       Benchmark baselines and tooling
 .github/          CI workflow definitions

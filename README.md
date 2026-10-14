@@ -39,80 +39,31 @@ cd python && pip install .
 
 ### Dependencies & Toolchains
 
-The primary CLI binary (`./mar`) is built with **Rust** and does not require external C++ libraries. The C++ reference implementation (`./mar-cpp`) is available for benchmarking and format validation.
+- **Rust toolchain (1.80+)**: Required to build the primary `mar` CLI binary (`./mar`), `mar-core` crate, and the `pymar` Python extension.
+- **Python (3.8+)**: Optional, for the Python package (`pymar`).
 
-- **Rust toolchain (1.80+)**: Required to build the primary `mar` CLI binary, `mar-core` crate, and `pymar` Python extension.
-- **C++17 compiler (GCC 8+, Clang 7+) & development headers**: Only required if building the in-tree C++ reference binary (`mar-cpp`):
-  - `libzstd` (Zstandard compression)
-  - `zlib` / `libdeflate` (Gzip/Deflate compression)
-  - `liblz4` (LZ4 compression)
-  - `libbz2` (Bzip2 compression)
-  - `libblake3` (Vendored in `deps/`, no system install required)
-
-#### Installation Commands (C++ Reference Dependencies)
-
-**Apple macOS (using Homebrew):**
-```bash
-brew install gcc zstd lz4 bzip2 libdeflate
-```
-
-**Debian / Ubuntu / Linux Mint:**
-```bash
-sudo apt update
-sudo apt install build-essential cargo rustc cmake libzstd-dev liblz4-dev libbz2-dev zlib1g-dev libdeflate-dev
-```
-
-**Fedora / RHEL / CentOS:**
-```bash
-sudo dnf install gcc-c++ cargo rust cmake zstd-devel lz4-devel bzip2-devel zlib-devel libdeflate-devel
-```
-
-**Arch Linux:**
-```bash
-sudo pacman -S gcc rust cmake zstd lz4 bzip2 zlib libdeflate
-```
+*Note*: An in-tree C++ reference implementation (`./mar-cpp`) is also available for benchmarking and format validation; see [`cpp/README.md`](cpp/README.md) for its compiler and dependency requirements.
 
 #### Building
 
 ```bash
-# Build the primary tool (defaults to pure Rust CLI binary: ./mar)
+# Build the primary CLI tool (pure Rust binary: ./mar)
 make
-
-# Build C++ reference binary (./mar-cpp)
-make cpp
 
 # Build Python PyO3 extension (python/pymar/_mar.so)
 make python
 
-# Build using Clang instead of GCC (for C++ reference)
-make CXX=clang++
-
-# Run unit tests
+# Run Rust unit tests
 make test
-
-# Run C++ reference unit tests
-make test-cpp
 
 # Run CLI integration tests
 make integration-test
 
-# Run integration tests
-make integration-test
+# Run Python unit tests
+make test-python
 
-# Check available compression libraries
-make check-deps
-
-## Run a quick performance smoke-test to help flag regressions.
+# Performance smoke-test against saved baselines
 make perf-smoke
-
-### Performance Smoke Test
-## The performance smoke test (`scripts/perf_smoke_test.sh`) compares current performance against a saved baseline in `.perf/previous_run.txt`.
-## By default, it looks for test data in `benchmarks/data`. You can point it to a different directory using the `DATA_DIR` environment variable.
-## The test will look for specific datasets like `linux-6.18.5`, `numpy-2.4.1`, or a `dickens` file within that directory.
-
-# Run with a custom data directory
-DATA_DIR=/path/to/my/benchmarks ./scripts/perf_smoke_test.sh
-
 ```
 
 ## Usage
@@ -226,15 +177,15 @@ pymar slice s3://alphafold-db-v4/proteome.mar -o local_targets.mar -T 2000_targe
 pymar slice https://cdn.example.com/proteome.mar -o local_targets.mar -T 2000_targets.txt
 ```
 
-See [Subsetting Large Datasets with MAR Slice](docs/tutorials/slice.md) for the full tutorial.
+For more details and tutorials, see the EarthFrame documentation at [https://docs.earthframe.com](https://docs.earthframe.com).
 
 ## Indexing and Search
 
 MAR supports sidecar indices (`.mai` files) for advanced search capabilities like structural similarity (MinHash) and semantic search (Vector/HNSW).
 
-**Note**: In the standalone open-source `mar` CLI binary, `mar index`, `mar search`, and `okf` delegate to `mar-enterprise` when available. Native in-tree sidecar indexing and search can also be executed directly via the C++ reference binary (`./mar-cpp`).
+**Note**: In the standalone open-source `mar` CLI binary, `mar index`, `mar search`, and `okf` delegate to `mar-enterprise` when available. Native in-tree sidecar indexing and search can also be executed directly via the C++ reference binary (`./mar-cpp`, see [`cpp/README.md`](cpp/README.md)).
 
-### Using MAR Indexes and MAR Search with C++ Reference Binary
+### MinHash Indexing and Search Example
 
 #### 1. Create an Archive
 
@@ -242,7 +193,7 @@ MAR supports sidecar indices (`.mai` files) for advanced search capabilities lik
 ./mar create -f data.mar ./my_docs/
 ```
 
-#### 2. Generate a MinHash Index
+#### 2. Generate a MinHash Index (with `mar-cpp`)
 
 MinHash indices allow finding files with similar content.
 ```bash

@@ -4,7 +4,7 @@
 
 MAR's performance is benchmarked to 1) measure the relative performance of various MAR configurations across workloads and 2) allow comparison to TAR.
 
-For **metadata parity** (what TAR vs MAR store and what extraction restores), see `docs/METADATA_PARITY.md` or run:
+For **metadata parity** (what TAR vs MAR store and what extraction restores), see `benchmarks/METADATA_PARITY.md` or run:
 
 ```bash
 cd benchmarks
