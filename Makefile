@@ -101,10 +101,7 @@ SRCS = $(CPP_DIR)/src/format.cpp $(CPP_DIR)/src/checksum.cpp $(CPP_DIR)/src/comp
        $(CPP_DIR)/src/file_descriptor_manager.cpp $(CPP_DIR)/src/async_io.cpp $(CPP_DIR)/src/thread_pool.cpp $(CPP_DIR)/src/redact.cpp $(CPP_DIR)/src/diff.cpp \
        $(CPP_DIR)/src/index_registry.cpp $(CPP_DIR)/src/index_minhash.cpp $(CPP_DIR)/src/index_vector.cpp $(CPP_DIR)/src/index_bm25.cpp $(CPP_DIR)/src/index_genomic.cpp \
        $(CPP_DIR)/src/index_fasta.cpp \
-       $(CPP_DIR)/src/index_email.cpp $(CPP_DIR)/src/index_timeseries.cpp $(CPP_DIR)/src/embed_server.cpp \
-       $(CPP_DIR)/src/okf_yaml.cpp $(CPP_DIR)/src/okf_document.cpp $(CPP_DIR)/src/okf_links.cpp $(CPP_DIR)/src/okf_bundle.cpp $(CPP_DIR)/src/okf_validate.cpp \
-       $(CPP_DIR)/src/okf_cache.cpp $(CPP_DIR)/src/okf_computation.cpp $(CPP_DIR)/src/okf_lint.cpp $(CPP_DIR)/src/okf_diff.cpp $(CPP_DIR)/src/okf_index_gen.cpp \
-       $(CPP_DIR)/src/okf_cli.cpp
+       $(CPP_DIR)/src/index_email.cpp $(CPP_DIR)/src/index_timeseries.cpp $(CPP_DIR)/src/embed_server.cpp
 MAIN_SRC = $(CPP_DIR)/src/main.cpp
 TEST_SRC = $(CPP_DIR)/tests/test_main.cpp
 

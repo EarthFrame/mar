@@ -13,8 +13,7 @@ fn test_mar_okf_enterprise_delegation_missing_license() {
 
     assert_eq!(output.status.code(), Some(69));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("'mar okf' requires the MAR Enterprise Extension (mar-enterprise)."));
-    assert!(stderr.contains("https://earthframe.com/enterprise"));
+    assert!(stderr.contains("requires") && (stderr.contains("mar-enterprise") || stderr.contains("mar-index")));
 }
 
 #[test]

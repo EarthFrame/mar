@@ -787,7 +787,7 @@ fn test_cli_usage_errors_exit_code_2() {
 fn test_cli_enterprise_delegations() {
     let mar_bin = env!("CARGO_BIN_EXE_mar");
 
-    // 1. Missing enterprise binary -> exit code 69 and license notification message
+    // 1. Missing enterprise/indexing binary -> exit code 69 and license notification message
     for cmd in &["index", "search", "okf"] {
         let out = std::process::Command::new(mar_bin)
             .arg(cmd)
@@ -799,17 +799,16 @@ fn test_cli_enterprise_delegations() {
         assert_eq!(
             out.status.code(),
             Some(69),
-            "Enterprise command '{}' without binary must exit with code 69",
+            "Command '{}' without binary must exit with code 69",
             cmd
         );
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(
-            err.contains("requires the MAR Enterprise Extension (mar-enterprise)"),
-            "Command '{}' missing enterprise banner in stderr: {}",
+            err.contains("requires the MAR Enterprise Extension") || err.contains("mar-index"),
+            "Command '{}' missing banner in stderr: {}",
             cmd,
             err
         );
-        assert!(err.contains("https://earthframe.com/enterprise"));
     }
 
     // 2. Mock enterprise binary invocation override

@@ -97,7 +97,6 @@ Commands:
   hash     Compute a fast archive hash
   header   Display archive header information
   validate Validate archive integrity and checksums
-  okf      Pack, inspect, and validate OKF knowledge bundles (Enterprise)
   version  Display version information
 
 Common options:
@@ -2473,10 +2472,10 @@ fn delegate_to_mar_enterprise(cmd_name: &str, args: &[String]) -> i32 {
         }
     } else {
         eprintln!(
-            "'mar {}' requires the MAR Enterprise Extension (mar-enterprise).",
+            "'mar {}' requires mar-index or the MAR Enterprise Extension.",
             cmd_name
         );
-        eprintln!("To obtain an enterprise license, visit: https://earthframe.com/enterprise");
+        eprintln!("For information on indexing, search, and enterprise features, visit: https://earthframe.com");
         EXIT_UNAVAILABLE
     }
 }

@@ -183,28 +183,9 @@ For more details and tutorials, see the EarthFrame documentation at [https://doc
 
 MAR supports sidecar indices (`.mai` files) for advanced search capabilities like structural similarity (MinHash) and semantic search (Vector/HNSW).
 
-**Note**: In the standalone open-source `mar` CLI binary, `mar index`, `mar search`, and `okf` delegate to `mar-enterprise` when available. Native in-tree sidecar indexing and search can also be executed directly via the C++ reference binary (`./mar-cpp`, see [`cpp/README.md`](cpp/README.md)).
+**Note**: In the standalone open-source `mar` CLI binary, `mar index` and `mar search` delegate to `mar-index` / `mar-enterprise` when available.
 
-### MinHash Indexing and Search Example
-
-#### 1. Create an Archive
-
-```bash
-./mar create -f data.mar ./my_docs/
-```
-
-#### 2. Generate a MinHash Index (with `mar-cpp`)
-
-MinHash indices allow finding files with similar content.
-```bash
-./mar-cpp index -i data.mar --type minhash --with bit_width=32 --with hashes=256 --with threads=4
-```
-
-#### 3. Search for Similar Files
-
-```bash
-./mar-cpp search -i data.mar --index data.mar.minhash.mai --type similarity --with file=report.txt
-```
+For documentation on creating and searching MAR indices, see the EarthFrame documentation at [https://docs.earthframe.com](https://docs.earthframe.com).
 
 ## Format Specification
 

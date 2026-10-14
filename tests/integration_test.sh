@@ -1455,8 +1455,8 @@ test_indexing_and_search() {
     # Check if 'mar index' is available or delegates to enterprise extension
     local check_out
     check_out=$("$MAR_BIN" index --help 2>&1 || true)
-    if echo "$check_out" | grep -q "requires the MAR Enterprise Extension"; then
-        log_warn "indexing and search (skipped: 'mar index' requires the MAR Enterprise Extension)"
+    if echo "$check_out" | grep -qE "requires (the MAR Enterprise Extension|mar-index)"; then
+        log_warn "indexing and search (skipped: 'mar index' requires mar-index or the MAR Enterprise Extension)"
         return 0
     fi
 
@@ -2027,6 +2027,11 @@ test_okf_pack_inspect() {
     local restored="$TEST_DIR/okf/restored"
     mkdir -p "$(dirname "$archive")" "$restored"
 
+    if [ ! -d "$fixture" ]; then
+        log_warn "OKF tests skipped: fixture not present in open-source mar (requires mar-index/mar-enterprise)"
+        return 0
+    fi
+
     run_test_or_skip_if_unsupported "okf pack minimal fixture" "$MAR_BIN okf pack \"$fixture\" -f \"$archive\""
     if [ ! -f "$archive" ]; then
         return 0
@@ -2067,6 +2072,15 @@ test_vector_search() {
     local workdir="$TEST_DIR/vector_search"
     mkdir -p "$workdir"
     cd "$workdir"
+
+    # Check if 'mar index' is available or delegates to enterprise extension
+    local check_out
+    check_out=$("$MAR_BIN" index --help 2>&1 || true)
+    if echo "$check_out" | grep -qE "requires (the MAR Enterprise Extension|mar-index)"; then
+        log_warn "Vector search tests skipped: 'mar index' requires mar-index or the MAR Enterprise Extension"
+        TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
+        return 0
+    fi
 
     # 1. Setup data
     mkdir -p input
