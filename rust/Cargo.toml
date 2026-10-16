@@ -4,7 +4,7 @@ version = "0.3.0"
 edition = "2021"
 authors = ["EarthFrame Corporation <info@earthframe.ai>"]
 description = "High-performance pure Rust engine and CLI for the MAR archive format"
-license = "MIT"
+license = "Apache-2.0"
 
 [lib]
 name = "mar_core"

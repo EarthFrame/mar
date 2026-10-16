@@ -3,7 +3,7 @@ class Mar < Formula
   homepage "https://github.com/earthframe/mar"
   url "https://github.com/earthframe/mar/archive/refs/tags/v0.3.0.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
-  license "MIT"
+  license "Apache-2.0"
 
   depends_on "rust" => :build
 

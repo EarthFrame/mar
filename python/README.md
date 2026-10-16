@@ -193,4 +193,4 @@ print("Files:", reader.file_count())
 
 ## License
 
-MIT License. Copyright (c) 2026 EarthFrame Corporation.
+Apache License 2.0. Copyright (c) 2026 EarthFrame Corporation.

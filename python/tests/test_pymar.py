@@ -9,6 +9,14 @@ from pymar.tools import (
     mar_hash, mar_validate, mar_header, mar_version, mar_fasta_get
 )
 
+def _has_mar_index() -> bool:
+    return bool(
+        os.environ.get("MAR_INDEX_BIN")
+        or os.environ.get("MAR_ENTERPRISE_BIN")
+        or shutil.which("mar-index")
+        or shutil.which("mar-enterprise")
+    )
+
 @pytest.fixture
 def test_data(tmp_path):
     data_dir = tmp_path / "data"
@@ -72,6 +80,8 @@ def test_mar_validate(mar_file):
     assert mar_validate(mar_file) is True
 
 def test_mar_index_minhash(mar_file, test_data, tmp_path):
+    if not _has_mar_index():
+        pytest.skip("Requires mar-index")
     index_path = str(tmp_path / "test.minhash.mai")
     msg = mar_index(mar_file, "minhash", index_path)
     assert "Successfully created minhash index" in msg
@@ -230,6 +240,8 @@ def test_symlinks(tmp_path):
         archive.read_file("link.txt")
 
 def test_mar_index_bm25(mar_file, tmp_path):
+    if not _has_mar_index():
+        pytest.skip("Requires mar-index")
     index_path = str(tmp_path / "test.bm25.mai")
     if "bm25" in _mar.list_index_types():
         msg = mar_index(mar_file, "bm25", index_path)
@@ -241,6 +253,8 @@ def test_mar_index_bm25(mar_file, tmp_path):
         assert "file1.txt" in results[0]["filename"]
 
 def test_mar_index_email(tmp_path):
+    if not _has_mar_index():
+        pytest.skip("Requires mar-index")
     path = str(tmp_path / "emails.mar")
     opts = _mar.WriteOptions()
     writer = _mar.MarWriter(path, opts)
@@ -266,6 +280,8 @@ def test_mar_index_email(tmp_path):
     assert results[0]["metadata"]["to"] == "bob@example.com"
 
 def test_mar_index_timeseries(tmp_path):
+    if not _has_mar_index():
+        pytest.skip("Requires mar-index")
     path = str(tmp_path / "ts.mar")
     opts = _mar.WriteOptions()
     writer = _mar.MarWriter(path, opts)
@@ -284,6 +300,8 @@ def test_mar_index_timeseries(tmp_path):
     assert results[0]["metadata"]["row_count"] == "2"
 
 def test_mar_index_genomic(tmp_path):
+    if not _has_mar_index():
+        pytest.skip("Requires mar-index")
     path = str(tmp_path / "genome.mar")
     opts = _mar.WriteOptions()
     writer = _mar.MarWriter(path, opts)
@@ -300,6 +318,8 @@ def test_mar_index_genomic(tmp_path):
     assert "chr1.fa" in results[0]["filename"]
 
 def test_mar_index_fasta_multi_file_and_get(tmp_path):
+    if not _has_mar_index():
+        pytest.skip("Requires mar-index")
     path = str(tmp_path / "proteins.mar")
     opts = _mar.WriteOptions()
     opts.multiblock = True

@@ -327,18 +327,25 @@ class MarArchive:
 
     def search(self, index_path: str, query: str, topk: int = 10, **params) -> List[SearchResult]:
         """Search the archive using a sidecar index."""
-        opts = _mar.IndexOptions()
-        opts.params = {k: str(v) for k, v in params.items()}
-        opts.params["topk"] = str(topk)
-        
-        results = _mar.search(self.path, index_path, query, opts)
-        return [SearchResult(
-            file_id=r.file_id,
-            filename=r.filename,
-            score=r.score,
-            content=r.content,
-            metadata=r.metadata
-        ) for r in results]
+        import shutil
+        import subprocess
+
+        idx_bin = os.environ.get("MAR_INDEX_BIN") or os.environ.get("MAR_ENTERPRISE_BIN")
+        if not idx_bin:
+            idx_bin = shutil.which("mar-index") or shutil.which("mar-enterprise")
+
+        if not idx_bin:
+            raise RuntimeError(
+                "Indexing and search require mar-index: pip install mar-index or visit https://earthframe.com"
+            )
+
+        cmd = [idx_bin, "search", self.path, index_path, query, "--topk", str(topk)]
+        for k, v in params.items():
+            cmd.extend(["--param", f"{k}={v}"])
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            raise RuntimeError(f"mar-index search failed: {res.stderr or res.stdout}")
+        return []
 
     def get_fasta_record(self, index_path: str, query: str, file: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
@@ -528,32 +535,28 @@ def slice_archive(
     )
 
 def index_archive(archive_path: str, index_type: str, output_path: Optional[str] = None, **params):
-    """Create a sidecar index for an archive."""
-    indexer = _mar.get_indexer(index_type)
-    if not indexer:
-        raise ValueError(f"Unsupported index type: {index_type}")
-        
-    reader = _mar.MarReader(archive_path)
-    
-    # Compute archive hash (simplified version of C++ logic)
-    # In a real scenario, we might want to use the C++ hash_file function
-    archive_hash_hex = _mar.hash_file(archive_path, "xxhash64")
-    archive_hash = int(archive_hash_hex, 16)
-    
-    # MAIWriter needs the enum type
-    # We can get it from the indexer
-    writer = _mar.MAIWriter(archive_path, indexer.index_type(), archive_hash)
-    
-    opts = _mar.IndexOptions()
-    opts.params = {k: str(v) for k, v in params.items()}
-    
-    indexer.build(reader, writer, opts)
-    
-    if output_path is None:
-        output_path = f"{archive_path}.{index_type}.mai"
-        
-    writer.write_to_file(output_path)
-    return output_path
+    """Create a sidecar index for an archive. Requires mar-index or mar-enterprise CLI."""
+    import shutil
+    import subprocess
+
+    idx_bin = os.environ.get("MAR_INDEX_BIN") or os.environ.get("MAR_ENTERPRISE_BIN")
+    if not idx_bin:
+        idx_bin = shutil.which("mar-index") or shutil.which("mar-enterprise")
+
+    if idx_bin:
+        cmd = [idx_bin, "index", archive_path, "--type", index_type]
+        if output_path:
+            cmd.extend(["-o", output_path])
+        for k, v in params.items():
+            cmd.extend(["--param", f"{k}={v}"])
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            raise RuntimeError(f"mar-index failed: {res.stderr or res.stdout}")
+        return output_path or f"{archive_path}.{index_type}.mai"
+
+    raise RuntimeError(
+        "Indexing and search require mar-index: pip install mar-index or visit https://earthframe.com"
+    )
 
 def get_version() -> str:
     """Get MAR tool version."""

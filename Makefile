@@ -28,7 +28,7 @@ PROJECT_DESC = High-performance archival utility for efficient compression, stor
 PROJECT_HOMEPAGE = https://github.com/earthframe/mar
 PROJECT_REPO = https://github.com/earthframe/mar
 PROJECT_MAINTAINER = EarthFrame Corporation
-PROJECT_LICENSE = MIT
+PROJECT_LICENSE = Apache-2.0
 
 # Developer tool versions
 ZIG_VERSION = 0.16.0
@@ -91,17 +91,14 @@ ARCH_FLAGS ?=
 TARGET_NAME ?= mar-cpp
 
 # Include paths
-INCLUDES = -I./cpp/include -isystem ./deps -isystem ./deps/simde -isystem ./deps/hnswlib
+INCLUDES = -I./cpp/include
 
 # Source files (C++ reference implementation in cpp/)
 CPP_DIR = cpp
 SRCS = $(CPP_DIR)/src/format.cpp $(CPP_DIR)/src/checksum.cpp $(CPP_DIR)/src/compression.cpp $(CPP_DIR)/src/compression_gzip.cpp \
        $(CPP_DIR)/src/compression_zstd.cpp $(CPP_DIR)/src/compression_lz4.cpp $(CPP_DIR)/src/compression_bzip2.cpp \
        $(CPP_DIR)/src/sections.cpp $(CPP_DIR)/src/name_index.cpp $(CPP_DIR)/src/reader.cpp $(CPP_DIR)/src/writer.cpp \
-       $(CPP_DIR)/src/file_descriptor_manager.cpp $(CPP_DIR)/src/async_io.cpp $(CPP_DIR)/src/thread_pool.cpp $(CPP_DIR)/src/redact.cpp $(CPP_DIR)/src/diff.cpp \
-       $(CPP_DIR)/src/index_registry.cpp $(CPP_DIR)/src/index_minhash.cpp $(CPP_DIR)/src/index_vector.cpp $(CPP_DIR)/src/index_bm25.cpp $(CPP_DIR)/src/index_genomic.cpp \
-       $(CPP_DIR)/src/index_fasta.cpp \
-       $(CPP_DIR)/src/index_email.cpp $(CPP_DIR)/src/index_timeseries.cpp $(CPP_DIR)/src/embed_server.cpp
+       $(CPP_DIR)/src/file_descriptor_manager.cpp $(CPP_DIR)/src/async_io.cpp $(CPP_DIR)/src/thread_pool.cpp $(CPP_DIR)/src/redact.cpp $(CPP_DIR)/src/diff.cpp
 MAIN_SRC = $(CPP_DIR)/src/main.cpp
 TEST_SRC = $(CPP_DIR)/tests/test_main.cpp
 
@@ -226,47 +223,14 @@ ifeq ($(KQUEUE_FOUND),yes)
     CXXFLAGS += -DMAR_HAS_KQUEUE=1
 endif
 
-# Local BLAKE3 detection
-LOCAL_BLAKE3_DIR = ./deps/BLAKE3/c
-LOCAL_BLAKE3_LIB = $(LOCAL_BLAKE3_DIR)/libblake3.a
-
-# Local libdeflate detection
-LOCAL_LIBDEFLATE_DIR = ./deps/libdeflate
-LOCAL_LIBDEFLATE_LIB = $(LOCAL_LIBDEFLATE_DIR)/libdeflate.a
-
 ifeq ($(BLAKE3_FOUND),yes)
     CXXFLAGS += $(shell pkg-config --cflags libblake3) -DHAVE_BLAKE3=1
     LDFLAGS += $(shell pkg-config $(PKG_CONFIG_STATIC) --libs libblake3)
-else ifneq ($(wildcard $(LOCAL_BLAKE3_LIB)),)
-    INCLUDES += -I$(LOCAL_BLAKE3_DIR)
-    LDFLAGS += $(LOCAL_BLAKE3_LIB)
-    CXXFLAGS += -DHAVE_BLAKE3=1
-    BLAKE3_FOUND := yes
-else
-    # Try to build it if the directory exists
-    ifneq ($(wildcard $(LOCAL_BLAKE3_DIR)/blake3.c),)
-        BLAKE3_DEP = $(LOCAL_BLAKE3_LIB)
-        INCLUDES += -I$(LOCAL_BLAKE3_DIR)
-        LDFLAGS += $(LOCAL_BLAKE3_LIB)
-        CXXFLAGS += -DHAVE_BLAKE3=1
-        BLAKE3_FOUND := yes
-    endif
 endif
 
 ifeq ($(LIBDEFLATE_FOUND),yes)
     CXXFLAGS += $(shell pkg-config --cflags libdeflate)
     LDFLAGS += $(shell pkg-config $(PKG_CONFIG_STATIC) --libs libdeflate)
-else ifneq ($(wildcard $(LOCAL_LIBDEFLATE_LIB)),)
-    INCLUDES += -I$(LOCAL_LIBDEFLATE_DIR)
-    LDFLAGS += $(LOCAL_LIBDEFLATE_LIB)
-    LIBDEFLATE_FOUND := yes
-else
-    # Try to build it if the directory exists
-    ifneq ($(wildcard $(LOCAL_LIBDEFLATE_DIR)/CMakeLists.txt),)
-        LIBDEFLATE_DEP = $(LOCAL_LIBDEFLATE_LIB)
-        INCLUDES += -I$(LOCAL_LIBDEFLATE_DIR)
-        LIBDEFLATE_FOUND := yes
-    endif
 endif
 
 # macOS specific
@@ -287,13 +251,7 @@ ifeq ($(UNAME_S),Darwin)
         LDFLAGS := $(subst -lz,$(call find_static,libz,-lz),$(LDFLAGS))
         LDFLAGS := $(subst -lbz2,$(call find_static,libbz2,-lbz2),$(LDFLAGS))
         LDFLAGS := $(subst -ldeflate,$(call find_static,libdeflate,-ldeflate),$(LDFLAGS))
-        
-        # Prefer local BLAKE3 static library if it exists, otherwise check Homebrew
-        ifneq ($(wildcard $(LOCAL_BLAKE3_LIB)),)
-            LDFLAGS := $(subst -lblake3,$(LOCAL_BLAKE3_LIB),$(LDFLAGS))
-        else
-            LDFLAGS := $(subst -lblake3,$(call find_static,libblake3,-lblake3),$(LDFLAGS))
-        endif
+        LDFLAGS := $(subst -lblake3,$(call find_static,libblake3,-lblake3),$(LDFLAGS))
     endif
 
     # Only add these if pkg-config failed to find them
@@ -331,7 +289,7 @@ endif
 
 # Phony targets
 .PHONY: all clean mar cpp test test-rust test-cpp install uninstall check-deps check-dev-deps drop-cache static release \
-        deps debug system-deps dev-deps lint lint-fix format mar-rust cpp rust python test-all \
+        debug system-deps dev-deps lint lint-fix format mar-rust cpp rust python test-all \
         integration-test integration-test-cpp \
         dist-linux-x86_64 \
 		dist-linux-x86_64-sse42 \
@@ -437,12 +395,12 @@ $(BUILD_DIR)/test_main.o: $(CPP_DIR)/tests/test_main.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # Link C++ binary
-$(CPP_TARGET): $(OBJS) $(MAIN_OBJ) $(BLAKE3_DEP) $(LIBDEFLATE_DEP)
-	$(CXX) $(CXXFLAGS) $(OBJS) $(MAIN_OBJ) $(BLAKE3_DEP) $(LIBDEFLATE_DEP) -o $@ $(LDFLAGS)
+$(CPP_TARGET): $(OBJS) $(MAIN_OBJ)
+	$(CXX) $(CXXFLAGS) $(OBJS) $(MAIN_OBJ) -o $@ $(LDFLAGS)
 
 # Link test binary
-$(TEST_TARGET): $(OBJS) $(TEST_OBJ) $(BLAKE3_DEP) $(LIBDEFLATE_DEP)
-	$(CXX) $(CXXFLAGS) $(OBJS) $(TEST_OBJ) $(BLAKE3_DEP) $(LIBDEFLATE_DEP) -o $@ $(LDFLAGS)
+$(TEST_TARGET): $(OBJS) $(TEST_OBJ)
+	$(CXX) $(CXXFLAGS) $(OBJS) $(TEST_OBJ) -o $@ $(LDFLAGS)
 
 # Static build
 static:
@@ -451,25 +409,6 @@ static:
 # Release build (optimized, static)
 release:
 	$(MAKE) STATIC=1 BUILD=release OPT_CXXFLAGS="-O3" all-internal
-
-# Dependency management
-deps:
-	@echo "Adding dependencies via git subtree..."
-	@if [ ! -d "deps/BLAKE3" ]; then \
-		git subtree add --prefix deps/BLAKE3 https://github.com/BLAKE3-team/BLAKE3.git master --squash; \
-	else \
-		echo "deps/BLAKE3 already exists, skipping."; \
-	fi
-	@if [ ! -d "deps/xxHash" ]; then \
-		git subtree add --prefix deps/xxHash https://github.com/Cyan4973/xxHash.git dev --squash; \
-	else \
-		echo "deps/xxHash already exists, skipping."; \
-	fi
-	@if [ ! -d "deps/libdeflate" ]; then \
-		git subtree add --prefix deps/libdeflate https://github.com/ebiggers/libdeflate.git master --squash; \
-	else \
-		echo "deps/libdeflate already exists, skipping."; \
-	fi
 
 # System dependency installation
 system-deps:

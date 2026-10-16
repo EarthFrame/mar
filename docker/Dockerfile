@@ -51,7 +51,7 @@ LABEL org.opencontainers.image.title="mar" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.ref.name="earthframe/mar" \
       org.opencontainers.image.source="https://github.com/earthframe/mar" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="Apache-2.0"
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends procps ca-certificates && \

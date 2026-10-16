@@ -3,7 +3,7 @@
  * @brief High-performance file I/O with platform-specific optimizations for MAR archive
  * @version 0.1.0
  * @author MAR Archive Project
- * @license MIT
+ * @license Apache-2.0
  *
  * This library provides:
  * - Automatic buffer size selection based on file size

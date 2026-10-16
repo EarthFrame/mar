@@ -545,42 +545,13 @@ impl PyIndexer {
 
     fn build(
         &self,
-        reader: &PyMarReader,
-        writer: &mut PyMAIWriter,
-        opts: &PyIndexOptions,
+        _reader: &PyMarReader,
+        _writer: &mut PyMAIWriter,
+        _opts: &PyIndexOptions,
     ) -> PyResult<()> {
-        let rust_opts = IndexOptions {
-            params: opts.params.clone(),
-            aux_files: opts.aux_files.clone(),
-        };
-        match self.index_type {
-            PyMAIIndexType::MINHASH => {
-                build_minhash_index(&reader.inner, &mut writer.inner, &rust_opts)
-                    .map_err(PyRuntimeError::new_err)
-            }
-            PyMAIIndexType::BM25 => build_bm25_index(&reader.inner, &mut writer.inner, &rust_opts)
-                .map_err(PyRuntimeError::new_err),
-            PyMAIIndexType::EMAIL => {
-                build_email_index(&reader.inner, &mut writer.inner, &rust_opts)
-                    .map_err(PyRuntimeError::new_err)
-            }
-            PyMAIIndexType::TIMESERIES => {
-                build_timeseries_index(&reader.inner, &mut writer.inner, &rust_opts)
-                    .map_err(PyRuntimeError::new_err)
-            }
-            PyMAIIndexType::GENOMIC => {
-                build_genomic_index(&reader.inner, &mut writer.inner, &rust_opts)
-                    .map_err(PyRuntimeError::new_err)
-            }
-            PyMAIIndexType::FASTA => {
-                build_fasta_index(&reader.inner, &mut writer.inner, &rust_opts)
-                    .map_err(PyRuntimeError::new_err)
-            }
-            _ => Err(PyRuntimeError::new_err(format!(
-                "Unsupported indexer type: {}",
-                self.type_name
-            ))),
-        }
+        Err(PyRuntimeError::new_err(
+            "Indexing and search require mar-index: pip install mar-index or visit https://earthframe.com"
+        ))
     }
 }
 
@@ -701,103 +672,14 @@ fn py_list_index_types() -> Vec<String> {
 
 #[pyfunction(name = "search")]
 fn py_search(
-    archive_path: &str,
-    index_path: &str,
-    query: &str,
-    opts: &PyIndexOptions,
+    _archive_path: &str,
+    _index_path: &str,
+    _query: &str,
+    _opts: &PyIndexOptions,
 ) -> PyResult<Vec<PySearchResult>> {
-    let reader = MarReader::open(archive_path).map_err(PyRuntimeError::new_err)?;
-    let index = MAIReader::open(index_path)
-        .ok_or_else(|| PyRuntimeError::new_err("Failed to open index"))?;
-
-    let itype = index.header().index_type;
-    let rust_opts = IndexOptions {
-        params: opts.params.clone(),
-        aux_files: opts.aux_files.clone(),
-    };
-    if itype == MAIIndexType::MinHash as u8 {
-        let results =
-            search_minhash(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
-        Ok(results
-            .into_iter()
-            .map(|r| PySearchResult {
-                file_id: r.file_id,
-                filename: r.filename,
-                score: r.score,
-                content: r.content,
-                metadata: r.metadata,
-            })
-            .collect())
-    } else if itype == MAIIndexType::BM25 as u8 {
-        let results =
-            search_bm25(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
-        Ok(results
-            .into_iter()
-            .map(|r| PySearchResult {
-                file_id: r.file_id,
-                filename: r.filename,
-                score: r.score,
-                content: r.content,
-                metadata: r.metadata,
-            })
-            .collect())
-    } else if itype == MAIIndexType::Email as u8 {
-        let results =
-            search_email(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
-        Ok(results
-            .into_iter()
-            .map(|r| PySearchResult {
-                file_id: r.file_id,
-                filename: r.filename,
-                score: r.score,
-                content: r.content,
-                metadata: r.metadata,
-            })
-            .collect())
-    } else if itype == MAIIndexType::TimeSeries as u8 {
-        let results = search_timeseries(&reader, &index, query, &rust_opts)
-            .map_err(PyRuntimeError::new_err)?;
-        Ok(results
-            .into_iter()
-            .map(|r| PySearchResult {
-                file_id: r.file_id,
-                filename: r.filename,
-                score: r.score,
-                content: r.content,
-                metadata: r.metadata,
-            })
-            .collect())
-    } else if itype == MAIIndexType::Genomic as u8 {
-        let results =
-            search_genomic(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
-        Ok(results
-            .into_iter()
-            .map(|r| PySearchResult {
-                file_id: r.file_id,
-                filename: r.filename,
-                score: r.score,
-                content: r.content,
-                metadata: r.metadata,
-            })
-            .collect())
-    } else if itype == MAIIndexType::Fasta as u8 {
-        let results =
-            search_fasta(&reader, &index, query, &rust_opts).map_err(PyRuntimeError::new_err)?;
-        Ok(results
-            .into_iter()
-            .map(|r| PySearchResult {
-                file_id: r.file_id,
-                filename: r.filename,
-                score: r.score,
-                content: r.content,
-                metadata: r.metadata,
-            })
-            .collect())
-    } else {
-        Err(PyRuntimeError::new_err(
-            "Unsupported index type in index file",
-        ))
-    }
+    Err(PyRuntimeError::new_err(
+        "Indexing and search require mar-index: pip install mar-index or visit https://earthframe.com"
+    ))
 }
 
 #[pyfunction(name = "hash_file")]
