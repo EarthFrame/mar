@@ -68,6 +68,8 @@ make perf-smoke
 
 ## Usage
 
+For the complete command-line reference covering every subcommand and option, see [`CLI.md`](CLI.md).
+
 ### Basics
 
 The basic form of mar commands is as follows:
