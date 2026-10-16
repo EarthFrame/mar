@@ -197,13 +197,6 @@ class AlgebraicFilter:
         return [name for name in names if self.matches(name)]
 
 
-class SearchResult(BaseModel):
-    file_id: int
-    filename: str
-    score: float
-    content: str = ""
-    metadata: Dict[str, str] = {}
-
 class FileInfo(BaseModel):
     name: str
     size: int
@@ -324,73 +317,6 @@ class MarArchive:
         if not self._reader:
             raise RuntimeError("Archive not open for reading")
         return self._reader.validate_parallel(threads)
-
-    def search(self, index_path: str, query: str, topk: int = 10, **params) -> List[SearchResult]:
-        """Search the archive using a sidecar index."""
-        import shutil
-        import subprocess
-
-        idx_bin = os.environ.get("MAR_INDEX_BIN") or os.environ.get("MAR_ENTERPRISE_BIN")
-        if not idx_bin:
-            idx_bin = shutil.which("mar-index") or shutil.which("mar-enterprise")
-
-        if not idx_bin:
-            raise RuntimeError(
-                "Indexing and search require mar-index: pip install mar-index or visit https://earthframe.com"
-            )
-
-        cmd = [idx_bin, "search", self.path, index_path, query, "--topk", str(topk)]
-        for k, v in params.items():
-            cmd.extend(["--param", f"{k}={v}"])
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        if res.returncode != 0:
-            raise RuntimeError(f"mar-index search failed: {res.stderr or res.stdout}")
-        return []
-
-    def get_fasta_record(self, index_path: str, query: str, file: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """
-        Retrieve a single FASTA sequence record by ID with sub-millisecond latency.
-
-        Args:
-            index_path: Path to the .fasta.mai index file.
-            query: Record accession ID (e.g., 'AF-A0A022R2B6-F1').
-            file: Optional archive filename to scope search (e.g. 'human.fa').
-
-        Returns:
-            Dictionary with keys 'id', 'filename', 'seq_len', 'file_byte_offset', 'header', and 'sequence'.
-        """
-        params = {}
-        if file:
-            params["file"] = file
-        results = self.search(index_path, query, topk=1, **params)
-        if not results:
-            return None
-        res = results[0]
-        meta = res.metadata
-        offset = int(meta.get("offset", 0))
-        raw_bytes = int(meta.get("raw_bytes", 0))
-        
-        # Read the raw record bytes
-        file_bytes = self.read_file(res.filename)
-        # Parse header line and sequence
-        record_slice = file_bytes[offset:offset + raw_bytes + 2048] # ample slice
-        first_nl = record_slice.find(b"\n")
-        if first_nl == -1:
-            return None
-        header = record_slice[:first_nl].decode("utf-8", errors="replace").lstrip(">").strip()
-        
-        # Collect sequence bases
-        seq_slice = record_slice[first_nl + 1:first_nl + 1 + raw_bytes]
-        seq = "".join(seq_slice.decode("ascii", errors="ignore").split())
-        
-        return {
-            "id": meta.get("id", query),
-            "filename": res.filename,
-            "seq_len": int(meta.get("seq_len", len(seq))),
-            "file_byte_offset": offset,
-            "header": header,
-            "sequence": seq,
-        }
 
     def slice(
         self,
@@ -532,30 +458,6 @@ def slice_archive(
         verbose=verbose,
         force=force,
         **kwargs
-    )
-
-def index_archive(archive_path: str, index_type: str, output_path: Optional[str] = None, **params):
-    """Create a sidecar index for an archive. Requires mar-index or mar-enterprise CLI."""
-    import shutil
-    import subprocess
-
-    idx_bin = os.environ.get("MAR_INDEX_BIN") or os.environ.get("MAR_ENTERPRISE_BIN")
-    if not idx_bin:
-        idx_bin = shutil.which("mar-index") or shutil.which("mar-enterprise")
-
-    if idx_bin:
-        cmd = [idx_bin, "index", archive_path, "--type", index_type]
-        if output_path:
-            cmd.extend(["-o", output_path])
-        for k, v in params.items():
-            cmd.extend(["--param", f"{k}={v}"])
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        if res.returncode != 0:
-            raise RuntimeError(f"mar-index failed: {res.stderr or res.stdout}")
-        return output_path or f"{archive_path}.{index_type}.mai"
-
-    raise RuntimeError(
-        "Indexing and search require mar-index: pip install mar-index or visit https://earthframe.com"
     )
 
 def get_version() -> str:

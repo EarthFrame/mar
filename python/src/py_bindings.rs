@@ -3,14 +3,12 @@
 use mar_core::blake3;
 use mar_core::checksum::*;
 use mar_core::format::*;
-use mar_core::mai::*;
 use mar_core::reader::MarReader;
 use mar_core::remote::IndexCacheManager;
 use mar_core::writer::{BlockMode, MarWriter, WriteOptions};
 use pyo3::exceptions::{PyFileNotFoundError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 
@@ -53,19 +51,6 @@ pub enum PyEntryType {
     FIFO = 5,
     SOCKET = 6,
     UNKNOWN = 255,
-}
-
-#[pyclass(name = "MAIIndexType", eq, eq_int)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum PyMAIIndexType {
-    VECTOR = 1,
-    MINHASH = 2,
-    GENERIC = 3,
-    GENOMIC = 4,
-    EMAIL = 5,
-    TIMESERIES = 6,
-    BM25 = 7,
-    FASTA = 8,
 }
 
 #[pyclass(name = "WriteOptions")]
@@ -157,37 +142,6 @@ impl From<PyWriteOptions> for WriteOptions {
             align_log2: DEFAULT_ALIGN_LOG2,
         }
     }
-}
-
-#[pyclass(name = "IndexOptions")]
-#[derive(Clone, Default)]
-pub struct PyIndexOptions {
-    #[pyo3(get, set)]
-    pub params: HashMap<String, String>,
-    #[pyo3(get, set)]
-    pub aux_files: Vec<String>,
-}
-
-#[pymethods]
-impl PyIndexOptions {
-    #[new]
-    fn new() -> Self {
-        Self::default()
-    }
-}
-
-#[pyclass(name = "SearchResult")]
-pub struct PySearchResult {
-    #[pyo3(get)]
-    pub file_id: usize,
-    #[pyo3(get)]
-    pub filename: String,
-    #[pyo3(get)]
-    pub score: f64,
-    #[pyo3(get)]
-    pub content: String,
-    #[pyo3(get)]
-    pub metadata: HashMap<String, String>,
 }
 
 #[pyclass(name = "FileEntry")]
@@ -425,136 +379,6 @@ impl PyMarReader {
     }
 }
 
-#[pyclass(name = "MAIWriter")]
-pub struct PyMAIWriter {
-    inner: MAIWriter,
-}
-
-#[pymethods]
-impl PyMAIWriter {
-    #[new]
-    fn new(archive_path: &str, index_type: PyMAIIndexType, archive_hash: u64) -> Self {
-        let it = match index_type {
-            PyMAIIndexType::VECTOR => MAIIndexType::Vector,
-            PyMAIIndexType::MINHASH => MAIIndexType::MinHash,
-            PyMAIIndexType::GENERIC => MAIIndexType::Generic,
-            PyMAIIndexType::GENOMIC => MAIIndexType::Genomic,
-            PyMAIIndexType::EMAIL => MAIIndexType::Email,
-            PyMAIIndexType::TIMESERIES => MAIIndexType::TimeSeries,
-            PyMAIIndexType::BM25 => MAIIndexType::BM25,
-            PyMAIIndexType::FASTA => MAIIndexType::Fasta,
-        };
-        Self {
-            inner: MAIWriter::new(archive_path, it, archive_hash),
-        }
-    }
-
-    #[pyo3(signature = (section_type, data, flags = 0))]
-    fn add_section(&mut self, section_type: u32, data: &[u8], flags: u32) {
-        self.inner.add_section(section_type, data.to_vec(), flags);
-    }
-
-    #[pyo3(signature = (path, align_log2 = 0))]
-    fn write_to_file(&mut self, path: &str, align_log2: u8) -> PyResult<()> {
-        self.inner
-            .write_to_file(path, align_log2)
-            .map_err(PyRuntimeError::new_err)
-    }
-}
-
-#[pyclass(name = "MAIFixedHeader")]
-pub struct PyMAIFixedHeader {
-    #[pyo3(get)]
-    pub magic: u32,
-    #[pyo3(get)]
-    pub version: u8,
-    #[pyo3(get)]
-    pub index_type: u8,
-    #[pyo3(get)]
-    pub align_log2: u8,
-    #[pyo3(get)]
-    pub archive_hash: u64,
-    #[pyo3(get)]
-    pub archive_name_len: u32,
-    #[pyo3(get)]
-    pub flags: u32,
-    #[pyo3(get)]
-    pub timestamp: u64,
-    #[pyo3(get)]
-    pub index_data_offset: u64,
-}
-
-#[pyclass(name = "MAIReader")]
-pub struct PyMAIReader {
-    inner: MAIReader,
-}
-
-#[pymethods]
-impl PyMAIReader {
-    #[staticmethod]
-    fn open(path: &str) -> PyResult<Self> {
-        let reader = MAIReader::open(path)
-            .ok_or_else(|| PyRuntimeError::new_err(format!("Failed to open index: {}", path)))?;
-        Ok(Self { inner: reader })
-    }
-
-    fn header(&self) -> PyMAIFixedHeader {
-        let h = self.inner.header();
-        PyMAIFixedHeader {
-            magic: h.magic,
-            version: h.version,
-            index_type: h.index_type,
-            align_log2: h.align_log2,
-            archive_hash: h.archive_hash,
-            archive_name_len: h.archive_name_len,
-            flags: h.flags,
-            timestamp: h.timestamp,
-            index_data_offset: h.index_data_offset,
-        }
-    }
-
-    fn archive_name(&self) -> String {
-        self.inner.archive_name().to_string()
-    }
-
-    fn has_section(&self, section_type: u32) -> bool {
-        self.inner.has_section(section_type)
-    }
-
-    fn read_section<'py>(&self, py: Python<'py>, section_type: u32) -> Bound<'py, PyBytes> {
-        let data = self.inner.read_section(section_type);
-        PyBytes::new_bound(py, &data)
-    }
-}
-
-#[pyclass(name = "Indexer")]
-pub struct PyIndexer {
-    type_name: String,
-    index_type: PyMAIIndexType,
-}
-
-#[pymethods]
-impl PyIndexer {
-    fn type_name(&self) -> &str {
-        &self.type_name
-    }
-
-    fn index_type(&self) -> PyMAIIndexType {
-        self.index_type
-    }
-
-    fn build(
-        &self,
-        _reader: &PyMarReader,
-        _writer: &mut PyMAIWriter,
-        _opts: &PyIndexOptions,
-    ) -> PyResult<()> {
-        Err(PyRuntimeError::new_err(
-            "Indexing and search require mar-index: pip install mar-index or visit https://earthframe.com"
-        ))
-    }
-}
-
 #[pyclass(name = "IndexCacheManager")]
 pub struct PyIndexCacheManager {
     inner: IndexCacheManager,
@@ -592,18 +416,11 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyChecksumType>()?;
     m.add_class::<PyNameTableFormat>()?;
     m.add_class::<PyEntryType>()?;
-    m.add_class::<PyMAIIndexType>()?;
     m.add_class::<PyWriteOptions>()?;
-    m.add_class::<PyIndexOptions>()?;
-    m.add_class::<PySearchResult>()?;
     m.add_class::<PyFileEntry>()?;
     m.add_class::<PyFixedHeader>()?;
     m.add_class::<PyMarWriter>()?;
     m.add_class::<PyMarReader>()?;
-    m.add_class::<PyMAIWriter>()?;
-    m.add_class::<PyMAIFixedHeader>()?;
-    m.add_class::<PyMAIReader>()?;
-    m.add_class::<PyIndexer>()?;
     m.add_class::<PyIndexCacheManager>()?;
 
     let spec_v = format!("{}.{}.{}", MAR_SPEC_MAJOR, MAR_SPEC_MINOR, MAR_SPEC_PATCH);
@@ -615,71 +432,9 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("TOOL_VERSION", &tool_v)?;
     m.add("VERSION", &tool_v)?;
 
-    m.add_function(wrap_pyfunction!(py_get_indexer, m)?)?;
-    m.add_function(wrap_pyfunction!(py_list_index_types, m)?)?;
-    m.add_function(wrap_pyfunction!(py_search, m)?)?;
     m.add_function(wrap_pyfunction!(py_hash_file, m)?)?;
 
     Ok(())
-}
-
-#[pyfunction(name = "get_indexer")]
-fn py_get_indexer(type_name: &str) -> PyResult<PyIndexer> {
-    match type_name {
-        "minhash" => Ok(PyIndexer {
-            type_name: "minhash".to_string(),
-            index_type: PyMAIIndexType::MINHASH,
-        }),
-        "bm25" => Ok(PyIndexer {
-            type_name: "bm25".to_string(),
-            index_type: PyMAIIndexType::BM25,
-        }),
-        "email" => Ok(PyIndexer {
-            type_name: "email".to_string(),
-            index_type: PyMAIIndexType::EMAIL,
-        }),
-        "timeseries" => Ok(PyIndexer {
-            type_name: "timeseries".to_string(),
-            index_type: PyMAIIndexType::TIMESERIES,
-        }),
-        "genomic" => Ok(PyIndexer {
-            type_name: "genomic".to_string(),
-            index_type: PyMAIIndexType::GENOMIC,
-        }),
-        "fasta" => Ok(PyIndexer {
-            type_name: "fasta".to_string(),
-            index_type: PyMAIIndexType::FASTA,
-        }),
-        _ => Err(PyRuntimeError::new_err(format!(
-            "Unknown indexer: {}",
-            type_name
-        ))),
-    }
-}
-
-#[pyfunction(name = "list_index_types")]
-fn py_list_index_types() -> Vec<String> {
-    vec![
-        "minhash".to_string(),
-        "bm25".to_string(),
-        "email".to_string(),
-        "timeseries".to_string(),
-        "genomic".to_string(),
-        "fasta".to_string(),
-        "vector".to_string(),
-    ]
-}
-
-#[pyfunction(name = "search")]
-fn py_search(
-    _archive_path: &str,
-    _index_path: &str,
-    _query: &str,
-    _opts: &PyIndexOptions,
-) -> PyResult<Vec<PySearchResult>> {
-    Err(PyRuntimeError::new_err(
-        "Indexing and search require mar-index: pip install mar-index or visit https://earthframe.com"
-    ))
 }
 
 #[pyfunction(name = "hash_file")]

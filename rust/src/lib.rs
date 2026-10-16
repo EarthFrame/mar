@@ -5,7 +5,6 @@ pub mod delta;
 pub mod diff;
 pub mod filter;
 pub mod format;
-pub mod mai;
 pub mod name_index;
 pub mod reader;
 pub mod redact;

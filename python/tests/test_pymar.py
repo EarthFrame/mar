@@ -3,19 +3,11 @@ import pytest
 import shutil
 import pymar
 from pymar import _mar
-from pymar.core import MarArchive, create_archive, index_archive, get_hash, get_version
+from pymar.core import MarArchive, create_archive, get_hash, get_version
 from pymar.tools import (
-    mar_create, mar_index, mar_list, mar_get, mar_search, 
-    mar_hash, mar_validate, mar_header, mar_version, mar_fasta_get
+    mar_create, mar_list, mar_get, 
+    mar_hash, mar_validate, mar_header, mar_version
 )
-
-def _has_mar_index() -> bool:
-    return bool(
-        os.environ.get("MAR_INDEX_BIN")
-        or os.environ.get("MAR_ENTERPRISE_BIN")
-        or shutil.which("mar-index")
-        or shutil.which("mar-enterprise")
-    )
 
 @pytest.fixture
 def test_data(tmp_path):
@@ -79,20 +71,6 @@ def test_mar_hash(mar_file):
 def test_mar_validate(mar_file):
     assert mar_validate(mar_file) is True
 
-def test_mar_index_minhash(mar_file, test_data, tmp_path):
-    if not _has_mar_index():
-        pytest.skip("Requires mar-index")
-    index_path = str(tmp_path / "test.minhash.mai")
-    msg = mar_index(mar_file, "minhash", index_path)
-    assert "Successfully created minhash index" in msg
-    assert os.path.exists(index_path)
-    
-    query_file = str(test_data / "file1.txt")
-    results = mar_search(mar_file, index_path, query_file)
-    assert isinstance(results, list)
-    assert len(results) > 0
-    assert "file1.txt" in results[0]["filename"]
-
 def test_mar_archive_class(mar_file):
     archive = MarArchive(mar_file)
     files = archive.list_files()
@@ -129,26 +107,6 @@ def test_low_level_writer(tmp_path):
     assert reader.file_count() == 3
     assert reader.read_file("mem1.txt") == b"Memory content 1"
     assert reader.read_file("mem2.txt") == b"Memory content 2"
-
-def test_mai_io(tmp_path):
-    mai_path = str(tmp_path / "test.mai")
-    writer = _mar.MAIWriter("fake.mar", _mar.MAIIndexType.MINHASH, 0x12345678)
-    writer.add_section(1, b"section data")
-    writer.write_to_file(mai_path)
-    
-    reader = _mar.MAIReader.open(mai_path)
-    assert reader.header().archive_hash == 0x12345678
-    assert reader.header().index_type == int(_mar.MAIIndexType.MINHASH)
-    assert reader.has_section(1)
-    assert reader.read_section(1) == b"section data"
-
-def test_index_registry():
-    types = _mar.list_index_types()
-    assert "minhash" in types
-    
-    indexer = _mar.get_indexer("minhash")
-    assert indexer.type_name() == "minhash"
-    assert indexer.index_type() == _mar.MAIIndexType.MINHASH
 
 def test_error_handling(tmp_path):
     with pytest.raises(FileNotFoundError):
@@ -238,127 +196,6 @@ def test_symlinks(tmp_path):
     
     with pytest.raises(RuntimeError, match="Not a regular file"):
         archive.read_file("link.txt")
-
-def test_mar_index_bm25(mar_file, tmp_path):
-    if not _has_mar_index():
-        pytest.skip("Requires mar-index")
-    index_path = str(tmp_path / "test.bm25.mai")
-    if "bm25" in _mar.list_index_types():
-        msg = mar_index(mar_file, "bm25", index_path)
-        assert "Successfully created bm25 index" in msg
-        assert os.path.exists(index_path)
-        
-        results = mar_search(mar_file, index_path, "Hello")
-        assert len(results) >= 1
-        assert "file1.txt" in results[0]["filename"]
-
-def test_mar_index_email(tmp_path):
-    if not _has_mar_index():
-        pytest.skip("Requires mar-index")
-    path = str(tmp_path / "emails.mar")
-    opts = _mar.WriteOptions()
-    writer = _mar.MarWriter(path, opts)
-    raw_email = (
-        b"From: alice@example.com\n"
-        b"To: bob@example.com\n"
-        b"Subject: Meeting tomorrow\n"
-        b"\n"
-        b"Let's discuss the MAR archive format!\n"
-    )
-    writer.add_memory("email1.eml", raw_email)
-    writer.finish()
-
-    index_path = str(tmp_path / "emails.mai")
-    msg = mar_index(path, "email", index_path)
-    assert "Successfully created email index" in msg
-    assert os.path.exists(index_path)
-
-    results = mar_search(path, index_path, "Meeting")
-    assert len(results) >= 1
-    assert results[0]["filename"] == "email1.eml"
-    assert results[0]["metadata"]["from"] == "alice@example.com"
-    assert results[0]["metadata"]["to"] == "bob@example.com"
-
-def test_mar_index_timeseries(tmp_path):
-    if not _has_mar_index():
-        pytest.skip("Requires mar-index")
-    path = str(tmp_path / "ts.mar")
-    opts = _mar.WriteOptions()
-    writer = _mar.MarWriter(path, opts)
-    csv_data = b"timestamp,temp\n1700000000000,21.5\n1700000060000,22.1\n"
-    writer.add_memory("sensors.csv", csv_data)
-    writer.finish()
-
-    index_path = str(tmp_path / "ts.mai")
-    msg = mar_index(path, "timeseries", index_path, params={"ts_col": "0", "ts_format": "epoch_ms"})
-    assert "Successfully created timeseries index" in msg
-    assert os.path.exists(index_path)
-
-    results = mar_search(path, index_path, "", params={"since": "1699999999999", "until": "1700000090000"})
-    assert len(results) >= 1
-    assert results[0]["filename"] == "sensors.csv"
-    assert results[0]["metadata"]["row_count"] == "2"
-
-def test_mar_index_genomic(tmp_path):
-    if not _has_mar_index():
-        pytest.skip("Requires mar-index")
-    path = str(tmp_path / "genome.mar")
-    opts = _mar.WriteOptions()
-    writer = _mar.MarWriter(path, opts)
-    writer.add_memory("chr1.fa", b">chr1\nACGTACGTACGT\n")
-    writer.finish()
-
-    index_path = str(tmp_path / "genome.mai")
-    msg = mar_index(path, "genomic", index_path)
-    assert "Successfully created genomic index" in msg
-    assert os.path.exists(index_path)
-
-    results = mar_search(path, index_path, "chr1")
-    assert len(results) >= 1
-    assert "chr1.fa" in results[0]["filename"]
-
-def test_mar_index_fasta_multi_file_and_get(tmp_path):
-    if not _has_mar_index():
-        pytest.skip("Requires mar-index")
-    path = str(tmp_path / "proteins.mar")
-    opts = _mar.WriteOptions()
-    opts.multiblock = True
-    opts.block_size = 4096
-    writer = _mar.MarWriter(path, opts)
-    writer.add_memory("human.fasta", b">AF-A0A022R2B6-F1 AlphaFold human\nMKFLVNVALVFMVVYISYIYAAFPSQ\nEKSNEEQKEEEREEEEKK\n>P12345 Human protein\nACDEFGHIKLMNPQRSTVWY\n")
-    writer.add_memory("mouse.fa", b">MOUSE_001 Mouse protein\nMVKVGVNGFGRIGRLVTRAAFNSG\n>AF-A0A022R2B6-F1 Shared isoform\nACDEFGHIKLMNPQRSTVWY\n")
-    writer.finish()
-
-    index_path = str(tmp_path / "proteins.fasta.mai")
-    msg = mar_index(path, "fasta", index_path)
-    assert "Successfully created fasta index" in msg
-    assert os.path.exists(index_path)
-
-    # 1. Search unique record
-    results = mar_search(path, index_path, "P12345")
-    assert len(results) == 1
-    assert results[0]["filename"] == "human.fasta"
-    assert results[0]["metadata"]["id"] == "P12345"
-    assert results[0]["metadata"]["seq_len"] == "20"
-
-    # 2. Get record directly
-    rec = mar_fasta_get(path, index_path, "P12345")
-    assert rec is not None
-    assert rec["id"] == "P12345"
-    assert rec["sequence"] == "ACDEFGHIKLMNPQRSTVWY"
-    assert rec["filename"] == "human.fasta"
-
-    # 3. Disambiguate using file param
-    rec_mouse = mar_fasta_get(path, index_path, "AF-A0A022R2B6-F1", file="mouse.fa")
-    assert rec_mouse is not None
-    assert rec_mouse["filename"] == "mouse.fa"
-    assert rec_mouse["sequence"] == "ACDEFGHIKLMNPQRSTVWY"
-
-    # 4. Qualified query in mar_search
-    results_qual = mar_search(path, index_path, "human.fasta:AF-A0A022R2B6-F1")
-    assert len(results_qual) == 1
-    assert results_qual[0]["filename"] == "human.fasta"
-    assert results_qual[0]["metadata"]["seq_len"] == "44"
 
 if __name__ == "__main__":
     pytest.main([__file__])

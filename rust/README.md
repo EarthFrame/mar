@@ -10,7 +10,6 @@ High-performance, pure Rust implementation of the MAR format specification with 
 - `src/writer.rs`: Multi-threaded parallel archive writer with streaming sinks
 - `src/checksum.rs`: Accelerated CRC32C, XXHash3-64, and BLAKE3 checksums
 - `src/compression.rs`: Zstandard, LZ4, Gzip, and Bzip2 codecs
-- `src/mai.rs`: Sidecar indices (.mai) for MinHash, BM25, Email, TimeSeries, and Genomic
 - `src/diff.rs`: Archive delta comparison engine
 - `src/redact.rs`: Out-of-place and in-place archive redaction
 - `src/bin/main.rs`: Standalone pure Rust CLI executable (`mar` / `mar-rust`)
