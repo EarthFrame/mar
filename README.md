@@ -14,16 +14,20 @@ Written in pure Rust with seamless Python bindings (`pymar`), Mar delivers rando
 
 ## What is a Universal Data Container?
 
-Data is fundamentally stored as binary sequences on physical media, organized into formats such as CSV, Parquet, JSON, images, or raw binaries. To transport, share, and track data provenance reliably, files are commonly packaged into single-file archives. Conceptually, a data container acts like a glass jar holding diverse objects: it lets you move an entire collection as a single unit while retaining the ability to inspect and retrieve individual contents cleanly.
+A **Universal Data Container** is a single-file archive that packages arbitrary, heterogeneous data—directory trees, documents, tabular files, images, or model weights—into a portable collection of data entities.
 
-Unix `tar` ("tape archiver") was created in 1979 for magnetic tape drives. It laid out files sequentially in a continuous byte stream mirroring tape media. This model worked well for tapes and spinning hard disks, but modern computing has evolved fundamentally:
+Where traditional formats force a compromise between packaging convenience and access efficiency, Mar provides both:
 
-- **Storage Mediums**: Modern systems rely on solid-state drives (NVMe and SATA SSDs) where random read latency is orders of magnitude lower than sequential seek times on tape.
-- **Compute Architectures**: Systems feature high core counts, hardware acceleration, and SIMD instruction sets capable of parallel block compression and hashing.
-- **Network & Cloud**: Datasets frequently live on remote cloud object storage (such as AWS S3, Cloudflare R2, or Backblaze B2) rather than local disks. Interacting with multi-gigabyte or terabyte datasets across a network makes traditional "download everything, untar everything" workflows prohibitively slow and expensive.
-- **Automated & Agentic Consumers**: Modern workloads are increasingly orchestrated by automated pipelines and agentic LLMs that need predictable CLI interfaces, structured outputs (such as JSON metadata), and fast random reads.
+- **Single-file portability**: Eliminates the overhead of managing millions of loose files across filesystems, cloud buckets, and OS boundaries.
+- **True random access**: A deterministic header and metadata index allow any file to be retrieved immediately without scanning or decompressing the rest of the container.
+- **Selective cloud streaming**: Over HTTP, S3, or R2, tools like `pymar` fetch the archive index in two small requests and download only the specific compressed blocks required, cutting network egress by up to 99%.
 
-We wrote Mar to address these shifts and create an archive format that can store contemporary data on modern hardware in a way that today's computer users (both human and machine-driven) can intuitively get started with.
+### How Mar Compares
+
+- **vs. Folders**: Loose directory trees are hard to transfer across file systems, cause inode exhaustion, can slow cloud transfers, and risk filesystem path issues (especially when moving between machines). Mar encapsulates the entire structure into a single verified container with zero loss of directory hierarchy or POSIX metadata.
+- **vs. Tar (`.tar.gz`, `.tar.zst`)**: Tar formats store data sequentially. Extracting a file requires decompressing all preceding bytes, and querying a remote tarball requires downloading the full file. Mar isolates data into independent compressed blocks, enabling direct \(O(1)\) access to individual files, even over a network connection.
+- **vs. Zip (`.zip`)**: Standard Zip compresses files individually, yielding poor compression on small files, or relies on legacy algorithms like Deflate. Mar groups files into configurable block sizes using modern Zstandard or LZ4 compression, balancing high compression density with fast random reads.
+- **vs. Parquet (`.parquet`)**: Parquet is a specialized columnar format for structured tables. It cannot store directory trees, unstructured documents, or binary assets. Mar provides a more general container and can store Parquet tables alongside the code, configuration, raw text, and model weights that accompany them.
 
 ---
 
