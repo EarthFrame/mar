@@ -1,237 +1,322 @@
-# mar - A modern archive format and toolset
+# Mar - Universal Data Container & Archive Toolset
 
 ## Overview
 
 > ### *"Water is the new oil."*
 
-MAR is an archive format and a data archive toolset designed for modern computing.
+Mar is an open-source **Universal Data Container** and high-performance archive toolset built from the ground up for modern computing architectures and networked data pipelines.
 
-Computing hardware today looks very different than it did in the past, with the proliferation of accelerated, multi-core and multi-threaded processing, solid state storage devices, larger / faster RAM, and new  compression algorithms. In addition, the ways in which users interact with their data has changed. While the terminal persists, much of our interaction with our data occurs in the browser or via AI models.
+In resource economics, people often say "water is the new oil." In that spirit, Mar—a homonym for the Spanish word for "sea"—is the modern counterpart to Tar. Where Unix Tar produces "tarballs," Mar produces **"marbles"**: compact, durable, and structured data containers engineered to hold any data type across local NVMe storage, distributed filesystems, or cloud object stores.
 
-MAR is designed to leverage advances in modern hardware and support new interfaces to data archives that mirror modern usage. MAR builds on the decades of knowledge embedded in other archive and data storage formats and tools to build a **m**odern **ar**chiver ready for the next decade of computing.
+Written in pure Rust with seamless Python bindings (`pymar`), Mar delivers random file access, multi-threaded streaming, modern compression codecs, cryptographic integrity checks, and network byte-range querying without requiring the extraction of an entire archive.
 
-## Features
+---
 
-- **Fast**: Optimized for modern hardware with efficient I/O patterns on NVMe and SATA SSDs, hard drives, and accelerated/multi-core/multi-thread architectures.
-- **Random Access**: Want just one file from your archive? MAR supports getting it without decompressing the entire archive.
-- **Multiple compression**: Support for ZSTD (default), LZ4, Gzip, Bzip2, or no compression. Flexibility enables tuning for your use case.
-- **Integrity verification**: Built-in integrity checking via XXHash, CRC32, or BLAKE3 checksums.
-- **POSIX metadata**: Optionally preserves permissions, ownership, and timestamps, just like `tar`.
-- **Flexibly file/block relationship**: Files can be stored in their own block, in a block shared with other files, or across multiple blocks, allowing you to tune the compression ratio vs. access time of your archive.
-- **Parallel ready**: MAR, as a format and a tool, is designed to make use of available hardware parallelism wherever possible.
-- **Modern tools for modern computing**: Is your data on S3? Do you want to talk to your data via MCP? Want to browse it like it's a simple website? MAR is designed to support these use cases.
+## What is a Universal Data Container?
+
+Data is fundamentally stored as binary sequences on physical media, organized into formats such as CSV, Parquet, JSON, images, or raw binaries. To transport, share, and track data provenance reliably, files are commonly packaged into single-file archives. Conceptually, a data container acts like a glass jar holding diverse objects: it lets you move an entire collection as a single unit while retaining the ability to inspect and retrieve individual contents cleanly.
+
+Unix `tar` ("tape archiver") was created in 1979 for magnetic tape drives. It laid out files sequentially in a continuous byte stream mirroring tape media. This model worked well for tapes and spinning hard disks, but modern computing has evolved fundamentally:
+
+- **Storage Mediums**: Modern systems rely on solid-state drives (NVMe and SATA SSDs) where random read latency is orders of magnitude lower than sequential seek times on tape.
+- **Compute Architectures**: Systems feature high core counts, hardware acceleration, and SIMD instruction sets capable of parallel block compression and hashing.
+- **Network & Cloud**: Datasets frequently live on remote cloud object storage (such as AWS S3, Cloudflare R2, or Backblaze B2) rather than local disks. Interacting with multi-gigabyte or terabyte datasets across a network makes traditional "download everything, untar everything" workflows prohibitively slow and expensive.
+- **Automated & Agentic Consumers**: Modern workloads are increasingly orchestrated by automated pipelines and agentic LLMs that need predictable CLI interfaces, structured outputs (such as JSON metadata), and fast random reads.
+
+We wrote Mar to address these shifts and create an archive format that can store contemporary data on modern hardware in a way that today's computer users (both human and machine-driven) can intuitively get started with.
+
+---
+
+## Features and Use Cases
+
+- **Blazing Fast**: Pure Rust core (`mar-core`) with multi-threaded parallel compression, decompression, and block checksum verification.
+- **True Random Access**: Inspect or extract individual files directly in \(O(1)\) time without decompressing preceding blocks or unpacking the entire container.
+- **Cloud & Egress Optimization**: Query and slice remote archives on S3, R2, B2, or HTTP servers via byte-range requests. Download only the target blocks, reducing egress bandwidth by 95% to 99%+.
+- **Zero-Copy Tar Ingestion**: Stream compressed or uncompressed tarballs (`.tar`, `.tar.gz`, `.tar.zst`, `.tar.bz2`, `.tar.lz4`) directly into Mar format with \(O(1)\) memory overhead without writing intermediate files to disk.
+- **Flexible Codecs & Integrity**: Built-in support for Zstandard (default), LZ4, Gzip, Bzip2, or uncompressed storage. Block and file-level integrity powered by XXHash3, XXHash32, CRC32C, and BLAKE3.
+- **POSIX Fidelity & Reproducibility**: Preserves file permissions, ownership (UID/GID), and modification times. Supports a `--deterministic` flag to generate byte-identical reproducible marbles across builds.
+- **Sidecar Indexing & Native RAG**: Our commercial version of Mar supports sidecar indices (`.mai` files) for vector embeddings, MinHash similarity, and keyword search (BM25), enabling direct Retrieval-Augmented Generation (RAG) over raw archives without importing data into an external database.
+- **Automation Ready**: Predictable CLI return codes, comprehensive `--json` and table outputs, and an intuitive syntax that automated pipelines and agentic models can drive reliably out of the box.
+
+---
 
 ## Quick Start
 
-This README provides some basic usage - for more detailed usage, see the EarthFrame docs at [https://docs.earthframe.com](https://docs.earthframe.com).
-
 ### Installation
 
-Package manager installation and static builds are available via Homebrew, Debian packages, prebuilt binaries on GitHub Releases, and PyPI:
+Mar is distributed as a standalone Rust CLI binary, a Python package (`pymar`), and prebuilt packages for standard platforms.
+
+#### Python Package (`pymar`)
 
 ```bash
-# Python package and CLI
+# Install via PyPI
 pip install pymar
 
-# Or install from source:
+# Or install from source
 cd python && pip install .
+```
+
+#### Prebuilt Binaries & Package Managers
+
+Prebuilt binaries for Linux (x86_64, aarch64) and macOS (Apple Silicon, Intel) are available on GitHub Releases, as well as through Homebrew and Debian package repositories:
+
+```bash
+# Verify the installed binary
+mar version
 ```
 
 ### Dependencies & Toolchains
 
-- **Rust toolchain (1.80+)**: Required to build the primary `mar` CLI binary (`./mar`), `mar-core` crate, and the `pymar` Python extension.
-- **Python (3.8+)**: Optional, for the Python package (`pymar`).
+- **Rust (1.80+)**: Required to build the standalone `mar` CLI binary, `mar-core` library, and `pymar` PyO3 extension.
+- **Python (3.8+)**: Optional, required for the `pymar` library and high-level remote cloud CLI features.
 
-*Note*: An in-tree C++ reference implementation (`./mar-cpp`) is also available for benchmarking and format validation; see [`cpp/README.md`](cpp/README.md) for its compiler and dependency requirements.
-
-#### Building
+#### Building from Source
 
 ```bash
-# Build the primary CLI tool (pure Rust binary: ./mar)
+# Build the release CLI binary (./mar)
 make
 
-# Build Python PyO3 extension (python/pymar/_mar.so)
+# Build the Python PyO3 extension module
 make python
 
-# Run Rust unit tests
+# Run Rust and CLI test suites
 make test
-
-# Run CLI integration tests
 make integration-test
 
-# Run Python unit tests
+# Run Python test suite
 make test-python
 
-# Performance smoke-test against saved baselines
+# Run performance smoke test
 make perf-smoke
 ```
 
-## Usage
+---
 
-For the complete command-line reference covering every subcommand and option, see [`CLI.md`](CLI.md).
+## Basic Usage
 
-### Basics
-
-The basic form of mar commands is as follows:
+The standard structure for `mar` commands is:
 
 ```bash
-mar <subcommand> [options] <archive> ... [File Paths]
+mar [global options] <command> [command options] [arguments]
 ```
 
-Mar archive names *should* end with the ".mar" extension, though this is not a requirement.
+### Global Options
 
-You can get the help for `mar`, or any `mar` command, by passing `-h` or `--help`:
+| Option | Description |
+|--------|-------------|
+| `-h`, `--help` | Display general help or command-specific help |
+| `-q`, `--quiet` | Suppress non-error output (returns standard exit codes) |
+| `-v`, `--verbose` | Increase logging verbosity (`-v`, `-vv`) |
+| `--stopwatch` | Print execution time to stderr upon completion |
+
+---
+
+### Creating a Marble
+
+Create a new container from individual files, trees, or pipelines:
 
 ```bash
-## Get the help for mar, including all the subcommands and common options.
-mar -h
+# Create a marble from a directory using default settings (zstd, xxhash3, 1MB blocks)
+mar create dataset.mar ./data/
 
-## Get the help for a specific mar subcommand (in this case, "create," used to create an archive):
-mar create --help
-## or
-mar create -h
+# Create using LZ4 compression for ultra-fast throughput
+mar create -c lz4 fast_cache.mar ./cache/
+
+# Uncompressed container for raw high-speed random access
+mar create -c none raw_media.mar ./media/
+
+# Byte-for-byte reproducible build (normalized timestamps, sorted order)
+mar create --deterministic release.mar ./dist/
+
+# Deduplicate identical files across the directory tree
+mar create --hashes --dedup deduplicated.mar ./artifacts/
 ```
 
-`mar` has several common options:
+---
+
+### Importing Tar Archives (Zero-Copy)
+
+Convert legacy `.tar`, `.tar.gz`, `.tgz`, `.tar.zst`, or `.tar.bz2` files directly into Mar containers without unpacking files to disk:
 
 ```bash
-Common options:
-  -h, --help      Display this help message
-  -q, --quiet     Suppress non-error output
-  -v, --verbose   Enable verbose output (use multiple times for more detail)
-  --stopwatch     Report command execution time
+# Import a compressed tarball
+mar import -o dataset.mar dataset.tar.gz
+
+# Combine multiple tar archives into a single unified marble
+mar import -c zstd -o combined.mar part1.tar.gz part2.tar.zst part3.tar
+
+# Stream directly from a network pipe with zero intermediate disk writes
+curl -sL https://example.com/checkpoints.tar.zst | mar import -f -o checkpoints.mar -
 ```
 
-### Create an archive
+---
+
+### Listing and Inspecting Contents
+
+Inspect container metadata, file listings, and block structure:
 
 ```bash
-# Create archive from files
-mar create archive.mar file1.txt file2.txt
+# Standard path listing
+mar list dataset.mar
 
-# Create archive from directory
-mar create archive.mar mydir/
+# Tabular view with file sizes, compression details, and permissions
+mar list --table dataset.mar
 
-# Use LZ4 compression (faster)
-mar create -c lz4 archive.mar mydir/
+# Machine-readable JSON output for automated pipelines
+mar list --json dataset.mar
 
-# Use no compression
-mar create -c none archive.mar mydir/
-
-# Deterministic output (sorted, fixed timestamps)
-mar create --deterministic archive.mar mydir/
+# Inspect archive fixed headers, metadata offsets, and format version
+mar header dataset.mar
 ```
 
-### Import tar archives (streaming, zero-copy to disk)
+---
 
-Convert compressed or uncompressed tarballs directly into MAR archives without unpacking to temporary files on disk:
+### Extracting Files
+
+Extract the entire container or target paths:
 
 ```bash
-# Import a .tar.gz archive directly
-mar import -o archive.mar dataset.tar.gz
+# Extract all files into the current directory
+mar extract dataset.mar
 
-# Import multiple compressed tarballs into one MAR archive
-mar import -c zstd -o output.mar part1.tar.zst part2.tar.gz part3.tar
+# Extract into a target directory
+mar extract -o /path/to/destination dataset.mar
 
-# Stream directly from stdin / curl
-curl -sL https://example.com/weights.tar.gz | mar import -f -o weights.mar -
+# Strip leading directory components (equivalent to tar --strip-components)
+mar extract -o ./output --strip-components 2 dataset.mar
 ```
 
-### Extract an archive
+---
+
+### Random Access & Targeted Retrieval
+
+Retrieve specific files immediately without decompressing the full container:
 
 ```bash
-# Extract all files to current directory
-mar extract archive.mar
+# Stream a single file directly to stdout
+mar get -c dataset.mar metadata/manifest.json
 
-# Extract to specific directory
-mar extract -o /tmp/output archive.mar
-
-# Extract with path stripping
-mar extract --strip-components 1 archive.mar
+# Extract selected files into a specific folder
+mar get -o /tmp/target dataset.mar file1.csv config/settings.yaml
 ```
 
-### List contents
+---
+
+### Slicing Marbles (Local and Remote)
+
+The `slice` command extracts a subset of files from a source archive into a new, self-contained marble without decompressing unselected entries.
+
+#### Local Slicing
 
 ```bash
-# Simple list
-mar list archive.mar
+# Method 1: Glob pattern matching
+mar slice input.mar -o filtered.mar "documents/**/*.pdf"
 
-# Table format with metadata
-mar list --table archive.mar
+# Method 2: Algebraic include and exclude rules
+mar slice input.mar -o subset.mar -i "src/**" -x "**/*.tmp"
 
-# JSON output
-mar list --json archive.mar
+# Method 3: Pipeline with grep and stdin file list
+mar list input.mar | grep "2026-Q3" | mar slice input.mar -o q3_report.mar -T -
 
-# Verbose with summary
-mar list -v archive.mar
+# Method 4: Read paths from an explicit list file
+mar slice input.mar -o selected.mar -T target_files.txt
 ```
 
-### Get specific files
+#### Remote Cloud Slicing via HTTP Range Requests
+
+Using `pymar`, remote archives on S3, Cloudflare R2, Backblaze B2, or HTTP servers can be sliced directly over the network. The remote index is retrieved in two small reads and cached locally. Only the compressed blocks matching the query are downloaded:
 
 ```bash
-# Extract to stdout
-mar get -c archive.mar path/to/file.txt
-
-# Extract to directory
-mar get -o /tmp archive.mar file1.txt file2.txt
+# Download only matching files from a remote 100 GB marble into a 20 MB local marble
+pymar slice --verbose -o local_subset.mar https://data.example.com/archive.mar "**Business**"
 ```
 
-### Slice an archive (subset extraction)
+Because only the required blocks are transferred, cloud egress and transfer time are reduced by up to 99% compared to downloading the entire archive.
 
-Extract a subset of files from a source archive into a new, compact `.mar` archive. Works with local archives and remote cloud archives (`s3://` or `http://`) with recursive globs and algebraic include/exclude sets:
+---
+
+### Verifying Archive Integrity
+
+Verify the physical structure and per-block checksums of a marble:
 
 ```bash
-# Slice by glob pattern
-mar slice input.mar -o subset.mar "*.pdb"
+# Silent check for scripts and CI (exit code 0 indicates valid archive)
+mar validate -q dataset.mar
 
-# Algebraic include and exclude rules
-mar slice input.mar -o filtered.mar -i "structures/**" -x "*.json"
-
-# Read file list from file
-mar slice input.mar -o targets.mar -T target_ids.txt
-
-# Remote cloud slicing (S3 / HTTPS) via pymar CLI with batch block coalescing:
-pymar slice s3://alphafold-db-v4/proteome.mar -o local_targets.mar -T 2000_targets.txt
-pymar slice https://cdn.example.com/proteome.mar -o local_targets.mar -T 2000_targets.txt
+# Detailed block-by-block integrity audit
+mar validate -v dataset.mar
 ```
 
-For more details and tutorials, see the EarthFrame documentation at [https://docs.earthframe.com](https://docs.earthframe.com).
+---
 
-## Indexing and Search
+## Indexing & Search (Mar Enterprise)
 
-MAR supports sidecar indices (`.mai` files) for advanced search capabilities like structural similarity (MinHash) and semantic search (Vector/HNSW).
+The core Mar format and CLI are open-source under the Apache 2.0 license. For specialized information retrieval, Mar supports standalone index sidecar files (`.mai`) that attach structured indices to an existing marble without modifying the underlying archive:
 
-**Note**: In the standalone open-source `mar` CLI binary, `mar index` and `mar search` delegate to `mar-index` / `mar-enterprise` when available.
+- **Semantic Vector (HNSW)**: Dense vector embeddings for similarity lookup
+- **Semantic MinHash**: Fast locality-sensitive hashing for document duplicate and similarity detection
+- **Keyword (BM25)**: Full-text lexical search
+- **Domain Indexes**: Time-series, email (MIME), and genomics (FASTA)
 
-For documentation on creating and searching MAR indices, see the EarthFrame documentation at [https://docs.earthframe.com](https://docs.earthframe.com).
+Sidecar indices allow native Retrieval-Augmented Generation (RAG) and search queries to run directly against Mar archives without loading content into an external vector database.
 
-## Format Specification
+For index creation and query documentation, see the EarthFrame documentation at [https://docs.earthframe.com](https://docs.earthframe.com).
 
-This implementation follows the MAR format specification v0.1.0. Key features:
+---
 
-- **48-byte fixed header** with magic number, version, and metadata offsets
-- **Section-based metadata container** with NAME_TABLE, FILE_TABLE, FILE_SPANS, etc.
-- **32-byte block headers** with compression type and checksum
-- **64-byte block alignment** for efficient I/O
+## Format Specification Summary
 
-See `specs/mar-0.1.0.md` for the complete specification.
+Mar implements format specification v0.1.0 with 64-byte block alignment for maximum I/O throughput on NVMe and flash media:
+
+- **48-Byte Fixed Header**: Contains format magic bytes (`MAR\x01`), version numbers, flags, and absolute 64-bit offsets to the metadata section.
+- **Metadata Section**: Structured sections including `NAME_TABLE` (raw, front-coded, or trie-compressed paths), `FILE_TABLE` (sizes, timestamps, permissions, and block references), and `FILE_SPANS`.
+- **Data Blocks**: Each block features a 32-byte header recording codec identifiers, uncompressed/compressed sizes, and block-level checksums.
+- **Flexible Block Modes**:
+  - `shared`: Multiple files are packed into standardized blocks (e.g., 1 MB or 4 MB) for high compression ratios.
+  - `single`: Each file occupies its own block for zero-overhead random access.
+  - `multi`: Large files stream across sequential block boundaries.
+
+Detailed byte specifications are documented in [`specs/mar-0.1.0.md`](specs/mar-0.1.0.md).
+
+---
 
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | General error |
-| 2 | Usage error |
-| 65 | Integrity error (checksum mismatch) |
-| 69 | Unavailable feature |
+| Code | Meaning | Description |
+|------|---------|-------------|
+| 0 | Success | Operation completed successfully |
+| 1 | General Error | I/O failure, unexpected EOF, or file missing |
+| 2 | Usage Error | Invalid command-line arguments or invalid syntax |
+| 65 | Integrity Error | Block checksum mismatch or corrupted container structure |
+| 69 | Unavailable Feature | Requested codec or capability is not compiled into binary |
+
+---
+
+## Documentation & Community
+
+- **Full CLI Manual**: [`CLI.md`](CLI.md)
+- **Binary Format Specification**: [`specs/mar-0.1.0.md`](specs/mar-0.1.0.md)
+- **Official Documentation**: [https://docs.earthframe.com](https://docs.earthframe.com)
+- **Contributing Guidelines**: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+
+---
 
 ## License
 
-See the LICENSE.md file in the project root.
+Mar is open-source software licensed under the Apache License, Version 2.0. See [`LICENSE.md`](LICENSE.md) for details.
+
+---
 
 ## Citation
 
-When using MAR, please cite:
+When using Mar in research or production publications, please cite:
 
-> Dawson, Eric T. MAR: The NVMe Archive Format. https://github.com/earthframe/mar. 2026.
-
+```bibtex
+@misc{dawson2026mar,
+  author = {Dawson, Eric T.},
+  title = {MAR: A Universal Data Container for Modern Computing},
+  year = {2026},
+  publisher = {EarthFrame},
+  url = {https://github.com/earthframe/mar}
+}
+```
