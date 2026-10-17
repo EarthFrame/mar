@@ -37,14 +37,11 @@ env:
 # =============================================================================
 # Job graph
 #
-#   test (matrix: 22.04 / 24.04 / macOS) ──► dist (22.04 / macOS) ──► integration-test ──► release
+#   test (matrix: 22.04 / 24.04 / macOS) ──► dist (Linux x86_64, Linux ARM64, macOS ARM64) ──► integration-test ──► release
 #
 # A compile failure on any test matrix entry (fail-fast: true) cancels the
 # other matrix entries immediately. dist, integration-test, and release only
 # run if all preceding jobs pass. release only runs on v* tag pushes.
-#
-# Note: the lint job is currently disabled. Run locally with:
-#   bear -- make && make lint
 # =============================================================================
 
 jobs:
@@ -172,109 +169,32 @@ jobs:
   # ---------------------------------------------------------------------------
   # Distribution build — produces the release artifacts
   #
-  # Linux (ubuntu-22.04): builds inside an Alpine 3.20 Docker container.
-  #   Alpine uses musl natively, so STATIC=1 produces a fully static musl
-  #   binary with no glibc dependency. No zig required.
-  # macOS: removed in favor of Homebrew distribution.
+  # Builds 3 clean release binaries:
+  #   1. Linux x86_64: static musl binary (portable across all Linux distros/containers)
+  #   2. Linux ARM64: static musl binary (AWS Graviton, Raspberry Pi, ARM servers)
+  #   3. macOS ARM64: Apple Silicon native binary (M-series Macs)
   #
   # Only runs after all test matrix entries pass.
   # ---------------------------------------------------------------------------
   dist:
-    name: Distribution Build (Linux)
-    needs: test
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          ref: ${{ inputs.sha || github.sha }}
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build distribution binaries (Linux, musl via Alpine)
-        run: |
-          mkdir -p dist
-          # Write a build script to run inside the Alpine container.
-          # Alpine uses musl natively, so STATIC=1 produces a musl-linked
-          # binary with no glibc dependency — no zig required.
-          cat > alpine-build.sh << 'EOF'
-          set -ex
-          apk add --no-cache build-base linux-headers pkgconf cmake git \
-            zstd-dev zstd-static \
-            lz4-dev lz4-static \
-            bzip2-dev bzip2-static \
-            zlib-dev zlib-static \
-            libdeflate-dev libdeflate-static \
-            liburing-dev
-          # Work around Git's dubious ownership check for mounted Docker volumes
-          git config --global --add safe.directory /work
-          # Ensure submodules are initialized (in case they weren't)
-          git submodule update --init --recursive
-          
-          # Build the base x86-64 binary
-          make clean && mkdir -p dist
-          make STATIC=1 BUILD=release \
-            ARCH_FLAGS="-march=x86-64 -mtune=generic" \
-            TARGET_NAME=dist/mar-linux-x86_64-musl \
-            all-internal
-          
-          # Build the SSE4.2 optimized binary (don't clean — we need both!)
-          make STATIC=1 BUILD=release \
-            ARCH_FLAGS="-march=nehalem -mtune=generic" \
-            TARGET_NAME=dist/mar-linux-x86_64-sse42-musl \
-            all-internal
-          
-          # Verify both binaries exist
-          ls -lh dist/mar-linux-x86_64-musl || (echo "ERROR: Base x86-64 build failed"; exit 1)
-          ls -lh dist/mar-linux-x86_64-sse42-musl || (echo "ERROR: SSE4.2 build failed"; exit 1)
-          echo "✅ All builds completed successfully"
-          EOF
-          docker run --rm \
-            -v "$GITHUB_WORKSPACE:/work" \
-            -w /work \
-            alpine:3.20 \
-            sh alpine-build.sh
-          
-          # Verify files exist on host
-          ls -lh dist/mar-* || (echo "ERROR: Dist files not found on host"; exit 1)
-
-      - name: Build Rust distribution binary (Linux)
-        run: |
-          cargo build --release --manifest-path rust/Cargo.toml --bin mar
-          TARGET_DIR=$(cargo metadata --format-version 1 --manifest-path rust/Cargo.toml | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
-          cp "${TARGET_DIR}/release/mar" dist/mar-linux-x86_64
-          cp "${TARGET_DIR}/release/mar" dist/mar-rust-linux-x86_64
-          chmod +x dist/mar-linux-x86_64 dist/mar-rust-linux-x86_64
-          dist/mar-linux-x86_64 version
-          ls -lh dist/mar-*
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: mar-binaries-linux
-          path: dist/mar-*
-          # 30 days for release tags, 1 day for everything else
-          retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 30 || 1 }}
-
-  # ---------------------------------------------------------------------------
-  # Distribution build — macOS (ARM64 + x86_64)
-  #
-  # STATIC=1 on macOS links third-party libs (.a from Homebrew) statically.
-  # System libraries (libSystem, libc++) remain dynamic — this is fine since
-  # they ship with every macOS and cannot be statically linked on Apple platforms.
-  # ---------------------------------------------------------------------------
-  dist-macos:
-    name: Distribution Build (${{ matrix.os-label }})
+    name: Distribution Build (${{ matrix.artifact-name }})
     needs: test
     strategy:
       fail-fast: false
       matrix:
         include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            artifact-name: mar-linux-x86_64
+            use-cross: false
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-musl
+            artifact-name: mar-linux-arm64
+            use-cross: true
           - os: macos-latest
-            os-label: macOS ARM64
+            target: aarch64-apple-darwin
             artifact-name: mar-macos-arm64
+            use-cross: false
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -285,74 +205,59 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Homebrew downloads
-        uses: actions/cache@v4
         with:
-          path: ~/Library/Caches/Homebrew
-          key: brew-dist-${{ matrix.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
-          restore-keys: brew-dist-${{ matrix.os }}-
+          targets: ${{ matrix.target }}
 
-      - name: Install dependencies
-        run: brew install pkg-config zstd lz4 libdeflate bzip2 blake3 || true
+      - name: Install musl-tools (Linux x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends musl-tools
 
-      - name: Build C++ distribution binary
+      - name: Install cross (Linux ARM64 cross-compile)
+        if: matrix.use-cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build distribution binary
         run: |
           mkdir -p dist
-          make STATIC=1 BUILD=release \
-            TARGET_NAME=dist/${{ matrix.artifact-name }}-cpp \
-            all-internal
-          ls -lh dist/${{ matrix.artifact-name }}-cpp
-
-      - name: Build Rust distribution binary (macOS ARM64, default)
-        run: |
-          cargo build --release --manifest-path rust/Cargo.toml --bin mar
+          if [ "${{ matrix.use-cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }} --manifest-path rust/Cargo.toml --bin mar
+          else
+            cargo build --release --target ${{ matrix.target }} --manifest-path rust/Cargo.toml --bin mar
+          fi
           TARGET_DIR=$(cargo metadata --format-version 1 --manifest-path rust/Cargo.toml | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
-          cp "${TARGET_DIR}/release/mar" dist/${{ matrix.artifact-name }}
-          cp "${TARGET_DIR}/release/mar" dist/mar-rust-macos-arm64
-          chmod +x dist/${{ matrix.artifact-name }} dist/mar-rust-macos-arm64
-          ls -lh dist/mar-*
+          cp "${TARGET_DIR}/${{ matrix.target }}/release/mar" "dist/${{ matrix.artifact-name }}"
+          chmod +x "dist/${{ matrix.artifact-name }}"
+          ls -lh dist/
 
-      - name: Smoke test and verify macOS binaries
+      - name: Smoke test native binary
+        if: matrix.use-cross == false
         run: |
-          ./dist/${{ matrix.artifact-name }} version
-          ./dist/${{ matrix.artifact-name }}-cpp version
-          echo "Running CLI integration tests against macOS Rust binary..."
-          MAR_BIN="${GITHUB_WORKSPACE}/dist/${{ matrix.artifact-name }}" \
-            ./tests/integration_test.sh
+          "./dist/${{ matrix.artifact-name }}" version
+          "./dist/${{ matrix.artifact-name }}" --help
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: mar-binaries-${{ matrix.artifact-name }}
-          path: |
-            dist/${{ matrix.artifact-name }}
-            dist/mar-rust-macos-arm64
-            dist/${{ matrix.artifact-name }}-cpp
+          path: dist/${{ matrix.artifact-name }}
+          # 30 days for release tags, 1 day for everything else
           retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 30 || 1 }}
 
   # ---------------------------------------------------------------------------
-  # Integration tests — run against the dist binary (Linux only)
-  # macOS testing uses the non-static build from the test matrix.
+  # Integration tests — run against the dist binary (Linux x86_64)
   #
   # This is the key bootstrapping step: the binary under test is the exact
   # artifact that would be shipped to users. MAR_BIN overrides the default
   # ./mar path in integration_test.sh.
-  #
-  # Linux: tests both the C++ musl static binary and the Rust binary.
   # ---------------------------------------------------------------------------
   integration-test:
-    name: Integration Tests (${{ matrix.target }})
+    name: Integration Tests (Linux x86_64 musl)
     needs: dist
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: "Rust (default)"
-            bin_path: "dist/mar-rust-linux-x86_64"
-          - target: "C++ (musl)"
-            bin_path: "dist/mar-linux-x86_64-musl"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -360,35 +265,33 @@ jobs:
           submodules: recursive
           ref: ${{ inputs.sha || github.sha }}
 
-      - name: Download distribution artifacts
+      - name: Download distribution artifact
         uses: actions/download-artifact@v4
         with:
-          name: mar-binaries-linux
+          name: mar-binaries-mar-linux-x86_64
           path: dist/
 
       - name: Run integration tests
         run: |
-          # Verify the artifact exists before proceeding
-          if [ ! -f "${{ matrix.bin_path }}" ]; then
-            echo "❌ ERROR: Distribution binary not found at ${{ matrix.bin_path }}!"
-            echo "Contents of dist directory:"
+          if [ ! -f "dist/mar-linux-x86_64" ]; then
+            echo "❌ ERROR: Distribution binary not found at dist/mar-linux-x86_64!"
             ls -lh dist/ || echo "dist directory is empty"
             exit 1
           fi
           
-          echo "✅ Found binary: $(ls -lh ${{ matrix.bin_path }})"
-          chmod +x "${{ matrix.bin_path }}"
-          "${{ matrix.bin_path }}" version
-          MAR_BIN="${GITHUB_WORKSPACE}/${{ matrix.bin_path }}" \
+          echo "✅ Found binary: $(ls -lh dist/mar-linux-x86_64)"
+          chmod +x dist/mar-linux-x86_64
+          dist/mar-linux-x86_64 version
+          MAR_BIN="${GITHUB_WORKSPACE}/dist/mar-linux-x86_64" \
             ./tests/integration_test.sh
 
   # ---------------------------------------------------------------------------
   # Release — creates a GitHub Release and attaches distribution binaries
-  # Only runs on v* tag pushes. Both lint and integration-test must pass.
+  # Only runs on v* tag pushes. Both dist and integration-test must pass.
   # ---------------------------------------------------------------------------
   release:
     name: Create Release
-    needs: [integration-test, dist-macos]
+    needs: [integration-test, dist]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -406,14 +309,8 @@ jobs:
           cd all-dist
           ls -lh
           chmod +x mar-*
-          if [ -f "mar-rust-linux-x86_64" ]; then
-            ./mar-rust-linux-x86_64 version
-          fi
           if [ -f "mar-linux-x86_64" ]; then
             ./mar-linux-x86_64 version
-          fi
-          if [ -f "mar-linux-x86_64-musl" ]; then
-            ./mar-linux-x86_64-musl version
           fi
           sha256sum mar-* > SHA256SUMS.txt
           cat SHA256SUMS.txt
