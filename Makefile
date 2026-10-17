@@ -851,25 +851,26 @@ native-lto:
 	@echo "WARNING: This binary may not run on different CPUs!"
 
 # Debian package build
-deb: release
+deb: mar
 	@echo "Building Debian package v$(PKG_VERSION)..."
+	@mkdir -p $(DIST_DIR)
 	@mkdir -p $(PROJECT_NAME)-$(PKG_VERSION)/usr/bin
 	@mkdir -p $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN
-	@cp $(TARGET) $(PROJECT_NAME)-$(PKG_VERSION)/usr/bin/
+	@cp mar $(PROJECT_NAME)-$(PKG_VERSION)/usr/bin/
 	@echo "Package: $(PROJECT_NAME)" > $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
 	@echo "Version: $(PKG_VERSION)" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
 	@echo "Section: utils" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
 	@echo "Priority: optional" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
 	@echo "Architecture: $$(dpkg --print-architecture)" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
-	@echo "Depends: libc6, libstdc++6, libgcc-s1, libzstd1, zlib1g, liblz4-1, libbz2-1.0, libdeflate0" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
-	@echo "Maintainer: $(PROJECT_MAINTAINER)" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
+	@echo "Depends: libc6, libgcc-s1" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
+	@echo "Maintainer: $(PROJECT_MAINTAINER) <support@earthframe.com>" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
 	@echo "Description: $(PROJECT_DESC)" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
 	@echo " MAR is a high-performance archive format designed for efficient storage" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
 	@echo " and retrieval of large datasets, with support for various compression" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
 	@echo " algorithms and indexing." >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
-	@dpkg-deb --build $(PROJECT_NAME)-$(PKG_VERSION)
+	@dpkg-deb --build $(PROJECT_NAME)-$(PKG_VERSION) $(DIST_DIR)/$(PROJECT_NAME)_$(PKG_VERSION)_$$(dpkg --print-architecture).deb
 	@rm -rf $(PROJECT_NAME)-$(PKG_VERSION)
-	@echo "Built: $(PROJECT_NAME)-$(PKG_VERSION).deb"
+	@echo "Built: $(DIST_DIR)/$(PROJECT_NAME)_$(PKG_VERSION)_$$(dpkg --print-architecture).deb"
 
 # Homebrew Formula generation
 brew-formula:

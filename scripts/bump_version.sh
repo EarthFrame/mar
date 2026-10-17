@@ -78,6 +78,14 @@ sed -i.bak "s|archive/refs/tags/v[0-9]*\.[0-9]*\.[0-9]*\.tar\.gz|archive/refs/ta
 rm -f "$REPO_ROOT/.homebrew/mar.rb.bak"
 echo "✓ Updated .homebrew/mar.rb"
 
+# 10. Debian changelog (debian/changelog)
+if [ -f "$REPO_ROOT/debian/changelog" ]; then
+    DATE_STR=$(date -R 2>/dev/null || date +"%a, %d %b %Y %H:%M:%S +0000")
+    CHANGELOG_ENTRY="mar (${NEW_VERSION}-1) unstable; urgency=low\n\n  * Release v${NEW_VERSION}.\n\n -- EarthFrame Corporation <support@earthframe.com>  ${DATE_STR}\n"
+    printf "%b\n%s" "$CHANGELOG_ENTRY" "$(cat "$REPO_ROOT/debian/changelog")" > "$REPO_ROOT/debian/changelog"
+    echo "✓ Prepended v$NEW_VERSION to debian/changelog"
+fi
+
 echo ""
 echo "Version successfully bumped to $NEW_VERSION across all targets!"
 echo "Next steps:"
