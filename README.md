@@ -35,7 +35,7 @@ Where traditional formats force a compromise between packaging convenience and a
 
 - **Blazing Fast**: Pure Rust core (`mar-core`) with multi-threaded parallel compression, decompression, and block checksum verification.
 - **True Random Access**: Inspect or extract individual files directly in \(O(1)\) time without decompressing preceding blocks or unpacking the entire container.
-- **Cloud & Egress Optimization**: Query and slice remote archives on S3, R2, B2, or HTTP servers via byte-range requests. Download only the target blocks, reducing egress bandwidth by 95% to 99%+.
+- **Cloud & Egress Optimization**: Query and slice remote archives on S3, R2, B2, or HTTP servers via byte-range requests. Download only the target blocks, reducing egress bandwidth by up to 99%.
 - **Zero-Copy Tar Ingestion**: Stream compressed or uncompressed tarballs (`.tar`, `.tar.gz`, `.tar.zst`, `.tar.bz2`, `.tar.lz4`) directly into Mar format with \(O(1)\) memory overhead without writing intermediate files to disk.
 - **Flexible Codecs & Integrity**: Built-in support for Zstandard (default), LZ4, Gzip, Bzip2, or uncompressed storage. Block and file-level integrity powered by XXHash3, XXHash32, CRC32C, and BLAKE3.
 - **POSIX Fidelity & Reproducibility**: Preserves file permissions, ownership (UID/GID), and modification times. Supports a `--deterministic` flag to generate byte-identical reproducible marbles across builds.
