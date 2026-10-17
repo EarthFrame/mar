@@ -71,15 +71,15 @@ impl Default for WriteOptions {
 }
 
 #[derive(Clone)]
-struct FileData {
-    name: String,
-    source_path: Option<String>,
-    content: Option<Vec<u8>>,
-    entry: FileEntry,
-    posix: PosixEntry,
-    symlink_target: Option<String>,
-    hash: Option<[u8; 32]>,
-    spans: Vec<Span>,
+pub struct FileData {
+    pub name: String,
+    pub source_path: Option<String>,
+    pub content: Option<Vec<u8>>,
+    pub entry: FileEntry,
+    pub posix: PosixEntry,
+    pub symlink_target: Option<String>,
+    pub hash: Option<[u8; 32]>,
+    pub spans: Vec<Span>,
 }
 
 pub struct MarWriter {
@@ -1358,198 +1358,206 @@ impl MarWriter {
     }
 
     fn build_meta_container(&self, block_table: &[BlockDesc], assume_all_hashes: bool) -> Vec<u8> {
-        let count = self.files.len();
-        let mut names = Vec::with_capacity(count);
-        let mut entries = Vec::with_capacity(count);
-        let mut posix_entries = Vec::with_capacity(count);
-        let mut symlink_targets = Vec::with_capacity(count);
-        let mut all_spans = Vec::with_capacity(count);
-        let mut hashes = Vec::with_capacity(count);
-
-        for (i, fd) in self.files.iter().enumerate() {
-            names.push(fd.name.clone());
-            let mut fe = fd.entry.clone();
-            fe.name_id = i as u32;
-            entries.push(fe);
-            posix_entries.push(fd.posix.clone());
-            symlink_targets.push(fd.symlink_target.clone());
-            all_spans.push(fd.spans.clone());
-            if assume_all_hashes
-                && self.options.compute_hashes
-                && fd.entry.entry_type == EntryType::RegularFile
-                && fd.entry.logical_size > 0
-            {
-                hashes.push(Some([0u8; 32]));
-            } else {
-                hashes.push(fd.hash);
-            }
-        }
-
-        let name_format = self
-            .options
-            .name_table_format
-            .unwrap_or_else(|| recommend_format(&names));
-        let name_data = write_name_table(&names, name_format);
-
-        // Serialize file table
-        let mut file_data = Vec::with_capacity(4 + entries.len() * FILE_ENTRY_SIZE);
-        file_data.extend_from_slice(&(entries.len() as u32).to_le_bytes());
-        for e in &entries {
-            let mut buf = [0u8; FILE_ENTRY_SIZE];
-            e.write(&mut buf);
-            file_data.extend_from_slice(&buf);
-        }
-
-        struct Sec {
-            stype: u32,
-            flags: u32,
-            data: Vec<u8>,
-        }
-        let mut sections: Vec<Sec> = Vec::new();
-        sections.push(Sec {
-            stype: section_type::NAME_TABLE,
-            flags: name_format as u32,
-            data: name_data,
-        });
-        sections.push(Sec {
-            stype: section_type::FILE_TABLE,
-            flags: 0,
-            data: file_data,
-        });
-
-        if self.options.multiblock {
-            let mut spans_data = Vec::new();
-            let fc = all_spans.len() as u32;
-            let total_spans: u32 = all_spans.iter().map(|s| s.len() as u32).sum();
-            spans_data.extend_from_slice(&fc.to_le_bytes());
-            spans_data.extend_from_slice(&total_spans.to_le_bytes());
-
-            let mut offset = 0u32;
-            for s in &all_spans {
-                spans_data.extend_from_slice(&offset.to_le_bytes());
-                offset += s.len() as u32;
-            }
-            for s in &all_spans {
-                spans_data.extend_from_slice(&(s.len() as u32).to_le_bytes());
-            }
-            for s in &all_spans {
-                for span in s {
-                    let mut sbuf = [0u8; SPAN_SIZE];
-                    span.write(&mut sbuf);
-                    spans_data.extend_from_slice(&sbuf);
-                }
-            }
-            sections.push(Sec {
-                stype: section_type::FILE_SPANS,
-                flags: 0,
-                data: spans_data,
-            });
-        }
-
-        if !block_table.is_empty() {
-            let mut bdata = Vec::with_capacity(4 + block_table.len() * BLOCK_DESC_SIZE);
-            bdata.extend_from_slice(&(block_table.len() as u32).to_le_bytes());
-            for b in block_table {
-                let mut bbuf = [0u8; BLOCK_DESC_SIZE];
-                b.write(&mut bbuf);
-                bdata.extend_from_slice(&bbuf);
-            }
-            sections.push(Sec {
-                stype: section_type::BLOCK_TABLE,
-                flags: 0,
-                data: bdata,
-            });
-        }
-
-        if self.options.include_posix {
-            let mut pdata = Vec::with_capacity(4 + posix_entries.len() * POSIX_ENTRY_SIZE);
-            pdata.extend_from_slice(&(posix_entries.len() as u32).to_le_bytes());
-            for p in &posix_entries {
-                let mut pbuf = [0u8; POSIX_ENTRY_SIZE];
-                p.write(&mut pbuf);
-                pdata.extend_from_slice(&pbuf);
-            }
-            sections.push(Sec {
-                stype: section_type::POSIX_META,
-                flags: 0,
-                data: pdata,
-            });
-        }
-
-        if symlink_targets.iter().any(|t| t.is_some()) {
-            let mut sdata = Vec::new();
-            let fc = symlink_targets.len();
-            sdata.extend_from_slice(&(fc as u32).to_le_bytes());
-            let bitset_size = fc.div_ceil(8);
-            let mut bitset = vec![0u8; bitset_size];
-            for (i, t) in symlink_targets.iter().enumerate() {
-                if t.is_some() {
-                    bitset[i / 8] |= 1 << (i % 8);
-                }
-            }
-            sdata.extend_from_slice(&bitset);
-            for target in symlink_targets.iter().flatten() {
-                sdata.extend_from_slice(&(target.len() as u32).to_le_bytes());
-                sdata.extend_from_slice(target.as_bytes());
-            }
-            sections.push(Sec {
-                stype: section_type::SYMLINK_TARGETS,
-                flags: 0,
-                data: sdata,
-            });
-        }
-
-        if self.options.compute_hashes {
-            let mut hdata = Vec::new();
-            let fc = hashes.len();
-            hdata.extend_from_slice(&(fc as u32).to_le_bytes());
-            hdata.push(HashAlgo::XXHash3 as u8);
-            hdata.push(32u8); // hash_len
-            hdata.extend_from_slice(&[0u8; 2]); // Reserved
-
-            let bitset_size = fc.div_ceil(8);
-            let mut bitset = vec![0u8; bitset_size];
-            for (i, h) in hashes.iter().enumerate() {
-                if h.is_some() {
-                    bitset[i / 8] |= 1 << (i % 8);
-                }
-            }
-            hdata.extend_from_slice(&bitset);
-            for hash in hashes.iter().flatten() {
-                hdata.extend_from_slice(hash);
-            }
-            sections.push(Sec {
-                stype: section_type::FILE_HASHES,
-                flags: 0,
-                data: hdata,
-            });
-        }
-
-        // Assemble meta
-        let mut meta = Vec::new();
-        let section_count = sections.len() as u32;
-        meta.extend_from_slice(&section_count.to_le_bytes());
-        meta.extend_from_slice(&0u32.to_le_bytes()); // Reserved
-
-        let mut offset = (META_CONTAINER_HEADER_SIZE + sections.len() * SECTION_ENTRY_SIZE) as u64;
-        for s in &sections {
-            let se = SectionEntry {
-                section_type: s.stype,
-                flags: s.flags,
-                payload_offset: offset,
-                stored_size: s.data.len() as u64,
-                raw_size: 0,
-            };
-            let mut se_buf = [0u8; SECTION_ENTRY_SIZE];
-            se.write(&mut se_buf);
-            meta.extend_from_slice(&se_buf);
-            offset += s.data.len() as u64;
-        }
-
-        for s in &sections {
-            meta.extend_from_slice(&s.data);
-        }
-
-        meta
+        build_meta_container(&self.files, block_table, &self.options, assume_all_hashes)
     }
+}
+
+pub fn build_meta_container(
+    files: &[FileData],
+    block_table: &[BlockDesc],
+    options: &WriteOptions,
+    assume_all_hashes: bool,
+) -> Vec<u8> {
+    let count = files.len();
+    let mut names = Vec::with_capacity(count);
+    let mut entries = Vec::with_capacity(count);
+    let mut posix_entries = Vec::with_capacity(count);
+    let mut symlink_targets = Vec::with_capacity(count);
+    let mut all_spans = Vec::with_capacity(count);
+    let mut hashes = Vec::with_capacity(count);
+
+    for (i, fd) in files.iter().enumerate() {
+        names.push(fd.name.clone());
+        let mut fe = fd.entry.clone();
+        fe.name_id = i as u32;
+        entries.push(fe);
+        posix_entries.push(fd.posix.clone());
+        symlink_targets.push(fd.symlink_target.clone());
+        all_spans.push(fd.spans.clone());
+        if assume_all_hashes
+            && options.compute_hashes
+            && fd.entry.entry_type == EntryType::RegularFile
+            && fd.entry.logical_size > 0
+        {
+            hashes.push(Some([0u8; 32]));
+        } else {
+            hashes.push(fd.hash);
+        }
+    }
+
+    let name_format = options
+        .name_table_format
+        .unwrap_or_else(|| recommend_format(&names));
+    let name_data = write_name_table(&names, name_format);
+
+    // Serialize file table
+    let mut file_data = Vec::with_capacity(4 + entries.len() * FILE_ENTRY_SIZE);
+    file_data.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+    for e in &entries {
+        let mut buf = [0u8; FILE_ENTRY_SIZE];
+        e.write(&mut buf);
+        file_data.extend_from_slice(&buf);
+    }
+
+    struct Sec {
+        stype: u32,
+        flags: u32,
+        data: Vec<u8>,
+    }
+    let mut sections: Vec<Sec> = Vec::new();
+    sections.push(Sec {
+        stype: section_type::NAME_TABLE,
+        flags: name_format as u32,
+        data: name_data,
+    });
+    sections.push(Sec {
+        stype: section_type::FILE_TABLE,
+        flags: 0,
+        data: file_data,
+    });
+
+    if options.multiblock {
+        let mut spans_data = Vec::new();
+        let fc = all_spans.len() as u32;
+        let total_spans: u32 = all_spans.iter().map(|s| s.len() as u32).sum();
+        spans_data.extend_from_slice(&fc.to_le_bytes());
+        spans_data.extend_from_slice(&total_spans.to_le_bytes());
+
+        let mut offset = 0u32;
+        for s in &all_spans {
+            spans_data.extend_from_slice(&offset.to_le_bytes());
+            offset += s.len() as u32;
+        }
+        for s in &all_spans {
+            spans_data.extend_from_slice(&(s.len() as u32).to_le_bytes());
+        }
+        for s in &all_spans {
+            for span in s {
+                let mut sbuf = [0u8; SPAN_SIZE];
+                span.write(&mut sbuf);
+                spans_data.extend_from_slice(&sbuf);
+            }
+        }
+        sections.push(Sec {
+            stype: section_type::FILE_SPANS,
+            flags: 0,
+            data: spans_data,
+        });
+    }
+
+    if !block_table.is_empty() {
+        let mut bdata = Vec::with_capacity(4 + block_table.len() * BLOCK_DESC_SIZE);
+        bdata.extend_from_slice(&(block_table.len() as u32).to_le_bytes());
+        for b in block_table {
+            let mut bbuf = [0u8; BLOCK_DESC_SIZE];
+            b.write(&mut bbuf);
+            bdata.extend_from_slice(&bbuf);
+        }
+        sections.push(Sec {
+            stype: section_type::BLOCK_TABLE,
+            flags: 0,
+            data: bdata,
+        });
+    }
+
+    if options.include_posix {
+        let mut pdata = Vec::with_capacity(4 + posix_entries.len() * POSIX_ENTRY_SIZE);
+        pdata.extend_from_slice(&(posix_entries.len() as u32).to_le_bytes());
+        for p in &posix_entries {
+            let mut pbuf = [0u8; POSIX_ENTRY_SIZE];
+            p.write(&mut pbuf);
+            pdata.extend_from_slice(&pbuf);
+        }
+        sections.push(Sec {
+            stype: section_type::POSIX_META,
+            flags: 0,
+            data: pdata,
+        });
+    }
+
+    if symlink_targets.iter().any(|t| t.is_some()) {
+        let mut sdata = Vec::new();
+        let fc = symlink_targets.len();
+        sdata.extend_from_slice(&(fc as u32).to_le_bytes());
+        let bitset_size = fc.div_ceil(8);
+        let mut bitset = vec![0u8; bitset_size];
+        for (i, t) in symlink_targets.iter().enumerate() {
+            if t.is_some() {
+                bitset[i / 8] |= 1 << (i % 8);
+            }
+        }
+        sdata.extend_from_slice(&bitset);
+        for target in symlink_targets.iter().flatten() {
+            sdata.extend_from_slice(&(target.len() as u32).to_le_bytes());
+            sdata.extend_from_slice(target.as_bytes());
+        }
+        sections.push(Sec {
+            stype: section_type::SYMLINK_TARGETS,
+            flags: 0,
+            data: sdata,
+        });
+    }
+
+    if options.compute_hashes {
+        let mut hdata = Vec::new();
+        let fc = hashes.len();
+        hdata.extend_from_slice(&(fc as u32).to_le_bytes());
+        hdata.push(HashAlgo::XXHash3 as u8);
+        hdata.push(32u8); // hash_len
+        hdata.extend_from_slice(&[0u8; 2]); // Reserved
+
+        let bitset_size = fc.div_ceil(8);
+        let mut bitset = vec![0u8; bitset_size];
+        for (i, h) in hashes.iter().enumerate() {
+            if h.is_some() {
+                bitset[i / 8] |= 1 << (i % 8);
+            }
+        }
+        hdata.extend_from_slice(&bitset);
+        for hash in hashes.iter().flatten() {
+            hdata.extend_from_slice(hash);
+        }
+        sections.push(Sec {
+            stype: section_type::FILE_HASHES,
+            flags: 0,
+            data: hdata,
+        });
+    }
+
+    // Assemble meta
+    let mut meta = Vec::new();
+    let section_count = sections.len() as u32;
+    meta.extend_from_slice(&section_count.to_le_bytes());
+    meta.extend_from_slice(&0u32.to_le_bytes()); // Reserved
+
+    let mut offset = (META_CONTAINER_HEADER_SIZE + sections.len() * SECTION_ENTRY_SIZE) as u64;
+    for s in &sections {
+        let se = SectionEntry {
+            section_type: s.stype,
+            flags: s.flags,
+            payload_offset: offset,
+            stored_size: s.data.len() as u64,
+            raw_size: 0,
+        };
+        let mut se_buf = [0u8; SECTION_ENTRY_SIZE];
+        se.write(&mut se_buf);
+        meta.extend_from_slice(&se_buf);
+        offset += s.data.len() as u64;
+    }
+
+    for s in &sections {
+        meta.extend_from_slice(&s.data);
+    }
+
+    meta
 }

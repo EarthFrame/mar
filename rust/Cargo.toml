@@ -20,7 +20,7 @@ path = "src/bin/bench.rs"
 
 [dependencies]
 zstd = "0.13"
-lz4_flex = "0.11"
+lz4_flex = { version = "0.11", features = ["frame"] }
 flate2 = "1.0"
 bzip2 = "0.4"
 crc32fast = "1.4"

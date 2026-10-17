@@ -84,6 +84,7 @@ fn print_usage() {
 
 Commands:
   create   Create an archive from files or directories
+  import   Import tar archives directly into a MAR archive
   slice    Extract a subset of files into a new archive
   extract  Extract files from an archive
   list     List contents of an archive
@@ -152,6 +153,38 @@ Examples:
   mar create -c lz4 archive.mar ./mydir/
   mar create --checksum xxhash32 fast_archive.mar ./data/
   find . -name "*.txt" | mar create -T - archive.mar"#
+    );
+}
+
+fn print_import_usage() {
+    println!(
+        r#"Usage: mar import [options] -o <archive> <tarball...>
+
+Import one or more tar archives (.tar, .tar.gz, .tgz, .tar.zst, .tar.bz2, .tar.lz4) directly into a MAR archive without intermediate disk extraction.
+
+Options:
+  -o, --output <file>        Output MAR archive path (required)
+  -c, --compression <algo>   Compression: none, lz4, zstd (default), gzip, bzip2
+  --compression-level <n>    Codec level (-1 = default). Valid ranges depend on --compression
+  --checksum <type>          Checksum: xxhash3 (default), xxhash32, blake3, crc32c, none
+  --block-mode <mode>        Block mode: single, multi, shared (default: shared)
+  -m, --multiblock           Use multiblock mode (alias for --block-mode multi)
+  --pack-files               Pack small files into shared blocks (alias for --block-mode shared)
+  --single-file              Use single-file-per-block mode (alias for --block-mode single)
+  --block-size <size>        Target block size, e.g. 64KB, 1MB, 4MB (default: 1MB)
+  -f, --force                Overwrite existing archive
+  -j, --threads <num>        Parallel threads (default: CPU cores)
+  --no-checksum              Skip per-block checksums (same as --checksum none)
+  --deterministic            Produce reproducible output
+  --no-posix                 Skip storing POSIX metadata (UID, GID, mode, mtime)
+  --hashes                   Compute and store file content hashes
+  --no-metadata              Disable optional metadata
+
+Examples:
+  mar import -o archive.mar input.tar
+  mar import -c zstd -o archive.mar data.tar.gz
+  mar import -o archive.mar part1.tar.zst part2.tar.zst
+  curl -s https://example.com/data.tar.gz | mar import -o archive.mar -"#
     );
 }
 
@@ -691,6 +724,215 @@ fn cmd_create(args: &[String]) -> i32 {
     }
 
     print_info(&format!("Created: {}", archive_path));
+    EXIT_OK
+}
+
+fn cmd_import(args: &[String]) -> i32 {
+    let mut archive_path = String::new();
+    let mut tar_files = Vec::new();
+    let mut opts = WriteOptions::default();
+    let mut force = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg == "-h" || arg == "--help" {
+            print_import_usage();
+            return EXIT_OK;
+        } else if arg == "-c" || arg == "--compression" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Missing compression algorithm", "import");
+                return EXIT_USAGE;
+            }
+            opts.compression = match args[i].to_lowercase().as_str() {
+                "none" => CompressionAlgo::None,
+                "zstd" => CompressionAlgo::Zstd,
+                "lz4" => CompressionAlgo::Lz4,
+                "gzip" | "gz" => CompressionAlgo::Gzip,
+                "bzip2" | "bz2" => CompressionAlgo::Bzip2,
+                _ => {
+                    print_error(&format!("Unknown compression: {}", args[i]), "import");
+                    return EXIT_USAGE;
+                }
+            };
+        } else if arg == "--compression-level" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Missing compression level", "import");
+                return EXIT_USAGE;
+            }
+            opts.compression_level = args[i].parse().unwrap_or(-1);
+        } else if arg == "--block-mode" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Missing block mode", "import");
+                return EXIT_USAGE;
+            }
+            match args[i].to_lowercase().as_str() {
+                "single" => {
+                    opts.block_mode = BlockMode::Single;
+                    opts.multiblock = false;
+                }
+                "multi" => {
+                    opts.block_mode = BlockMode::Multi;
+                    opts.multiblock = true;
+                }
+                "shared" => {
+                    opts.block_mode = BlockMode::Shared;
+                    opts.multiblock = true;
+                }
+                _ => {
+                    print_error(
+                        &format!(
+                            "Invalid block mode: '{}'. Expected single, multi, or shared",
+                            args[i]
+                        ),
+                        "import",
+                    );
+                    return EXIT_USAGE;
+                }
+            }
+        } else if arg == "-m" || arg == "--multiblock" {
+            opts.block_mode = BlockMode::Multi;
+            opts.multiblock = true;
+        } else if arg == "--pack-files" {
+            opts.block_mode = BlockMode::Shared;
+            opts.multiblock = true;
+        } else if arg == "--single-file" {
+            opts.block_mode = BlockMode::Single;
+            opts.multiblock = false;
+        } else if arg == "--block-size" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Missing block size", "import");
+                return EXIT_USAGE;
+            }
+            if let Some(sz) = parse_size(&args[i]) {
+                if !(MIN_BLOCK_SIZE..=MAX_BLOCK_SIZE).contains(&sz) {
+                    print_error(
+                        &format!(
+                            "Block size out of range (min: 4KB [4096 bytes], max: 1GB; got {})",
+                            args[i]
+                        ),
+                        "import",
+                    );
+                    return EXIT_USAGE;
+                }
+                opts.block_size = sz;
+            } else {
+                print_error(
+                    &format!(
+                        "Invalid block size: '{}'. Expected bytes or shorthand (e.g. 64KB, 1MB, 4MB)",
+                        args[i]
+                    ),
+                    "import",
+                );
+                return EXIT_USAGE;
+            }
+        } else if arg == "-f" || arg == "--force" {
+            force = true;
+        } else if arg == "-j" || arg == "--threads" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Missing thread count", "import");
+                return EXIT_USAGE;
+            }
+            if let Ok(t) = args[i].parse::<usize>() {
+                if t < 1 {
+                    print_error("Invalid thread count (must be >= 1)", "import");
+                    return EXIT_USAGE;
+                }
+                opts.num_threads = t;
+            }
+        } else if arg == "--no-checksum" {
+            opts.checksum = ChecksumType::None;
+        } else if arg == "--checksum" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Missing checksum type", "import");
+                return EXIT_USAGE;
+            }
+            match checksum_from_string(&args[i]) {
+                Some(cs) => opts.checksum = cs,
+                None => {
+                    print_error(&format!("Unknown checksum type: {}", args[i]), "import");
+                    return EXIT_USAGE;
+                }
+            }
+        } else if arg == "--no-posix" {
+            opts.include_posix = false;
+        } else if arg == "--hashes" {
+            opts.compute_hashes = true;
+        } else if arg == "--no-metadata" {
+            opts.include_posix = false;
+            opts.compute_hashes = false;
+            opts.compress_meta = false;
+        } else if arg == "--deterministic" {
+            opts.deterministic = true;
+        } else if arg == "-o" || arg == "--output" {
+            i += 1;
+            if i >= args.len() {
+                print_error("Option -o/--output requires an argument", "import");
+                return EXIT_USAGE;
+            }
+            archive_path = args[i].clone();
+        } else if arg.starts_with('-') {
+            print_error(&format!("Unknown option: {}", arg), "import");
+            return EXIT_USAGE;
+        } else {
+            tar_files.push(arg.clone());
+        }
+        i += 1;
+    }
+
+    if archive_path.is_empty() {
+        if tar_files.len() >= 2 && tar_files[0].ends_with(".mar") {
+            archive_path = tar_files.remove(0);
+        } else {
+            print_error("Output archive path (-o/--output <file>) is required", "import");
+            return EXIT_USAGE;
+        }
+    }
+
+    if tar_files.is_empty() {
+        print_error("No input tar archives specified", "import");
+        return EXIT_USAGE;
+    }
+
+    if !force && Path::new(&archive_path).exists() {
+        print_error(
+            &format!("Output archive exists (use --force): {}", archive_path),
+            "import",
+        );
+        return EXIT_ERROR;
+    }
+
+    for f in &tar_files {
+        if f != "-" && !Path::new(f).exists() {
+            print_error(&format!("Input file not found: {}", f), "import");
+            return EXIT_ERROR;
+        }
+    }
+
+    if let Err(e) = mar_core::import_tar_files(&tar_files, &archive_path, opts) {
+        if mar_core::is_interrupted() {
+            print_error("Interrupted", "import");
+            let _ = fs::remove_file(&archive_path);
+            return 130;
+        }
+        print_error(&e, "import");
+        let _ = fs::remove_file(&archive_path);
+        return EXIT_ERROR;
+    }
+
+    if mar_core::is_interrupted() {
+        print_error("Interrupted", "import");
+        let _ = fs::remove_file(&archive_path);
+        return 130;
+    }
+
+    print_info(&format!("Imported into: {}", archive_path));
     EXIT_OK
 }
 
@@ -2609,6 +2851,7 @@ fn main() {
     let start = Instant::now();
     let code = match cmd_name.as_str() {
         "create" => cmd_create(&filtered_args),
+        "import" => cmd_import(&filtered_args),
         "extract" => cmd_extract(&filtered_args),
         "list" => cmd_list(&filtered_args),
         "hash" => cmd_hash(&filtered_args),

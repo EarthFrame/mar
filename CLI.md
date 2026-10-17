@@ -28,6 +28,7 @@ These options can be specified with any subcommand:
 | Command | Description |
 |---------|-------------|
 | [`create`](#mar-create) | Create a new archive from files or directories |
+| [`import`](#mar-import) | Import tar archives directly into a MAR archive without intermediate disk files |
 | [`extract`](#mar-extract) | Extract files from an archive |
 | [`list`](#mar-list) | List contents and metadata of an archive |
 | [`get`](#mar-get) | Extract specific files to stdout or a destination directory |
@@ -93,6 +94,58 @@ find src/ -name "*.rs" | mar create --deterministic -T - src.mar
 
 # Deduplicate identical files across the tree
 mar create --hashes --dedup build_artifacts.mar ./target/
+```
+
+---
+
+### `mar import`
+
+Import one or more tar archives (`.tar`, `.tar.gz`, `.tgz`, `.tar.zst`, `.tar.bz2`, `.tbz2`, `.tar.lz4`) or standard input (`-`) directly into a MAR archive without intermediate disk files and with strictly bounded \(O(1)\) memory.
+
+```bash
+mar import [options] -o <archive.mar> <tarball...>
+```
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-o`, `--output <file>` | — | Output MAR archive path (required) |
+| `-c`, `--compression <algo>` | `zstd` | Compression codec: `zstd`, `lz4`, `gzip`, `bzip2`, `none` |
+| `--compression-level <n>` | `-1` | Codec-specific compression level (`-1` selects codec default) |
+| `--checksum <type>` | `xxhash3` | Checksum algorithm: `xxhash3`, `xxhash32`, `blake3`, `crc32c`, `none` |
+| `--block-mode <mode>` | `shared` | Block packing mode: `shared`, `single`, `multi` |
+| `--block-size <size>` | `1MB` | Target block size (e.g. `64KB`, `1MB`, `4MB`, `16MB`) |
+| `-f`, `--force` | `false` | Overwrite existing output archive |
+| `-j`, `--threads <n>` | CPU cores | Number of worker threads for parallel compression |
+| `--deterministic` | `false` | Produce byte-identical reproducible archives |
+| `--no-checksum` | `false` | Disable per-block checksums (alias for `--checksum none`) |
+| `--no-posix` | `false` | Omit POSIX metadata (permissions, UID, GID, mtime) |
+| `--hashes` | `false` | Calculate and store individual BLAKE3 hashes for every file |
+| `--no-metadata` | `false` | Disable all optional metadata sections |
+
+#### Features & Behavior
+
+- **Zero intermediate disk files**: Input archives are decompressed and parsed in a streaming pipeline, passing data chunks directly to MAR block compressors.
+- **Bounded memory**: Large files exceeding `--block-size` are chunked and streamed without buffering whole files in RAM.
+- **Transparent compression autodetection**: Archive compression format is sniffed automatically via magic bytes (supports gzip, zstd, bzip2, lz4, and uncompressed tar).
+- **Multi-archive ingestion**: Passing multiple tar archives ingests them sequentially into the same destination MAR archive.
+- **Standard input support**: Pass `-` as the tarball argument to stream directly from `stdin` (e.g. `curl ... | mar import -f -o out.mar -`).
+
+#### Examples
+
+```bash
+# Ingest a compressed tarball directly into a MAR archive
+mar import -o archive.mar dataset.tar.gz
+
+# Ingest multiple tarballs into a single archive with LZ4 compression
+mar import -c lz4 -o data.mar part1.tar.zst part2.tar.gz part3.tar
+
+# Stream from curl/stdin without saving tarball to disk
+curl -sL https://example.com/weights.tar.zst | mar import -f -o weights.mar -
+
+# Fine-tune block size and use multithreaded compression
+mar import -c zstd --block-size 4MB -j 16 -f -o output.mar huge.tar
 ```
 
 ---

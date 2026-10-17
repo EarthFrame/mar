@@ -1,63 +1,41 @@
 import os
-import io
-import tarfile
-from typing import Optional, Callable
-from .core import MarArchive, create_archive
+from typing import Optional, Union, List
 from . import _mar
 
-def from_tar(tar_path: str, mar_path: str, compression: str = "zstd", verbose: bool = False, chunk_size: int = 4 * 1024 * 1024):
+def from_tar(
+    tar_path: Union[str, List[str]],
+    mar_path: str,
+    compression: str = "zstd",
+    verbose: bool = False,
+    chunk_size: int = 4 * 1024 * 1024,
+    options: Optional[_mar.WriteOptions] = None,
+):
     """
-    Convert a .tar archive into a high-performance .mar archive without untarring to disk.
+    Convert one or more .tar archives (.tar, .tar.gz, .tgz, .tar.zst, .tar.bz2, .tar.lz4)
+    into a high-performance .mar archive without untarring to disk and with O(1) bounded memory.
     Preserves exact file structure, names, and bytes.
     """
-    opts = _mar.WriteOptions()
-    if compression == "zstd":
-        opts.compression = _mar.CompressionAlgo.ZSTD
-    elif compression == "lz4":
-        opts.compression = _mar.CompressionAlgo.LZ4
-    elif compression == "gzip":
-        opts.compression = _mar.CompressionAlgo.GZIP
-    elif compression == "bzip2":
-        opts.compression = _mar.CompressionAlgo.BZIP2
-    elif compression == "none":
-        opts.compression = _mar.CompressionAlgo.NONE
+    if options is None:
+        opts = _mar.WriteOptions()
+        if compression == "zstd":
+            opts.compression = _mar.CompressionAlgo.ZSTD
+        elif compression == "lz4":
+            opts.compression = _mar.CompressionAlgo.LZ4
+        elif compression == "gzip":
+            opts.compression = _mar.CompressionAlgo.GZIP
+        elif compression == "bzip2":
+            opts.compression = _mar.CompressionAlgo.BZIP2
+        elif compression == "none":
+            opts.compression = _mar.CompressionAlgo.NONE
+        opts.block_size = chunk_size
+    else:
+        opts = options
 
-    writer = _mar.MarWriter(mar_path, opts)
-
-    with tarfile.open(tar_path, "r:*") as tar:
-        for member in tar:
-            if member.isfile():
-                f = tar.extractfile(member)
-                if f is not None:
-                    data = f.read()
-                    writer.add_memory(member.name, data)
-            elif member.isdir():
-                writer.add_directory(member.name)
-            elif member.issym():
-                writer.add_symlink(member.name, member.linkname)
-
-    writer.finish()
+    paths = [tar_path] if isinstance(tar_path, str) else list(tar_path)
+    _mar.import_tar(paths, mar_path, opts)
 
 def to_tar(mar_path: str, tar_path: str):
     """
-    Export a .mar archive back to a standard .tar file.
+    Export a .mar archive back to a standard .tar file with O(1) bounded memory.
     """
-    archive = MarArchive(mar_path)
-    with tarfile.open(tar_path, "w") as tar:
-        for name in archive.list_files():
-            info = archive.get_file_info(name)
-            if not info:
-                continue
-            if info.type == "file":
-                data = archive.read_file(name)
-                ti = tarfile.TarInfo(name=name)
-                ti.size = len(data)
-                tar.addfile(ti, io.BytesIO(data))
-            elif info.type == "directory":
-                ti = tarfile.TarInfo(name=name)
-                ti.type = tarfile.DIRTYPE
-                tar.addfile(ti)
-            elif info.type == "directory":
-                ti = tarfile.TarInfo(name=name)
-                ti.type = tarfile.DIRTYPE
-                tar.addfile(ti)
+    _mar.export_tar(mar_path, tar_path)

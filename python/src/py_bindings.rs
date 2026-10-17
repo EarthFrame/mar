@@ -433,8 +433,42 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("VERSION", &tool_v)?;
 
     m.add_function(wrap_pyfunction!(py_hash_file, m)?)?;
+    m.add_function(wrap_pyfunction!(py_import_tar, m)?)?;
+    m.add_function(wrap_pyfunction!(py_export_tar, m)?)?;
 
     Ok(())
+}
+
+#[pyfunction(name = "import_tar")]
+#[pyo3(signature = (tar_paths, mar_path, options=None))]
+fn py_import_tar(
+    py: Python<'_>,
+    tar_paths: &Bound<'_, PyAny>,
+    mar_path: String,
+    options: Option<PyWriteOptions>,
+) -> PyResult<()> {
+    let paths: Vec<String> = if let Ok(s) = tar_paths.extract::<String>() {
+        vec![s]
+    } else if let Ok(list) = tar_paths.extract::<Vec<String>>() {
+        list
+    } else {
+        return Err(PyValueError::new_err(
+            "tar_paths must be a str or list of str",
+        ));
+    };
+    let opts = options.unwrap_or_else(PyWriteOptions::new).into();
+    py.allow_threads(|| {
+        mar_core::import_tar_files(&paths, &mar_path, opts)
+            .map_err(PyRuntimeError::new_err)
+    })
+}
+
+#[pyfunction(name = "export_tar")]
+fn py_export_tar(py: Python<'_>, mar_path: String, tar_path: String) -> PyResult<()> {
+    py.allow_threads(|| {
+        mar_core::export_tar(&mar_path, &tar_path)
+            .map_err(PyRuntimeError::new_err)
+    })
 }
 
 #[pyfunction(name = "hash_file")]

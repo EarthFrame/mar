@@ -9,6 +9,7 @@ pub mod name_index;
 pub mod reader;
 pub mod redact;
 pub mod remote;
+pub mod tar_import;
 pub mod writer;
 
 static INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -22,3 +23,6 @@ pub fn is_interrupted() -> bool {
 }
 
 pub use blake3;
+pub use tar_import::{
+    export_tar, import_tar_files, import_tar_streams, open_tar_stream, TarCompression,
+};

@@ -39,6 +39,34 @@ def test_from_tar_and_to_tar(tmp_path):
         names = tar.getnames()
         assert "mols/ATP.pkl" in names
 
+def test_from_tar_compressed_and_multiple(tmp_path):
+    import gzip
+    t1_path = str(tmp_path / "part1.tar.gz")
+    t2_path = str(tmp_path / "part2.tar")
+    mar_path = str(tmp_path / "merged.mar")
+
+    with tarfile.open(t1_path, "w:gz") as tar:
+        data = b"part1_content"
+        ti = tarfile.TarInfo(name="part1/data.bin")
+        ti.size = len(data)
+        tar.addfile(ti, io.BytesIO(data))
+
+    with tarfile.open(t2_path, "w") as tar:
+        data = b"part2_content"
+        ti = tarfile.TarInfo(name="part2/data.bin")
+        ti.size = len(data)
+        tar.addfile(ti, io.BytesIO(data))
+
+    # Ingest multiple archives into one MAR
+    from_tar([t1_path, t2_path], mar_path, compression="lz4")
+    assert os.path.exists(mar_path)
+
+    archive = pymar.open(mar_path)
+    assert "part1/data.bin" in archive
+    assert "part2/data.bin" in archive
+    assert archive["part1/data.bin"] == b"part1_content"
+    assert archive["part2/data.bin"] == b"part2_content"
+
 def test_mar_dataset(tmp_path):
     mar_path = str(tmp_path / "dataset.mar")
     opts = pymar._mar.WriteOptions()

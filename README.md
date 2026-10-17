@@ -121,6 +121,21 @@ mar create -c none archive.mar mydir/
 mar create --deterministic archive.mar mydir/
 ```
 
+### Import tar archives (streaming, zero-copy to disk)
+
+Convert compressed or uncompressed tarballs directly into MAR archives without unpacking to temporary files on disk:
+
+```bash
+# Import a .tar.gz archive directly
+mar import -o archive.mar dataset.tar.gz
+
+# Import multiple compressed tarballs into one MAR archive
+mar import -c zstd -o output.mar part1.tar.zst part2.tar.gz part3.tar
+
+# Stream directly from stdin / curl
+curl -sL https://example.com/weights.tar.gz | mar import -f -o weights.mar -
+```
+
 ### Extract an archive
 
 ```bash

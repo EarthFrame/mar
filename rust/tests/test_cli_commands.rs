@@ -931,3 +931,123 @@ fn test_cli_slice_files_from_literal_and_brackets() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+// ============================================================================
+// mar import Tests: streaming tarball ingestion
+// ============================================================================
+
+#[test]
+fn test_cli_import_basic_and_compressed_tarballs() {
+    let dir = temp_test_dir("import_basic");
+    let staging = dir.join("staging");
+    fs::create_dir_all(staging.join("nested")).unwrap();
+    fs::write(staging.join("f1.txt"), b"File 1 content").unwrap();
+    fs::write(staging.join("nested").join("f2.txt"), b"File 2 nested content").unwrap();
+
+    // 1. Create plain .tar
+    let tar1_path = dir.join("archive1.tar");
+    let status = Command::new("tar")
+        .args(&["-cf", tar1_path.to_str().unwrap(), "-C", staging.to_str().unwrap(), "."])
+        .status()
+        .expect("tar failed");
+    assert!(status.success());
+
+    // 2. Create .tar.gz
+    let staging2 = dir.join("staging2");
+    fs::create_dir_all(&staging2).unwrap();
+    fs::write(staging2.join("g1.txt"), b"Gzip payload here").unwrap();
+    let tar2_path = dir.join("archive2.tar.gz");
+    let status = Command::new("tar")
+        .args(&["-czf", tar2_path.to_str().unwrap(), "-C", staging2.to_str().unwrap(), "."])
+        .status()
+        .expect("tar -czf failed");
+    assert!(status.success());
+
+    // 3. Import both into a single MAR archive
+    let mar_path = dir.join("imported.mar");
+    let out = run_mar_success(&[
+        "import",
+        "-f",
+        "-c",
+        "zstd",
+        "--block-size",
+        "64KB",
+        "-o",
+        mar_path.to_str().unwrap(),
+        tar1_path.to_str().unwrap(),
+        tar2_path.to_str().unwrap(),
+    ]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Imported"));
+    assert!(stdout.contains("imported.mar"));
+
+    // 4. Verify contents with mar list
+    let list_out = run_mar_success(&["list", mar_path.to_str().unwrap()]);
+    let list_str = String::from_utf8_lossy(&list_out.stdout);
+    assert!(list_str.contains("f1.txt"));
+    assert!(list_str.contains("nested/f2.txt"));
+    assert!(list_str.contains("g1.txt"));
+
+    // 5. Verify file contents with mar cat
+    let cat_f1 = run_mar_success(&["cat", mar_path.to_str().unwrap(), "f1.txt"]);
+    assert_eq!(cat_f1.stdout, b"File 1 content");
+
+    let cat_g1 = run_mar_success(&["cat", mar_path.to_str().unwrap(), "g1.txt"]);
+    assert_eq!(cat_g1.stdout, b"Gzip payload here");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_cli_import_large_file_streaming() {
+    let dir = temp_test_dir("import_large");
+    let staging = dir.join("staging");
+    fs::create_dir_all(&staging).unwrap();
+
+    // Create a 2.5 MB file to ensure it spans across multiple blocks (target block size 512KB)
+    let large_data: Vec<u8> = (0..(2500 * 1024)).map(|i| (i % 251) as u8).collect();
+    fs::write(staging.join("large.bin"), &large_data).unwrap();
+
+    let tar_path = dir.join("large.tar");
+    let status = Command::new("tar")
+        .args(&["-cf", tar_path.to_str().unwrap(), "-C", staging.to_str().unwrap(), "large.bin"])
+        .status()
+        .expect("tar failed");
+    assert!(status.success());
+
+    let mar_path = dir.join("large.mar");
+    run_mar_success(&[
+        "import",
+        "-f",
+        "-c",
+        "lz4",
+        "--block-size",
+        "512KB",
+        "--output",
+        mar_path.to_str().unwrap(),
+        tar_path.to_str().unwrap(),
+    ]);
+
+    // Extract and verify exact content
+    let out_dir = dir.join("out");
+    run_mar_success(&[
+        "extract",
+        mar_path.to_str().unwrap(),
+        "-o",
+        out_dir.to_str().unwrap(),
+    ]);
+
+    let extracted = fs::read(out_dir.join("large.bin")).unwrap();
+    assert_eq!(extracted.len(), large_data.len());
+    assert_eq!(extracted, large_data);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_cli_import_missing_output_error() {
+    let out = run_mar(&["import", "only_one_tar.tar"]);
+    assert_eq!(out.status.code(), Some(2));
+    let err_str = String::from_utf8_lossy(&out.stderr);
+    assert!(err_str.contains("-o/--output"));
+}
