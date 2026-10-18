@@ -167,6 +167,50 @@ jobs:
         run: make test-cpp
 
   # ---------------------------------------------------------------------------
+  # Python test matrix — validates pymar across supported Python versions
+  # ---------------------------------------------------------------------------
+  test-python:
+    name: Python Tests (${{ matrix.python-version }} on ${{ matrix.os }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04]
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
+        include:
+          - os: macos-latest
+            python-version: '3.11'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ref: ${{ inputs.sha || github.sha }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install maturin and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin pytest pydantic certifi
+
+      - name: Build pymar wheel & install
+        run: |
+          cd python
+          maturin develop --release
+
+      - name: Run pymar unit and integration tests
+        run: |
+          pytest python/tests -v
+
+  # ---------------------------------------------------------------------------
   # Distribution build — produces the release artifacts
   #
   # Builds 3 clean release binaries:
@@ -178,7 +222,7 @@ jobs:
   # ---------------------------------------------------------------------------
   dist:
     name: Distribution Build (${{ matrix.artifact-name }})
-    needs: test
+    needs: [test, test-python]
     strategy:
       fail-fast: false
       matrix:

@@ -11,7 +11,7 @@ from .core import (
     HeaderInfo
 )
 
-def mar_create(path: str, files: List[str], compression: str = "zstd") -> str:
+def mar_create(path: str, files: List[str], compression: str = "zstd", verbose: int = 0, **kwargs) -> str:
     """
     Create a new MAR archive.
     
@@ -19,11 +19,13 @@ def mar_create(path: str, files: List[str], compression: str = "zstd") -> str:
         path: Path where the archive will be created (e.g., 'data.mar').
         files: List of files or directories to include in the archive.
         compression: Compression algorithm to use ('zstd', 'lz4', 'gzip', 'bzip2', 'none').
+        verbose: Verbosity level (0 = quiet, >0 = verbose).
+        **kwargs: Additional options for archive creation.
         
     Returns:
         A success message.
     """
-    create_archive(path, files, compression=compression)
+    create_archive(path, files, compression=compression, verbose=verbose, **kwargs)
     return f"Successfully created archive at {path} with {len(files)} inputs."
 
 def mar_slice(
@@ -36,6 +38,9 @@ def mar_slice(
     files_from: Optional[str] = None,
     exclude_from: Optional[str] = None,
     compression: str = "zstd",
+    threads: int = 0,
+    verbose: int = 0,
+    force: bool = True,
     **kwargs
 ) -> str:
     """
@@ -51,6 +56,9 @@ def mar_slice(
         files_from: Optional path to a file containing inclusion patterns (- for stdin).
         exclude_from: Optional path to a file containing exclusion patterns.
         compression: Target compression algorithm ('zstd', 'lz4', 'gzip', 'bzip2', 'none').
+        threads: Number of worker threads (0 = auto-detect hardware concurrency).
+        verbose: Verbosity level (0 = quiet, >0 = verbose).
+        force: Overwrite existing output archive if True.
         **kwargs: Additional options for archive creation.
 
     Returns:
@@ -67,6 +75,9 @@ def mar_slice(
         files_from=files_from,
         exclude_from=exclude_from,
         compression=compression,
+        threads=threads,
+        verbose=verbose,
+        force=force,
         **kwargs
     )
     return f"Successfully sliced archive to {res}."
@@ -102,7 +113,13 @@ def mar_get(path: str, filename: str) -> str:
     except UnicodeDecodeError:
         return f"<Binary data: {len(content)} bytes>"
 
-def mar_extract(path: str, output_dir: str, files: Optional[List[str]] = None, threads: int = 0) -> str:
+def mar_extract(
+    path: str,
+    output_dir: str,
+    files: Optional[List[str]] = None,
+    threads: int = 0,
+    verbose: int = 0,
+) -> str:
     """
     Extract files from a MAR archive into a directory.
 
@@ -111,12 +128,13 @@ def mar_extract(path: str, output_dir: str, files: Optional[List[str]] = None, t
         output_dir: Directory where files should be extracted.
         files: Optional list of specific file names to extract.
         threads: Number of worker threads (0 = auto-detect hardware concurrency).
+        verbose: Verbosity level (0 = quiet, >0 = verbose).
 
     Returns:
         A success message with the destination directory.
     """
-    archive = MarArchive(path)
-    archive.extract(output_dir, files=files, threads=threads)
+    archive = MarArchive(path, verbose=verbose)
+    archive.extract(output_dir, files=files, threads=threads, verbose=verbose)
     return f"Successfully extracted {path} to {output_dir}."
 
 def mar_hash(path: str, algo: str = "xxhash64") -> str:
@@ -132,19 +150,20 @@ def mar_hash(path: str, algo: str = "xxhash64") -> str:
     """
     return get_hash(path, algo)
 
-def mar_validate(path: str, threads: int = 0) -> bool:
+def mar_validate(path: str, threads: int = 0, verbose: int = 0) -> bool:
     """
     Validate the integrity of a MAR archive.
     
     Args:
         path: Path to the .mar archive.
         threads: Number of worker threads (0 = auto-detect hardware concurrency).
+        verbose: Verbosity level (0 = quiet, >0 = verbose).
         
     Returns:
         True if the archive is valid, False otherwise.
     """
-    archive = MarArchive(path)
-    return archive.validate(threads=threads)
+    archive = MarArchive(path, verbose=verbose)
+    return archive.validate(threads=threads, verbose=verbose)
 
 def mar_header(path: str) -> Dict:
     """

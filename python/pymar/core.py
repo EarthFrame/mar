@@ -1,10 +1,22 @@
 import os
 import sys
+import time
 import fnmatch
 import re
 from typing import List, Optional, Dict, Any, Union, Iterable
 from pydantic import BaseModel, Field
 from . import _mar
+
+def format_bytes(n: Union[int, float]) -> str:
+    """Format byte size into human-readable representation."""
+    val = float(n)
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if abs(val) < 1024.0 or unit == "TB":
+            if unit in ["B", "KB"]:
+                return f"{val:.0f} {unit}" if unit == "B" else f"{val:.1f} {unit}"
+            return f"{val:.2f} {unit}"
+        val /= 1024.0
+    return f"{n} B"
 
 def _glob_to_regex(pattern: str) -> str:
     """Translate glob pattern supporting '**' into a regular expression."""
@@ -211,9 +223,10 @@ class HeaderInfo(BaseModel):
 class MarArchive:
     """High-level wrapper for a MAR archive."""
     
-    def __init__(self, path: str, mode: str = "r"):
+    def __init__(self, path: str, mode: str = "r", verbose: int = 0, **kwargs):
         self.path = path
         self.mode = mode
+        self.verbose = verbose
         self._reader = None
         self._writer = None
         
@@ -293,12 +306,33 @@ class MarArchive:
             return False
         return self._reader.find_file(name) is not None
 
-    def extract(self, output_dir: str, files: Optional[List[str]] = None, threads: int = 0):
+    def extract(
+        self,
+        output_dir: str,
+        files: Optional[List[str]] = None,
+        threads: int = 0,
+        verbose: Optional[int] = None,
+    ):
         """Extract files to a directory using parallel streaming sinks (O(1) memory)."""
         if not self._reader:
             raise RuntimeError("Archive not open for reading")
         
+        verb = self.verbose if verbose is None else verbose
+        t_start = time.perf_counter()
+        target_count = len(files) if files is not None else self.file_count
+
+        if verb > 0:
+            target_str = f"{target_count:,} files" if target_count > 0 else "all files"
+            sys.stderr.write(f"mar: extracting {target_str} to {output_dir}...\n")
+
         self._reader.extract(output_dir, files, threads)
+
+        if verb > 0:
+            elapsed = time.perf_counter() - t_start
+            rate = (target_count / elapsed) if elapsed > 0 else 0.0
+            sys.stderr.write(
+                f"mar: extracted {target_count:,} files in {elapsed:.2f}s ({rate:,.1f} files/s)\n"
+            )
 
     def get_header(self) -> HeaderInfo:
         """Get archive header information."""
@@ -312,11 +346,29 @@ class MarArchive:
             meta_compression=str(h.meta_comp_algo)
         )
 
-    def validate(self, threads: int = 0) -> bool:
+    def validate(self, threads: int = 0, verbose: Optional[int] = None) -> bool:
         """Validate archive integrity."""
         if not self._reader:
             raise RuntimeError("Archive not open for reading")
-        return self._reader.validate_parallel(threads)
+
+        verb = self.verbose if verbose is None else verbose
+        t_start = time.perf_counter()
+
+        if verb > 0:
+            sys.stderr.write(
+                f"mar: validating integrity of {self.path} ({self.file_count:,} files, {self._reader.block_count():,} blocks)...\n"
+            )
+
+        ok = self._reader.validate_parallel(threads, verb > 0)
+
+        if verb > 0:
+            elapsed = time.perf_counter() - t_start
+            status_str = "OK" if ok else "FAILED"
+            sys.stderr.write(
+                f"mar: validation completed in {elapsed:.2f}s (status: {status_str})\n"
+            )
+
+        return ok
 
     def slice(
         self,
@@ -328,6 +380,8 @@ class MarArchive:
         files_from: Optional[str] = None,
         exclude_from: Optional[str] = None,
         compression: str = "zstd",
+        threads: int = 0,
+        verbose: Optional[int] = None,
         force: bool = True,
         **kwargs
     ) -> str:
@@ -337,6 +391,9 @@ class MarArchive:
         """
         if not self._reader:
             raise RuntimeError("Archive not open for reading")
+
+        verb = self.verbose if verbose is None else verbose
+        t_slice_start = time.perf_counter()
 
         af = AlgebraicFilter()
         if patterns:
@@ -357,9 +414,28 @@ class MarArchive:
             af.load_literal_excludes_from_file(exclude_from)
 
         all_names = self.list_files()
+        total_files = len(all_names)
+
+        if not af.rules and verb > 0:
+            sys.stderr.write(
+                f"mar: warning: no filter specified; slicing all {total_files:,} files (full archive)\n"
+            )
+
         matched_names = af.filter_names(all_names)
         if not matched_names:
             raise ValueError("No files matched the specified criteria.")
+
+        matched_logical_size = 0
+        for name in matched_names:
+            found = self._reader.find_file(name)
+            if found:
+                _, entry = found
+                matched_logical_size += entry.logical_size
+
+        if verb > 0:
+            sys.stderr.write(
+                f"mar: matched {len(matched_names):,} of {total_files:,} files ({format_bytes(matched_logical_size)})\n"
+            )
 
         opts = _mar.WriteOptions()
         comp_map = {
@@ -372,12 +448,20 @@ class MarArchive:
         if compression in comp_map:
             opts.compression = comp_map[compression]
 
+        if "verbose" in kwargs:
+            kwargs.pop("verbose")
+        if "threads" in kwargs:
+            kwargs.pop("threads")
+
         for k, v in kwargs.items():
             if hasattr(opts, k):
                 setattr(opts, k, v)
 
         if os.path.exists(output_path) and not force:
             raise FileExistsError(f"Destination archive already exists: {output_path}")
+
+        if verb > 0:
+            sys.stderr.write(f"mar: writing destination archive {output_path}...\n")
 
         writer = _mar.MarWriter(output_path, opts)
         for name in matched_names:
@@ -392,10 +476,24 @@ class MarArchive:
                 writer.add_directory_entry(name)
 
         writer.finish()
+
+        elapsed_total = time.perf_counter() - t_slice_start
+        try:
+            out_bytes = os.path.getsize(output_path)
+        except OSError:
+            out_bytes = 0
+        rate = (out_bytes / (1024 * 1024) / elapsed_total) if elapsed_total > 0 else 0.0
+
+        if verb > 0:
+            sys.stderr.write(
+                f"mar: completed in {elapsed_total:.2f}s ({format_bytes(out_bytes)} written, {rate:.2f} MB/s)\n"
+            )
+
         return output_path
 
-def create_archive(path: str, files: List[str], compression: str = "zstd", **kwargs):
+def create_archive(path: str, files: List[str], compression: str = "zstd", verbose: int = 0, **kwargs):
     """Create a new MAR archive from a list of files."""
+    t_start = time.perf_counter()
     opts = _mar.WriteOptions()
     if compression == "zstd":
         opts.compression = _mar.CompressionAlgo.ZSTD
@@ -407,10 +505,20 @@ def create_archive(path: str, files: List[str], compression: str = "zstd", **kwa
         opts.compression = _mar.CompressionAlgo.BZIP2
     elif compression == "none":
         opts.compression = _mar.CompressionAlgo.NONE
+
+    if "verbose" in kwargs:
+        kwargs.pop("verbose")
+    if "threads" in kwargs:
+        kwargs.pop("threads")
     
     for k, v in kwargs.items():
         if hasattr(opts, k):
             setattr(opts, k, v)
+
+    if verbose > 0:
+        sys.stderr.write(
+            f"mar: creating {path} from {len(files)} inputs (compression: {compression})...\n"
+        )
             
     writer = _mar.MarWriter(path, opts)
     for f in files:
@@ -419,6 +527,17 @@ def create_archive(path: str, files: List[str], compression: str = "zstd", **kwa
         else:
             writer.add_file(f, os.path.basename(f))
     writer.finish()
+
+    if verbose > 0:
+        elapsed = time.perf_counter() - t_start
+        try:
+            out_bytes = os.path.getsize(path)
+        except OSError:
+            out_bytes = 0
+        rate = (out_bytes / (1024 * 1024) / elapsed) if elapsed > 0 else 0.0
+        sys.stderr.write(
+            f"mar: created {path} in {elapsed:.2f}s ({format_bytes(out_bytes)}, {rate:.2f} MB/s)\n"
+        )
 
 def slice_archive(
     archive_path_or_url: str,
@@ -444,7 +563,7 @@ def slice_archive(
         from .remote import RemoteArchive
         arc = RemoteArchive(archive_path_or_url, verbose=verbose, **kwargs)
     else:
-        arc = MarArchive(archive_path_or_url)
+        arc = MarArchive(archive_path_or_url, verbose=verbose, **kwargs)
 
     return arc.slice(
         output_path=output_path,

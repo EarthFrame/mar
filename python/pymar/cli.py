@@ -66,9 +66,10 @@ def cmd_create(argv: List[str]) -> int:
     parser.add_argument("archive", help="Output archive path")
     parser.add_argument("files", nargs="+", help="Files or directories to pack")
     parser.add_argument("-c", "--compression", default="zstd", choices=["zstd", "lz4", "gzip", "bzip2", "none"])
+    parser.add_argument("-v", "--verbose", action="count", default=0, help="Verbose output")
     args = parser.parse_args(argv)
     try:
-        create_archive(args.archive, args.files, compression=args.compression)
+        create_archive(args.archive, args.files, compression=args.compression, verbose=args.verbose)
         return 0
     except Exception as e:
         sys.stderr.write(f"mar: error: {e}\n")
@@ -107,9 +108,11 @@ def cmd_extract(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(prog="pymar extract", description="Extract archive contents.")
     parser.add_argument("archive", help="Path to archive")
     parser.add_argument("-o", "--output", default=".", help="Output directory")
+    parser.add_argument("-j", "--threads", type=int, default=0, help="Parallel worker threads")
+    parser.add_argument("-v", "--verbose", action="count", default=0, help="Verbose output")
     args = parser.parse_args(argv)
     try:
-        mar_extract(args.archive, args.output)
+        mar_extract(args.archive, args.output, threads=args.threads, verbose=args.verbose)
         return 0
     except Exception as e:
         sys.stderr.write(f"mar: error: {e}\n")
@@ -118,9 +121,11 @@ def cmd_extract(argv: List[str]) -> int:
 def cmd_validate(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(prog="pymar validate", description="Validate archive integrity.")
     parser.add_argument("archive", help="Path to archive")
+    parser.add_argument("-j", "--threads", type=int, default=0, help="Parallel worker threads")
+    parser.add_argument("-v", "--verbose", action="count", default=0, help="Verbose output")
     args = parser.parse_args(argv)
     try:
-        ok = mar_validate(args.archive)
+        ok = mar_validate(args.archive, threads=args.threads, verbose=args.verbose)
         if ok:
             print("Archive integrity: OK")
             return 0

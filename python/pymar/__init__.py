@@ -25,12 +25,12 @@ from .tools import (
     mar_tool_version
 )
 
-def open(path_or_url: str, **kwargs):
+def open(path_or_url: str, verbose: int = 0, **kwargs):
     """
     Open a local or remote MAR archive.
     """
     if path_or_url.startswith(("http://", "https://", "s3://")):
-        return RemoteArchive(path_or_url, **kwargs)
-    return MarArchive(path_or_url, **kwargs)
+        return RemoteArchive(path_or_url, verbose=verbose, **kwargs)
+    return MarArchive(path_or_url, verbose=verbose, **kwargs)
 
 __version__ = get_version()

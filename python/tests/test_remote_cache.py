@@ -261,4 +261,16 @@ def test_remote_logging_and_full_archive_warning(http_server, tmp_path, capsys):
     assert "version" in hdr
 
 
+def test_remote_slice_unfiltered_kwargs(http_server, tmp_path):
+    """Verify that passing verbose or threads to slice() does not fail on WriteOptions."""
+    out_archive = str(tmp_path / "sliced_kwargs.mar")
+    remote = pymar.RemoteArchive(http_server, cache_dir=str(tmp_path / "cache"))
+    # Should not raise AttributeError or TypeError on verbose/threads in opts
+    remote.slice(out_archive, verbose=1, threads=2)
+    assert os.path.exists(out_archive)
+    assert pymar.mar_validate(out_archive)
+    remote.close()
+
+
+
 

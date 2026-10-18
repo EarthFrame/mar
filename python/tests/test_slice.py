@@ -264,3 +264,127 @@ def test_cli_slice_remote_logging(remote_2000_server, tmp_path):
     out_arc = MarArchive(dst)
     assert out_arc.file_count == 2
     out_arc.close()
+
+
+def test_local_archive_verbose_operations(tmp_path, capsys):
+    src = str(tmp_path / "verbose_src.mar")
+    dst = str(tmp_path / "verbose_dst.mar")
+    extract_dir = str(tmp_path / "extracted")
+
+    opts = pymar._mar.WriteOptions()
+    writer = pymar._mar.MarWriter(src, opts)
+    writer.add_memory("f1.txt", b"hello world from file 1")
+    writer.add_memory("f2.pdb", b"pdb content data here")
+    writer.add_memory("f3.json", b'{"key": "value"}')
+    writer.finish()
+
+    # 1. pymar.open with verbose=1
+    arc = pymar.open(src, verbose=1)
+    assert arc.file_count == 3
+    assert arc.verbose == 1
+
+    # 2. validate with verbose=1
+    ok = arc.validate(verbose=1)
+    assert ok is True
+    captured = capsys.readouterr()
+    assert "mar: validating integrity of" in captured.err
+    assert "mar: validation completed in" in captured.err
+    assert "status: OK" in captured.err
+
+    # 3. slice with verbose=1
+    sliced_path = arc.slice(dst, includes=["*.pdb", "*.txt"], verbose=1)
+    assert os.path.exists(sliced_path)
+    captured = capsys.readouterr()
+    assert "mar: matched 2 of 3 files" in captured.err
+    assert "mar: writing destination archive" in captured.err
+    assert "mar: completed in" in captured.err
+
+    # 4. extract with verbose=1
+    arc.extract(extract_dir, verbose=1)
+    captured = capsys.readouterr()
+    assert "mar: extracting 3 files to" in captured.err
+    assert "mar: extracted 3 files in" in captured.err
+
+    # 5. create_archive and slice_archive with verbose=1
+    create_out = str(tmp_path / "created_via_func.mar")
+    pymar.create_archive(create_out, [src], verbose=1)
+    captured = capsys.readouterr()
+    assert "mar: creating" in captured.err
+    assert "mar: created" in captured.err
+
+    slice_func_out = str(tmp_path / "sliced_via_func.mar")
+    pymar.slice_archive(src, slice_func_out, includes=["*.pdb"], verbose=1)
+    captured = capsys.readouterr()
+    assert "mar: matched 1 of 3 files" in captured.err
+    assert "mar: completed in" in captured.err
+
+    # 6. tools functions mar_create, mar_slice, mar_extract, mar_validate with verbose=1
+    tool_slice_out = str(tmp_path / "sliced_via_tool.mar")
+    pymar.mar_slice(src, tool_slice_out, includes=["*.json"], verbose=1)
+    captured = capsys.readouterr()
+    assert "mar: matched 1 of 3 files" in captured.err
+
+    tool_ext_dir = str(tmp_path / "extracted_tool")
+    pymar.mar_extract(src, tool_ext_dir, verbose=1)
+    captured = capsys.readouterr()
+    assert "mar: extracting 3 files to" in captured.err
+
+    val_res = pymar.mar_validate(src, verbose=1)
+    assert val_res is True
+    captured = capsys.readouterr()
+    assert "mar: validating integrity of" in captured.err
+
+    arc.close()
+
+
+def test_cli_local_verbose(tmp_path):
+    src = str(tmp_path / "cli_verb_src.mar")
+    dst = str(tmp_path / "cli_verb_dst.mar")
+    ext = str(tmp_path / "cli_verb_ext")
+    data_file = tmp_path / "hello.txt"
+    data_file.write_text("sample content for packing")
+
+    # CLI create -v
+    res_create = subprocess.run(
+        [sys.executable, "-m", "pymar", "create", src, str(data_file), "-v"],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, PYTHONPATH="python"),
+    )
+    assert res_create.returncode == 0, res_create.stderr
+    assert "mar: creating" in res_create.stderr
+    assert "mar: created" in res_create.stderr
+
+    # CLI validate -v
+    res_val = subprocess.run(
+        [sys.executable, "-m", "pymar", "validate", src, "-v"],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, PYTHONPATH="python"),
+    )
+    assert res_val.returncode == 0, res_val.stderr
+    assert "mar: validating integrity of" in res_val.stderr
+    assert "mar: validation completed in" in res_val.stderr
+
+    # CLI slice -v
+    res_slice = subprocess.run(
+        [sys.executable, "-m", "pymar", "slice", src, "-o", dst, "-v"],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, PYTHONPATH="python"),
+    )
+    assert res_slice.returncode == 0, res_slice.stderr
+    assert "mar: matched 1 of 1 files" in res_slice.stderr
+    assert "mar: writing destination archive" in res_slice.stderr
+    assert "mar: completed in" in res_slice.stderr
+
+    # CLI extract -v
+    res_ext = subprocess.run(
+        [sys.executable, "-m", "pymar", "extract", dst, "-o", ext, "-v"],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, PYTHONPATH="python"),
+    )
+    assert res_ext.returncode == 0, res_ext.stderr
+    assert "mar: extracting" in res_ext.stderr
+    assert "mar: extracted" in res_ext.stderr

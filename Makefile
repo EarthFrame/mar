@@ -289,7 +289,7 @@ endif
 
 # Phony targets
 .PHONY: all clean mar cpp test test-rust test-cpp install uninstall check-deps check-dev-deps drop-cache static release \
-        debug system-deps dev-deps lint lint-fix format mar-rust cpp rust python test-all \
+        debug system-deps dev-deps lint lint-fix format mar-rust cpp rust python test-python test-all \
         integration-test integration-test-cpp \
         dist-linux-x86_64 \
 		dist-linux-x86_64-sse42 \
@@ -373,9 +373,11 @@ python:
 		echo "Python extension built: python/pymar/_mar.so"; \
 	fi
 
-test-all: test test-cpp integration-test
+test-python: python
 	@echo "\n=== Running Python Tests ==="
 	@PYTHONPATH=python:python/pymar python3 -m pytest python/tests
+
+test-all: test test-cpp integration-test test-python
 
 # Drop system caches (Linux only, requires sudo)
 drop-cache:

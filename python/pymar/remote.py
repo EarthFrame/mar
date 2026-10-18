@@ -2,9 +2,19 @@ import os
 import io
 import sys
 import time
+import ssl
 import urllib.request
 import urllib.error
 from typing import Dict, List, Optional, Tuple, Any, Callable, Union
+
+try:
+    import certifi
+    _DEFAULT_SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    try:
+        _DEFAULT_SSL_CONTEXT = ssl.create_default_context()
+    except Exception:
+        _DEFAULT_SSL_CONTEXT = None
 
 try:
     import boto3
@@ -12,18 +22,7 @@ except ImportError:
     boto3 = None
 
 from . import _mar
-from .core import get_cache_dir
-
-def format_bytes(n: Union[int, float]) -> str:
-    """Format byte size into human-readable representation."""
-    val = float(n)
-    for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if abs(val) < 1024.0 or unit == "TB":
-            if unit in ["B", "KB"]:
-                return f"{val:.0f} {unit}" if unit == "B" else f"{val:.1f} {unit}"
-            return f"{val:.2f} {unit}"
-        val /= 1024.0
-    return f"{n} B"
+from .core import get_cache_dir, format_bytes
 
 def clamp_workers(threads: int, max_limit: int = 32, default_workers: int = 8) -> int:
     """
@@ -51,6 +50,8 @@ class RemoteRangeReader:
         aws_session_token: Optional[str] = None,
         profile_name: Optional[str] = None,
         s3_client: Optional[Any] = None,
+        ssl_context: Optional[ssl.SSLContext] = None,
+        verify_ssl: bool = True,
         **s3_kwargs
     ):
         self.url = url
@@ -60,6 +61,13 @@ class RemoteRangeReader:
         self.bytes_transferred = 0
         self.read_count = 0
         self.time_spent = 0.0
+
+        if not verify_ssl:
+            self.ssl_context = ssl._create_unverified_context()
+        elif ssl_context is not None:
+            self.ssl_context = ssl_context
+        else:
+            self.ssl_context = _DEFAULT_SSL_CONTEXT
 
         # Parse s3:// URI
         self.is_s3 = url.startswith("s3://")
@@ -128,7 +136,7 @@ class RemoteRangeReader:
             "Range": f"bytes={start}-{end - 1}"
         })
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req, context=self.ssl_context) as resp:
                 data = resp.read()
                 elapsed = time.perf_counter() - t0
                 self.bytes_transferred += len(data)
@@ -151,7 +159,7 @@ class RemoteRangeReader:
 
         req = urllib.request.Request(self.url, headers=self.headers, method="HEAD")
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req, context=self.ssl_context) as resp:
                 return dict(resp.headers)
         except urllib.error.HTTPError:
             return {}
@@ -180,6 +188,8 @@ class RemoteArchive:
         aws_session_token: Optional[str] = None,
         profile_name: Optional[str] = None,
         s3_client: Optional[Any] = None,
+        ssl_context: Optional[ssl.SSLContext] = None,
+        verify_ssl: bool = True,
         **s3_kwargs
     ):
         self.url = url
@@ -216,6 +226,8 @@ class RemoteArchive:
             aws_session_token=aws_session_token,
             profile_name=profile_name,
             s3_client=s3_client,
+            ssl_context=ssl_context,
+            verify_ssl=verify_ssl,
             **s3_kwargs
         )
         self.cache_dir = get_cache_dir(cache_dir)
@@ -667,6 +679,11 @@ class RemoteArchive:
         }
         if compression in comp_map:
             opts.compression = comp_map[compression]
+
+        if "verbose" in kwargs:
+            kwargs.pop("verbose")
+        if "threads" in kwargs:
+            kwargs.pop("threads")
 
         for k, v in kwargs.items():
             if hasattr(opts, k):
