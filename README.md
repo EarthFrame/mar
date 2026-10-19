@@ -68,7 +68,7 @@ chmod 777 mar
 
 ```bash
 # Verify the installed binary
-mar version
+./mar version
 ```
 
 #### Python Package (`pymar`)
@@ -81,7 +81,7 @@ pip install earthframe-pymar
 cd python && pip install .
 ```
 
-### Dependencies & Toolchains
+### Dependencies & Toolchains For Building from Source
 
 - **Rust (1.80+)**: Required to build the standalone `mar` CLI binary, `mar-core` library, and `pymar` PyO3 extension.
 - **Python (3.8+)**: Optional, required for the `pymar` library and high-level remote cloud CLI features.
