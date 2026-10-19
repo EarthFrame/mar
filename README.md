@@ -50,23 +50,35 @@ Where traditional formats force a compromise between packaging convenience and a
 
 Mar is distributed as a standalone Rust CLI binary, a Python package (`pymar`), and prebuilt packages for standard platforms.
 
-#### Python Package (`pymar`)
-
-```bash
-# Install via PyPI
-pip install pymar
-
-# Or install from source
-cd python && pip install .
-```
-
 #### Prebuilt Binaries & Package Managers
 
-Prebuilt binaries for Linux (x86_64, aarch64) and macOS (Apple Silicon, Intel) are available on GitHub Releases, as well as through Homebrew and Debian package repositories:
+Prebuilt binaries for Linux (x86_64, aarch64) and macOS (Apple Silicon, Intel) are available on GitHub Releases, as well as (soon) through Homebrew and Debian package repositories. See the [Releases Page](https://github.com/EarthFrame/mar/releases) for the latest binary releases.
+
+```bash
+## Linux x86_64
+wget https://github.com/EarthFrame/mar/releases/download/v0.3.0/mar-linux-x86_64
+mv mar-linux-x86_64 mar
+chmod mar
+
+## Mac OS X
+wget https://github.com/EarthFrame/mar/releases/download/v0.3.0/mar-macos-arm64
+mv mar-macos-arm64 mar
+chmod 777 mar
+```
 
 ```bash
 # Verify the installed binary
 mar version
+```
+
+#### Python Package (`pymar`)
+
+```bash
+# Install via PyPI
+pip install earthframe-pymar
+
+# Or install from source
+cd python && pip install .
 ```
 
 ### Dependencies & Toolchains
