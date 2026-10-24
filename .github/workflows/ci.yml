@@ -230,10 +230,12 @@ jobs:
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-musl
             artifact-name: mar-linux-x86_64
+            deb-arch: amd64
             use-cross: false
           - os: ubuntu-22.04
             target: aarch64-unknown-linux-musl
             artifact-name: mar-linux-arm64
+            deb-arch: arm64
             use-cross: true
           - os: macos-latest
             target: aarch64-apple-darwin
@@ -284,36 +286,13 @@ jobs:
           "./dist/${{ matrix.artifact-name }}" --help
 
       - name: Build Debian package (.deb)
-        if: matrix.os == 'ubuntu-22.04' && matrix.target == 'x86_64-unknown-linux-musl'
+        if: matrix.deb-arch != ''
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF" ]; then
             VERSION=$(cat VERSION 2>/dev/null || echo "0.3.0")
           fi
-          PKG_VERSION="${VERSION}-1"
-          ARCH=$(dpkg --print-architecture)
-          PKG_DIR="mar-${PKG_VERSION}"
-          
-          mkdir -p "${PKG_DIR}/usr/bin" "${PKG_DIR}/DEBIAN"
-          cp "dist/${{ matrix.artifact-name }}" "${PKG_DIR}/usr/bin/mar"
-          chmod 755 "${PKG_DIR}/usr/bin/mar"
-          
-          cat <<EOF > "${PKG_DIR}/DEBIAN/control"
-Package: mar
-Version: ${PKG_VERSION}
-Section: utils
-Priority: optional
-Architecture: ${ARCH}
-Depends: libc6, libgcc-s1
-Maintainer: EarthFrame Corporation <support@earthframe.com>
-Description: High-performance archival utility for efficient compression, storage, and retrieval of large datasets with multi-format support
- MAR is a high-performance archive format designed for efficient storage
- and retrieval of large datasets, with support for various compression
- algorithms and indexing.
-EOF
-          
-          dpkg-deb --build "${PKG_DIR}" "dist/mar_${PKG_VERSION}_${ARCH}.deb"
-          rm -rf "${PKG_DIR}"
+          ./scripts/build_deb.sh "dist/${{ matrix.artifact-name }}" "${{ matrix.deb-arch }}" "${VERSION}" dist
           ls -lh dist/*.deb
 
       - name: Upload artifact
@@ -391,7 +370,17 @@ EOF
           if [ -f "mar-linux-x86_64" ]; then
             ./mar-linux-x86_64 version
           fi
-          sha256sum mar-* > SHA256SUMS.txt
+          # Verify .deb packages have proper contents (man page & completions)
+          for deb in *.deb; do
+            if [ -f "$deb" ]; then
+              echo "Inspecting $deb:"
+              dpkg -c "$deb" | grep -E "usr/share/man|usr/share/bash-completion|usr/share/zsh" || {
+                echo "ERROR: $deb is missing man page or completions"
+                exit 1
+              }
+            fi
+          done
+          sha256sum mar-linux-* mar-macos-* *.deb > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Create GitHub Release

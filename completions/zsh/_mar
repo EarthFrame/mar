@@ -1,0 +1,104 @@
+#compdef mar
+
+_mar() {
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    local -a commands
+    commands=(
+        'create:Create an archive from files or directories'
+        'import:Import tar archives directly into a MAR archive'
+        'slice:Extract a subset of files into a new archive'
+        'extract:Extract files from an archive'
+        'list:List contents of an archive'
+        'get:Extract specific files to stdout or directory'
+        'cat:Dump file contents to stdout or as JSON'
+        'diff:Compare two archives and show differences'
+        'delta:Create a delta archive between two archives'
+        'redact:Overwrite file data with zeros and mark redacted'
+        'index:Create a sidecar index for an archive'
+        'search:Search an archive using a sidecar index'
+        'hash:Compute a fast archive hash'
+        'header:Display archive header information'
+        'validate:Validate archive integrity and checksums'
+        'version:Display version information'
+    )
+
+    local -a common_options
+    common_options=(
+        '(-h --help)'{-h,--help}'[Display help information]'
+        '(-q --quiet)'{-q,--quiet}'[Suppress non-error output]'
+        '(-v --verbose)'{-v,--verbose}'[Enable verbose output]'
+        '--stopwatch[Report command execution time]'
+        '--version[Display version information]'
+    )
+
+    _arguments -C \
+        $common_options \
+        '1: :->command' \
+        '*:: :->args' && return 0
+
+    case $state in
+        command)
+            _describe -t commands 'mar commands' commands
+            ;;
+        args)
+            case $line[1] in
+                create)
+                    _arguments \
+                        $common_options \
+                        '(-c --compression)'{-c,--compression}'[Compression algorithm]:algorithm:(zstd lz4 gzip bzip2 none)' \
+                        '--compression-level[Codec compression level]:level:' \
+                        '--checksum[Integrity checksum]:checksum:(xxhash3 xxhash32 blake3 crc32c none)' \
+                        '--block-mode[Block grouping mode]:mode:(shared single multi)' \
+                        '(-m --multiblock)'{-m,--multiblock}'[Alias for --block-mode multi]' \
+                        '--pack-files[Alias for --block-mode shared]' \
+                        '--single-file[Alias for --block-mode single]' \
+                        '--block-size[Target block size]:size:(64KB 1MB 4MB 16MB)' \
+                        '--name-format[Name table format]:format:(auto raw front-coded trie)' \
+                        '(-f --force)'{-f,--force}'[Overwrite existing archive]' \
+                        '(-T --files-from)'{-T,--files-from}'[Read file list from file]:file:_files' \
+                        '(-j --threads)'{-j,--threads}'[Worker threads]:threads:' \
+                        '--no-checksum[Disable block checksums]' \
+                        '--deterministic[Produce reproducible archive]' \
+                        '--dedup[Deduplicate files by content hash]' \
+                        '*:file:_files'
+                    ;;
+                slice)
+                    _arguments \
+                        $common_options \
+                        '(-o --output)'{-o,--output}'[Destination archive path]:file:_files' \
+                        '*'{-i,--include}'[Include glob pattern]:pattern:' \
+                        '*'{-x,--exclude}'[Exclude glob pattern]:pattern:' \
+                        '(-T --files-from)'{-T,--files-from}'[File with include patterns]:file:_files' \
+                        '--exclude-from[File with exclude patterns]:file:_files' \
+                        '(-c --compression)'{-c,--compression}'[Output compression]:algorithm:(zstd lz4 gzip bzip2 none)' \
+                        '(-j --threads)'{-j,--threads}'[Worker threads]:threads:' \
+                        '(-f --force)'{-f,--force}'[Overwrite existing destination]' \
+                        '*:file:_files'
+                    ;;
+                extract)
+                    _arguments \
+                        $common_options \
+                        '(-o --output)'{-o,--output}'[Output directory]:directory:_files -/' \
+                        '(-j --threads)'{-j,--threads}'[Worker threads]:threads:' \
+                        '(-f --force)'{-f,--force}'[Overwrite existing files]' \
+                        '*:file:_files'
+                    ;;
+                hash)
+                    _arguments \
+                        $common_options \
+                        '(-a --algo)'{-a,--algo}'[Hash algorithm]:algorithm:(xxhash64 blake3)' \
+                        '*:file:_files'
+                    ;;
+                *)
+                    _arguments \
+                        $common_options \
+                        '*:file:_files'
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_mar "$@"

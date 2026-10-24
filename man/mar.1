@@ -1,0 +1,118 @@
+.TH MAR 1 "October 2026" "mar 0.3.0" "User Commands"
+.SH NAME
+mar \- Universal Data Container and high-performance archival utility
+.SH SYNOPSIS
+.B mar
+[\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR...]
+.SH DESCRIPTION
+.B mar
+is a high-performance archive utility and Universal Data Container format designed for efficient storage,
+random access, network streaming, and retrieval of large datasets. It features block-based multi-threaded
+compression, content deduplication, fast indexing, and algebraic subset slicing.
+.SH GLOBAL OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Display help information.
+.TP
+.BR \-v ", " \-\-verbose
+Enable verbose progress output. Can be specified multiple times for increased detail.
+.TP
+.BR \-q ", " \-\-quiet
+Suppress non-error output.
+.TP
+.BR \-\-stopwatch
+Report overall command execution time.
+.TP
+.BR \-\-version
+Display the tool version.
+.SH COMMANDS
+.TP
+.B create \fIarchive\fR [\fIfiles...\fR]
+Create a new MAR archive from files or directories.
+.RS
+.TP
+.BR \-c ", " \-\-compression " \fIalgo\fR"
+Compression algorithm: \fBzstd\fR (default), \fBlz4\fR, \fBgzip\fR, \fBbzip2\fR, or \fBnone\fR.
+.TP
+.BR \-\-compression\-level " \fIn\fR"
+Compression level (-1 for codec default).
+.TP
+.BR \-\-checksum " \fItype\fR"
+Integrity checksum algorithm: \fBxxhash3\fR (default), \fBblake3\fR, \fBcrc32c\fR, or \fBnone\fR.
+.TP
+.BR \-\-block\-size " \fIsize\fR"
+Target block size (e.g., 64KB, 1MB, 4MB; default 1MB).
+.TP
+.BR \-j ", " \-\-threads " \fInum\fR"
+Number of worker threads (default: hardware concurrency).
+.TP
+.BR \-f ", " \-\-force
+Overwrite existing output archive.
+.TP
+.BR \-\-dedup
+Deduplicate identical files by content hash (requires \fB--hashes\fR).
+.RE
+.TP
+.B import \fB-o\fR \fIoutput.mar\fR \fIarchive.tar\fR...
+Import one or more TAR archives directly into a MAR archive without extracting them to disk.
+.TP
+.B slice \fIarchive\fR \fB-o\fR \fIdest.mar\fR [\fIpatterns...\fR]
+Extract a subset of files into a new MAR archive using algebraic inclusion/exclusion patterns.
+.RS
+.TP
+.BR \-i ", " \-\-include " \fIpattern\fR"
+Include files matching glob pattern.
+.TP
+.BR \-x ", " \-\-exclude " \fIpattern\fR"
+Exclude files matching glob pattern.
+.TP
+.BR \-T ", " \-\-files\-from " \fIfile\fR"
+Read list of files or include patterns from file (- for standard input).
+.RE
+.TP
+.B extract \fIarchive\fR [\fB-o\fR \fIdir\fR] [\fIfiles...\fR]
+Extract files from an archive to a destination directory.
+.TP
+.B list \fIarchive\fR
+List the names of all files contained in the archive.
+.TP
+.B get \fIarchive\fR \fIfilename\fR
+Extract a specific file to standard output or a destination directory.
+.TP
+.B cat \fIarchive\fR [\fIfiles...\fR]
+Dump file contents to standard output or as structured JSON.
+.TP
+.B diff \fIarchive1\fR \fIarchive2\fR
+Compare two archives and output file differences.
+.TP
+.B delta \fB-o\fR \fIdelta.mar\fR \fIbase.mar\fR \fInew.mar\fR
+Create a binary delta archive representing modifications between two versions.
+.TP
+.B redact \fIarchive\fR \fIfiles...\fR
+Zero-out file contents while preserving archive layout and file records.
+.TP
+.B index \fIarchive\fR
+Create a fast sidecar search index for an archive.
+.TP
+.B search \fIarchive\fR \fIquery\fR
+Search archive entries using the sidecar index.
+.TP
+.B hash \fIarchive\fR
+Compute a deterministic archive hash (\fBxxhash64\fR or \fBblake3\fR).
+.TP
+.B header \fIarchive\fR
+Display archive header structure, block counts, and metadata.
+.TP
+.B validate \fIarchive\fR
+Validate archive block checksums and data integrity.
+.TP
+.B version
+Display tool version and specification format version.
+.SH AUTHORS
+EarthFrame Corporation <support@earthframe.com>
+.SH COPYRIGHT
+Copyright \(co 2026 EarthFrame Corporation.
+Licensed under the Apache License, Version 2.0.
+.SH SEE ALSO
+.BR tar (1),
+.BR zstd (1)

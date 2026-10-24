@@ -1,18 +1,23 @@
 class Mar < Formula
-  desc "High-performance archival utility for efficient compression, storage, and retrieval of large datasets"
+  desc "Universal Data Container and high-performance archival utility"
   homepage "https://github.com/earthframe/mar"
   url "https://github.com/earthframe/mar/archive/refs/tags/v0.3.0.tar.gz"
-  sha256 "0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5"
+  sha256 "b15a48417ada9f4b5a3935260d8b2ef101403514b50c7a1d3d03619f222a19ff"
   license "Apache-2.0"
+  head "https://github.com/earthframe/mar.git", branch: "main"
 
   depends_on "rust" => :build
 
   def install
-    system "make", "mar"
-    bin.install "mar"
+    system "cargo", "install", *std_cargo_args(path: "rust"), "--bin", "mar"
   end
 
   test do
-    system "#{bin}/mar", "version"
+    assert_match "mar version #{version}", shell_output("#{bin}/mar version")
+
+    (testpath/"test.txt").write("Hello, MAR!")
+    system bin/"mar", "create", "test.mar", "test.txt"
+    assert_predicate testpath/"test.mar", :exist?
+    assert_match "test.txt", shell_output("#{bin}/mar list test.mar")
   end
 end

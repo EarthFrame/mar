@@ -311,6 +311,8 @@ endif
 		native-lto \
 		help \
 		deb \
+		deb-arm64 \
+		deb-all \
 		brew-formula \
 		bump-version
 
@@ -646,9 +648,18 @@ check-deps:
 install: mar
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 755 mar $(DESTDIR)$(BINDIR)/
+	install -d $(DESTDIR)$(MANDIR)/man1
+	install -m 644 man/mar.1 $(DESTDIR)$(MANDIR)/man1/
+	install -d $(DESTDIR)$(DATADIR)/bash-completion/completions
+	install -m 644 completions/bash/mar $(DESTDIR)$(DATADIR)/bash-completion/completions/mar
+	install -d $(DESTDIR)$(DATADIR)/zsh/site-functions
+	install -m 644 completions/zsh/_mar $(DESTDIR)$(DATADIR)/zsh/site-functions/_mar
 
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/mar $(DESTDIR)$(BINDIR)/mar-cpp
+	rm -f $(DESTDIR)$(MANDIR)/man1/mar.1
+	rm -f $(DESTDIR)$(DATADIR)/bash-completion/completions/mar
+	rm -f $(DESTDIR)$(DATADIR)/zsh/site-functions/_mar
 
 # Clean
 clean:
@@ -854,25 +865,22 @@ native-lto:
 
 # Debian package build
 deb: mar
-	@echo "Building Debian package v$(PKG_VERSION)..."
-	@mkdir -p $(DIST_DIR)
-	@mkdir -p $(PROJECT_NAME)-$(PKG_VERSION)/usr/bin
-	@mkdir -p $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN
-	@cp mar $(PROJECT_NAME)-$(PKG_VERSION)/usr/bin/
-	@echo "Package: $(PROJECT_NAME)" > $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
-	@echo "Version: $(PKG_VERSION)" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
-	@echo "Section: utils" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
-	@echo "Priority: optional" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
-	@echo "Architecture: $$(dpkg --print-architecture)" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
-	@echo "Depends: libc6, libgcc-s1" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
-	@echo "Maintainer: $(PROJECT_MAINTAINER) <support@earthframe.com>" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
-	@echo "Description: $(PROJECT_DESC)" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
-	@echo " MAR is a high-performance archive format designed for efficient storage" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
-	@echo " and retrieval of large datasets, with support for various compression" >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
-	@echo " algorithms and indexing." >> $(PROJECT_NAME)-$(PKG_VERSION)/DEBIAN/control
-	@dpkg-deb --build $(PROJECT_NAME)-$(PKG_VERSION) $(DIST_DIR)/$(PROJECT_NAME)_$(PKG_VERSION)_$$(dpkg --print-architecture).deb
-	@rm -rf $(PROJECT_NAME)-$(PKG_VERSION)
-	@echo "Built: $(DIST_DIR)/$(PROJECT_NAME)_$(PKG_VERSION)_$$(dpkg --print-architecture).deb"
+	@scripts/build_deb.sh ./mar $$(dpkg --print-architecture 2>/dev/null || echo amd64) $(VERSION) $(DIST_DIR)
+
+deb-arm64:
+	@if [ -f $(DIST_DIR)/mar-linux-arm64 ]; then \
+	    scripts/build_deb.sh $(DIST_DIR)/mar-linux-arm64 arm64 $(VERSION) $(DIST_DIR); \
+	elif [ -f $(DIST_DIR)/mar-linux-arm64-musl ]; then \
+	    scripts/build_deb.sh $(DIST_DIR)/mar-linux-arm64-musl arm64 $(VERSION) $(DIST_DIR); \
+	else \
+	    echo "Error: ARM64 binary not found. Build with 'cross' or 'make dist-linux-arm64-musl' first."; \
+	    exit 1; \
+	fi
+
+deb-all: deb
+	@if [ -f $(DIST_DIR)/mar-linux-arm64 ] || [ -f $(DIST_DIR)/mar-linux-arm64-musl ]; then \
+	    $(MAKE) deb-arm64; \
+	fi
 
 # Homebrew Formula generation
 brew-formula:
@@ -883,19 +891,21 @@ brew-formula:
 	@echo "  url \"$(PROJECT_REPO)/archive/refs/tags/v$(VERSION).tar.gz\"" >> $(PROJECT_NAME).rb
 	@echo "  sha256 \"REPLACE_WITH_ACTUAL_SHA256\"" >> $(PROJECT_NAME).rb
 	@echo "  license \"$(PROJECT_LICENSE)\"" >> $(PROJECT_NAME).rb
+	@echo "  head \"$(PROJECT_REPO).git\", branch: \"main\"" >> $(PROJECT_NAME).rb
 	@echo "" >> $(PROJECT_NAME).rb
-	@echo "  depends_on \"pkg-config\" => :build" >> $(PROJECT_NAME).rb
-	@echo "  depends_on \"libzstd\"" >> $(PROJECT_NAME).rb
-	@echo "  depends_on \"lz4\"" >> $(PROJECT_NAME).rb
-	@echo "  depends_on \"libdeflate\"" >> $(PROJECT_NAME).rb
+	@echo "  depends_on \"rust\" => :build" >> $(PROJECT_NAME).rb
 	@echo "" >> $(PROJECT_NAME).rb
 	@echo "  def install" >> $(PROJECT_NAME).rb
-	@echo "    system \"make\", \"release\"" >> $(PROJECT_NAME).rb
-	@echo "    bin.install \"$(PROJECT_NAME)\"" >> $(PROJECT_NAME).rb
+	@echo "    system \"cargo\", \"install\", *std_cargo_args(path: \"rust\"), \"--bin\", \"$(PROJECT_NAME)\"" >> $(PROJECT_NAME).rb
 	@echo "  end" >> $(PROJECT_NAME).rb
 	@echo "" >> $(PROJECT_NAME).rb
 	@echo "  test do" >> $(PROJECT_NAME).rb
-	@echo "    system \"#{bin}/$(PROJECT_NAME)\", \"--version\"" >> $(PROJECT_NAME).rb
+	@echo "    assert_match \"$(PROJECT_NAME) version #{version}\", shell_output(\"#{bin}/$(PROJECT_NAME) version\")" >> $(PROJECT_NAME).rb
+	@echo "" >> $(PROJECT_NAME).rb
+	@echo "    (testpath/\"test.txt\").write(\"Hello, MAR!\")" >> $(PROJECT_NAME).rb
+	@echo "    system bin/\"$(PROJECT_NAME)\", \"create\", \"test.mar\", \"test.txt\"" >> $(PROJECT_NAME).rb
+	@echo "    assert_predicate testpath/\"test.mar\", :exist?" >> $(PROJECT_NAME).rb
+	@echo "    assert_match \"test.txt\", shell_output(\"#{bin}/$(PROJECT_NAME) list test.mar\")" >> $(PROJECT_NAME).rb
 	@echo "  end" >> $(PROJECT_NAME).rb
 	@echo "end" >> $(PROJECT_NAME).rb
 	@echo "Created $(PROJECT_NAME).rb. Note: You must update the sha256 after tagging a release."

@@ -1,0 +1,148 @@
+# bash completion for mar                                   -*- shell-script -*-
+
+_mar()
+{
+    local cur prev words cword
+    _init_completion || return
+
+    local commands="create import slice extract list get cat diff delta redact index search hash header validate version"
+    local common_opts="-h --help -q --quiet -v --verbose --stopwatch --version"
+
+    # Find which subcommand is being used
+    local cmd=""
+    local i
+    for (( i=1; i < cword; i++ )); do
+        case "${words[i]}" in
+            -*)
+                ;;
+            *)
+                cmd="${words[i]}"
+                break
+                ;;
+        esac
+    done
+
+    if [[ -z "$cmd" ]]; then
+        if [[ "$cur" == -* ]]; then
+            COMPREPLY=( $(compgen -W "$common_opts" -- "$cur") )
+        else
+            COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
+        fi
+        return 0
+    fi
+
+    # Subcommand-specific completion
+    case "$prev" in
+        -c|--compression)
+            COMPREPLY=( $(compgen -W "zstd lz4 gzip bzip2 none" -- "$cur") )
+            return 0
+            ;;
+        --checksum)
+            COMPREPLY=( $(compgen -W "xxhash3 xxhash32 blake3 crc32c none" -- "$cur") )
+            return 0
+            ;;
+        -a|--algo)
+            COMPREPLY=( $(compgen -W "xxhash64 blake3" -- "$cur") )
+            return 0
+            ;;
+        --block-mode)
+            COMPREPLY=( $(compgen -W "shared single multi" -- "$cur") )
+            return 0
+            ;;
+        --name-format)
+            COMPREPLY=( $(compgen -W "auto raw front-coded trie" -- "$cur") )
+            return 0
+            ;;
+        -o|--output)
+            _filedir
+            return 0
+            ;;
+        -T|--files-from|--exclude-from)
+            _filedir
+            return 0
+            ;;
+    esac
+
+    case "$cmd" in
+        create)
+            local opts="-c --compression --compression-level --checksum --block-mode -m --multiblock --pack-files --single-file --block-size --name-format -f --force -T --files-from -j --threads --no-checksum --deterministic --no-posix --hashes --dedup --no-metadata $common_opts"
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        import)
+            local opts="-o --output -c --compression -f --force $common_opts"
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        slice)
+            local opts="-o --output -i --include -x --exclude -T --files-from --exclude-from -c --compression -f --force -j --threads $common_opts"
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        extract)
+            local opts="-o --output -j --threads -f --force $common_opts"
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        list|header|validate)
+            local opts="-j --threads $common_opts"
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        get)
+            local opts="-o --output -c --stdout --strip-components --json -j --threads $common_opts"
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        cat)
+            local opts="-o --output --all --fmt -j --threads $common_opts"
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        diff|delta)
+            local opts="-o --output $common_opts"
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        hash)
+            local opts="-a --algo $common_opts"
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+        *)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "$common_opts" -- "$cur") )
+            else
+                _filedir
+            fi
+            ;;
+    esac
+} &&
+complete -F _mar mar

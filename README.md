@@ -52,23 +52,42 @@ Mar is distributed as a standalone Rust CLI binary, a Python package (`pymar`), 
 
 #### Prebuilt Binaries & Package Managers
 
-Prebuilt binaries for Linux (x86_64, aarch64) and macOS (Apple Silicon, Intel) are available on GitHub Releases, as well as (soon) through Homebrew and Debian package repositories. See the [Releases Page](https://github.com/EarthFrame/mar/releases) for the latest binary releases.
+Prebuilt binaries for Linux (x86_64, aarch64) and macOS (Apple Silicon, Intel) are available on GitHub Releases, as well as through Homebrew and Debian/Ubuntu APT repositories. See the [Releases Page](https://github.com/EarthFrame/mar/releases) for the latest binary releases.
+
+##### APT (Debian / Ubuntu)
+
+```bash
+curl -fsSL https://apt.earthframe.com/earthframe.asc | sudo gpg --dearmor -o /usr/share/keyrings/earthframe-keyring.gpg \
+  && curl -fsSL https://apt.earthframe.com/earthframe.list | \
+    sed 's#deb https://#deb [signed-by=/usr/share/keyrings/earthframe-keyring.gpg] https://#g' | \
+    sudo tee /etc/apt/sources.list.d/earthframe.list \
+  && sudo apt-get update \
+  && sudo apt-get install -y mar
+```
+
+##### Homebrew (macOS / Linux)
+
+```bash
+brew tap earthframe/tap
+brew trust --formula earthframe/tap/mar
+brew install mar
+```
+
+##### Direct Binary Download
 
 ```bash
 ## Linux x86_64
 wget https://github.com/EarthFrame/mar/releases/download/v0.3.0/mar-linux-x86_64
-mv mar-linux-x86_64 mar
-chmod mar
+chmod +x mar-linux-x86_64
+sudo mv mar-linux-x86_64 /usr/local/bin/mar
 
-## Mac OS X
+## macOS Apple Silicon
 wget https://github.com/EarthFrame/mar/releases/download/v0.3.0/mar-macos-arm64
-mv mar-macos-arm64 mar
-chmod 777 mar
-```
+chmod +x mar-macos-arm64
+sudo mv mar-macos-arm64 /usr/local/bin/mar
 
-```bash
-# Verify the installed binary
-./mar version
+## Verify installation
+mar version
 ```
 
 #### Python Package (`pymar`)
