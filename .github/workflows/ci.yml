@@ -196,15 +196,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install maturin and test dependencies
+      - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install maturin pytest pydantic certifi
+          pip install pytest pydantic certifi
 
       - name: Build pymar wheel & install
         run: |
-          cd python
-          maturin develop --release
+          pip install ./python
 
       - name: Run pymar unit and integration tests
         run: |
