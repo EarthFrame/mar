@@ -219,7 +219,6 @@ def test_cli_slice_local(tmp_path):
         [sys.executable, "-m", "pymar", "slice", src, "-o", dst, "-i", "*.pdb", "-i", "*.txt"],
         capture_output=True,
         text=True,
-        env=dict(os.environ, PYTHONPATH="python")
     )
     assert res.returncode == 0, f"stdout: {res.stdout}, stderr: {res.stderr}"
     assert os.path.exists(dst)
@@ -251,7 +250,6 @@ def test_cli_slice_remote_logging(remote_2000_server, tmp_path):
         ],
         capture_output=True,
         text=True,
-        env=dict(os.environ, PYTHONPATH="python")
     )
     assert res.returncode == 0, f"stdout: {res.stdout}, stderr: {res.stderr}"
     assert os.path.exists(dst)
@@ -349,7 +347,6 @@ def test_cli_local_verbose(tmp_path):
         [sys.executable, "-m", "pymar", "create", src, str(data_file), "-v"],
         capture_output=True,
         text=True,
-        env=dict(os.environ, PYTHONPATH="python"),
     )
     assert res_create.returncode == 0, res_create.stderr
     assert "mar: creating" in res_create.stderr
@@ -360,7 +357,6 @@ def test_cli_local_verbose(tmp_path):
         [sys.executable, "-m", "pymar", "validate", src, "-v"],
         capture_output=True,
         text=True,
-        env=dict(os.environ, PYTHONPATH="python"),
     )
     assert res_val.returncode == 0, res_val.stderr
     assert "mar: validating integrity of" in res_val.stderr
@@ -371,7 +367,6 @@ def test_cli_local_verbose(tmp_path):
         [sys.executable, "-m", "pymar", "slice", src, "-o", dst, "-v"],
         capture_output=True,
         text=True,
-        env=dict(os.environ, PYTHONPATH="python"),
     )
     assert res_slice.returncode == 0, res_slice.stderr
     assert "mar: matched 1 of 1 files" in res_slice.stderr
@@ -383,7 +378,6 @@ def test_cli_local_verbose(tmp_path):
         [sys.executable, "-m", "pymar", "extract", dst, "-o", ext, "-v"],
         capture_output=True,
         text=True,
-        env=dict(os.environ, PYTHONPATH="python"),
     )
     assert res_ext.returncode == 0, res_ext.stderr
     assert "mar: extracting" in res_ext.stderr
