@@ -17,7 +17,7 @@ constexpr u8 MAR_SPEC_PATCH = 1;
 // Tool version numbers (synchronized with format version initially)
 constexpr u8 TOOL_VERSION_MAJOR = 0;
 constexpr u8 TOOL_VERSION_MINOR = 3;
-constexpr u8 TOOL_VERSION_PATCH = 0;
+constexpr u8 TOOL_VERSION_PATCH = 1;
 
 // Structure sizes (bytes)
 constexpr u64 FIXED_HEADER_SIZE = 48;

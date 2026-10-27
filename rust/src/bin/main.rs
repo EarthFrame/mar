@@ -15,7 +15,7 @@ use std::process;
 use std::str::FromStr;
 use std::time::Instant;
 
-const TOOL_VERSION: &str = "0.3.0";
+const TOOL_VERSION: &str = "0.3.1";
 const MAR_SPEC_VERSION: &str = "0.1.1";
 
 const EXIT_OK: i32 = 0;

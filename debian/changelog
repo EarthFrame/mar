@@ -1,3 +1,15 @@
+mar (0.3.1-1) unstable; urgency=low
+
+  * Release v0.3.1.
+
+ -- EarthFrame Corporation <support@earthframe.com>  Tue, 27 Oct 2026 17:35:38 -0400
+
+mar (0.3.1-1) unstable; urgency=low
+
+  * Release v0.3.1.
+
+ -- EarthFrame Corporation <support@earthframe.com>  Tue, 27 Oct 2026 17:31:59 -0400
+
 mar (0.3.0-1) unstable; urgency=low
 
   * Update tool version to 0.3.0.
@@ -20,4 +32,3 @@ mar (0.1.1-1) unstable; urgency=low
   * Initial release.
 
  -- Eric T. Dawson <support@earthframe.com>  Mon, 02 Feb 2026 12:00:00 +0000
-

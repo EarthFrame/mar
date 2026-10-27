@@ -6,7 +6,7 @@ pub const MAR_SPEC_PATCH: u8 = 1;
 
 pub const TOOL_VERSION_MAJOR: u8 = 0;
 pub const TOOL_VERSION_MINOR: u8 = 3;
-pub const TOOL_VERSION_PATCH: u8 = 0;
+pub const TOOL_VERSION_PATCH: u8 = 1;
 
 pub const FIXED_HEADER_SIZE: usize = 48;
 pub const SECTION_ENTRY_SIZE: usize = 32;

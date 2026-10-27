@@ -44,7 +44,7 @@ RUN ARCH="${TARGETARCH}"; \
 # Final stage: Debian-based runtime with POSIX shell and procps (compatible with Nextflow and task runners)
 FROM --platform=$TARGETPLATFORM debian:bookworm-slim
 
-ARG VERSION=0.3.0
+ARG VERSION=0.3.1
 
 LABEL org.opencontainers.image.title="mar" \
       org.opencontainers.image.description="High-performance archive utility (Rust engine)" \

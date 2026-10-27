@@ -55,7 +55,7 @@ class RemoteRangeReader:
         **s3_kwargs
     ):
         self.url = url
-        self.headers = {"User-Agent": "pymar/0.3.0", **(headers or {})}
+        self.headers = {"User-Agent": "pymar/0.3.1", **(headers or {})}
         self.endpoint_url = endpoint_url
         self.region_name = region_name
         self.bytes_transferred = 0

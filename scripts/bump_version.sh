@@ -46,7 +46,7 @@ rm -f "$REPO_ROOT/rust/src/format.rs.bak"
 echo "✓ Updated rust/src/format.rs"
 
 # 4. Rust CLI Version (rust/src/bin/main.rs)
-sed -i.bak "s/const TOOL_VERSION: &str = \"[0-9]*\.[0-9]*\.[0-9]*\";/const TOOL_VERSION: &str = \"$NEW_VERSION\";/" "$REPO_ROOT/rust/src/bin/main.rs"
+sed -i.bak -E "s/const TOOL_VERSION: &str = \"[0-9]+\.[0-9]+\.[0-9]+\";/const TOOL_VERSION: \&str = \"$NEW_VERSION\";/" "$REPO_ROOT/rust/src/bin/main.rs"
 rm -f "$REPO_ROOT/rust/src/bin/main.rs.bak"
 echo "✓ Updated Rust main.rs binary"
 
@@ -57,10 +57,12 @@ sed -i.bak "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$NEW_VERSION\"/"
 rm -f "$REPO_ROOT/python/Cargo.toml.bak"
 echo "✓ Updated Cargo.toml files"
 
-# 6. Python packaging (python/pyproject.toml)
+# 6. Python packaging (python/pyproject.toml, python/pymar/remote.py)
 sed -i.bak "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$NEW_VERSION\"/" "$REPO_ROOT/python/pyproject.toml"
 rm -f "$REPO_ROOT/python/pyproject.toml.bak"
-echo "✓ Updated pyproject.toml file"
+sed -i.bak -E "s/\"User-Agent\": \"pymar\/[0-9]+\.[0-9]+\.[0-9]+\"/\"User-Agent\": \"pymar\/$NEW_VERSION\"/" "$REPO_ROOT/python/pymar/remote.py"
+rm -f "$REPO_ROOT/python/pymar/remote.py.bak"
+echo "✓ Updated python packaging & remote files"
 
 # 7. Dockerfile (docker/Dockerfile)
 sed -i.bak "s/^ARG VERSION=[0-9]*\.[0-9]*\.[0-9]*/ARG VERSION=$NEW_VERSION/" "$REPO_ROOT/docker/Dockerfile"
@@ -71,7 +73,9 @@ echo "✓ Updated docker/Dockerfile"
 sed -i.bak "s/# Version: [0-9]*\.[0-9]*\.[0-9]*/# Version: $NEW_VERSION/" "$REPO_ROOT/tests/integration_test.sh"
 sed -i.bak "s/MAR CLI Integration Tests v[0-9]*\.[0-9]*\.[0-9]*/MAR CLI Integration Tests v$NEW_VERSION/" "$REPO_ROOT/tests/integration_test.sh"
 rm -f "$REPO_ROOT/tests/integration_test.sh.bak"
-echo "✓ Updated tests/integration_test.sh"
+sed -i.bak -E "s/\"mar [0-9]+\.[0-9]+\.[0-9]+\"/\"mar $NEW_VERSION\"/" "$REPO_ROOT/man/mar.1"
+rm -f "$REPO_ROOT/man/mar.1.bak"
+echo "✓ Updated tests/integration_test.sh and man/mar.1"
 
 # 9. Homebrew formula (.homebrew/mar.rb)
 sed -i.bak "s|archive/refs/tags/v[0-9]*\.[0-9]*\.[0-9]*\.tar\.gz|archive/refs/tags/v$NEW_VERSION.tar.gz|" "$REPO_ROOT/.homebrew/mar.rb"

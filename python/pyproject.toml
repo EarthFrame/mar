@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "pymar"
-version = "0.3.0"
+version = "0.3.1"
 description = "High-performance Python package and Rust engine for the MAR archive format"
 readme = "README.md"
 requires-python = ">=3.8"

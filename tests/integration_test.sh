@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # MAR CLI Integration Tests - Data Integrity Focus
-# Version: 0.3.0
+# Version: 0.3.1
 #
 # Comprehensive test suite with strong focus on validating archived data integrity.
 # Tests ensure that no-ops or data corruption can be caught.
@@ -2128,7 +2128,7 @@ main() {
     parse_args "$@"
     
     echo "========================================"
-    echo "MAR CLI Integration Tests v0.3.0"
+    echo "MAR CLI Integration Tests v0.3.1"
     echo "Data Integrity Validation Focus"
     echo "========================================"
     echo ""
