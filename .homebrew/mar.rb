@@ -2,7 +2,7 @@ class Mar < Formula
   desc "Universal Data Container and high-performance archival utility"
   homepage "https://github.com/earthframe/mar"
   url "https://github.com/earthframe/mar/archive/refs/tags/v0.3.1.tar.gz"
-  sha256 "b15a48417ada9f4b5a3935260d8b2ef101403514b50c7a1d3d03619f222a19ff"
+  sha256 "412afa091c1a0b79dc186ee32b82667a0baf97c926de7e9756179d3aa1639e79"
   license "Apache-2.0"
   head "https://github.com/earthframe/mar.git", branch: "main"
 
